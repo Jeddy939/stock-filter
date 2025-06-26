@@ -7,6 +7,7 @@ import threading
 import queue
 import webbrowser
 import time # For ETA calculation
+import concurrent.futures # New import for parallelization
 
 # --- Default Configuration --- (These will be initial UI values)
 DEFAULT_TICKER_FILE = "asx_200_tickers.txt" # Or your preferred default
@@ -132,7 +133,6 @@ def analyze_stock_core(ticker, config, progress_queue=None):
         price_conditions_met = True
         ma_values = {}
         ma_passes = {}
-        ma_pass_dates = {} # To store the date of the MA crossover
 
         for ma_key, period in config['ma_periods'].items():
             min_weeks_for_ma = period + 1
@@ -145,36 +145,14 @@ def analyze_stock_core(ticker, config, progress_queue=None):
                 if pd.isna(ma_value_for_current_week):
                     price_conditions_met = False
                     ma_passes[ma_key] = False # Treat as a fail
-                    ma_pass_dates[ma_key] = "N/A"
                 else:
                     condition_passes = current_week_close_price > ma_value_for_current_week
                     ma_passes[ma_key] = condition_passes
                     if not condition_passes:
                         price_conditions_met = False
-                        ma_pass_dates[ma_key] = None # No pass date if it didn't pass
-                    else:
-                        # It passed, now find the date it crossed over.
-                        price_above_ma = (weekly_data['Close'] > ma_series).loc[:target_week_start_date]
-                        
-                        # Find the index of the last 'False' value (i.e., the last time price was below MA)
-                        last_false_date = price_above_ma[price_above_ma == False].last_valid_index()
-
-                        if pd.notna(last_false_date):
-                            # The crossover happened on the week immediately after the last 'False'
-                            last_false_idx_loc = price_above_ma.index.get_loc(last_false_date)
-                            if last_false_idx_loc + 1 < len(price_above_ma):
-                                crossover_date = price_above_ma.index[last_false_idx_loc + 1]
-                                ma_pass_dates[ma_key] = crossover_date.strftime('%Y-%m-%d')
-                            else: # Should not happen if current week is a pass, but for safety
-                                ma_pass_dates[ma_key] = target_week_start_date.strftime('%Y-%m-%d')
-                        else:
-                            # No 'False' found, meaning price was always above this MA.
-                            # The "pass date" is the first date this comparison was possible.
-                            ma_pass_dates[ma_key] = price_above_ma.first_valid_index().strftime('%Y-%m-%d')
             else:
                 ma_values[ma_key] = "Too Young"
                 ma_passes[ma_key] = "Omitted" # This MA condition is effectively passed/ignored
-                ma_pass_dates[ma_key] = None
 
         if price_conditions_met: # volume_condition_met is already true if we reached here
             return {
@@ -187,10 +165,10 @@ def analyze_stock_core(ticker, config, progress_queue=None):
                 "volume_ratio": volume_ratio,
                 "ma_values": ma_values,
                 "ma_passes": ma_passes,
-                "ma_pass_dates": ma_pass_dates,
                 "ma_periods_config": config['ma_periods'] # Store for display consistency
             }
     except Exception as e:
+        time.sleep(5)
         if progress_queue: progress_queue.put(f"Error processing {ticker}: {str(e)[:100]}") # Log error
         return None
     return None
@@ -211,24 +189,48 @@ def run_scan_thread(config, progress_queue, results_queue):
         return
 
     progress_queue.put(f"Status: Loaded {len(tickers)} tickers. Starting analysis...")
-    
+
     results = []
     total_tickers = len(tickers)
     start_time = time.time()
 
-    for i, ticker in enumerate(tickers):
-        elapsed_time = time.time() - start_time
-        avg_time_per_ticker = elapsed_time / (i + 1) if i > 0 else 1 # Avoid division by zero, estimate 1s for first
-        tickers_remaining = total_tickers - (i + 1)
-        eta_seconds = tickers_remaining * avg_time_per_ticker
-        eta_str = f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s" if eta_seconds > 0 else "---"
-        
-        progress_queue.put(f"Status: Scanning {ticker} ({i+1}/{total_tickers}) ETA: {eta_str}")
-        
-        analysis_result = analyze_stock_core(ticker, config, progress_queue)
-        if analysis_result:
-            results.append(analysis_result)
-            results_queue.put(analysis_result) # Send result immediately for live update
+    # --- Parallel Processing Setup ---
+    # This uses a pool of threads to fetch data for multiple tickers at once.
+    # The main bottleneck is waiting for the network, so this is very effective.
+    # If you find it's still slow or you get errors, Yahoo Finance might be
+    # rate-limiting you. Try reducing MAX_WORKERS to 4 or 5.
+    MAX_WORKERS = 6
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Submit all analysis tasks to the executor.
+        # The 'future' object represents a task that will be completed in the future.
+        future_to_ticker = {executor.submit(analyze_stock_core, ticker, config, progress_queue): ticker for ticker in tickers}
+
+        completed_count = 0
+        for future in concurrent.futures.as_completed(future_to_ticker):
+            ticker = future_to_ticker[future]
+            completed_count += 1
+
+            try:
+                # Get the result from the completed task
+                analysis_result = future.result()
+                if analysis_result:
+                    results.append(analysis_result)
+                    results_queue.put(analysis_result)
+            except Exception as exc:
+                # Log any error that occurred within the thread
+                progress_queue.put(f"Error processing {ticker}: {exc}")
+
+            # Update progress and ETA based on completed tasks
+            elapsed_time = time.time() - start_time
+            avg_time_per_ticker = elapsed_time / completed_count if completed_count > 0 else 1
+            tickers_remaining = total_tickers - completed_count
+            eta_seconds = tickers_remaining * avg_time_per_ticker
+            eta_str = f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s" if eta_seconds > 0 else "---"
+
+            # Update the status bar. We don't show the individual ticker being scanned
+            # anymore, as many are being scanned at once.
+            progress_queue.put(f"Status: Scanned {completed_count}/{total_tickers}. ETA: {eta_str}")
 
     progress_queue.put("Status: Scan complete!")
     progress_queue.put("DONE") # Signal completion
@@ -307,23 +309,19 @@ class StockScannerApp:
         results_frame.pack(expand=True, fill=tk.BOTH, padx=10, pady=5)
 
         self.columns = ("Ticker", "Date", "Close", "Market Cap", "AvgVol", "VolRatio",
-                        "MA_S_Pass", "MA_S_Date",
-                        "MA_M_Pass", "MA_M_Date",
-                        "MA_L_Pass", "MA_L_Date")
+                        "MA_S_Pass", "MA_M_Pass", "MA_L_Pass")
         self.tree = ttk.Treeview(results_frame, columns=self.columns, show="headings")
         
         col_widths = {
             "Ticker": 80, "Date": 80, "Close": 60, "Market Cap": 80, "AvgVol": 90, "VolRatio": 70,
-            "MA_S_Pass": 50, "MA_S_Date": 90,
-            "MA_M_Pass": 50, "MA_M_Date": 90,
-            "MA_L_Pass": 50, "MA_L_Date": 90
+            "MA_S_Pass": 90, "MA_M_Pass": 90, "MA_L_Pass": 90
         }
 
         header_texts = {
             "Market Cap": "Mkt Cap", "AvgVol": "Avg Vol", "VolRatio": "Vol Ratio",
-            "MA_S_Pass": "S Pass", "MA_S_Date": "S Pass Date",
-            "MA_M_Pass": "M Pass", "MA_M_Date": "M Pass Date",
-            "MA_L_Pass": "L Pass", "MA_L_Date": "L Pass Date"
+            "MA_S_Pass": "MA Short Pass",
+            "MA_M_Pass": "MA Medium Pass",
+            "MA_L_Pass": "MA Long Pass"
         }
 
         for col in self.columns:
@@ -448,12 +446,9 @@ class StockScannerApp:
             self.tree.delete(*self.tree.get_children()) # Clear previous results
 
             # Update treeview headers with dynamic MA periods from the current scan settings
-            self.tree.heading("MA_S_Pass", text=f"{ma_s}w")
-            self.tree.heading("MA_S_Date", text=f"{ma_s}w Pass Date")
-            self.tree.heading("MA_M_Pass", text=f"{ma_m}w")
-            self.tree.heading("MA_M_Date", text=f"{ma_m}w Pass Date")
-            self.tree.heading("MA_L_Pass", text=f"{ma_l}w")
-            self.tree.heading("MA_L_Date", text=f"{ma_l}w Pass Date")
+            self.tree.heading("MA_S_Pass", text=f"{ma_s}w Pass")
+            self.tree.heading("MA_M_Pass", text=f"{ma_m}w Pass")
+            self.tree.heading("MA_L_Pass", text=f"{ma_l}w Pass")
 
             # Ensure queues are empty before starting
             while not self.progress_queue.empty(): self.progress_queue.get_nowait()
@@ -529,12 +524,9 @@ class StockScannerApp:
         # Add MA passes dynamically based on the config used for that scan
         for ma_key in ["short", "medium", "long"]: # Order matters for columns
             ma_pass_raw = result_item['ma_passes'].get(ma_key)
-            ma_pass_date_raw = result_item['ma_pass_dates'].get(ma_key)
 
             ma_pass_str = "Omit" if ma_pass_raw == "Omitted" else ("Yes" if ma_pass_raw is True else ("No" if ma_pass_raw is False else "N/A"))
-            ma_pass_date_str = "" if ma_pass_date_raw is None else str(ma_pass_date_raw)
-            
-            values.extend([ma_pass_str, ma_pass_date_str])
+            values.append(ma_pass_str)
         
         item_id = self.tree.insert("", tk.END, values=tuple(values))
         # Apply hyperlink tag to the first cell (ticker)
