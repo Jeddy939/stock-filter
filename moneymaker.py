@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 import threading
 import queue
 import webbrowser
-import time # For ETA calculation
-import concurrent.futures # New import for parallelization
+import time  # For ETA calculation
+import concurrent.futures  # New import for parallelization
 
 # --- Default Configuration --- (These will be initial UI values)
 DEFAULT_TICKER_FILE = "asx_200_tickers.txt" # Or your preferred default
@@ -64,8 +64,10 @@ def get_tickers_from_file_core(filename, is_asx_list=False, progress_queue=None)
         if progress_queue: progress_queue.put(f"Error reading ticker file: {str(e)}")
         return []
 
-def analyze_stock_core(ticker, config, progress_queue=None):
+def analyze_stock_core(ticker, config, progress_queue=None, cancel_event=None):
     # config is a dictionary holding volume_multiplier, avg_volume_weeks, ma_periods, data_fetch_years
+    if cancel_event and cancel_event.is_set():
+        return None
     try:
         stock = yf.Ticker(ticker)
 
@@ -95,6 +97,9 @@ def analyze_stock_core(ticker, config, progress_queue=None):
         hist_daily = stock.history(start=start_date.strftime('%Y-%m-%d'),
                                    end=end_date.strftime('%Y-%m-%d'),
                                    interval="1d")
+
+        if cancel_event and cancel_event.is_set():
+            return None
 
         if hist_daily.empty: return None
         
@@ -191,7 +196,7 @@ def analyze_stock_core(ticker, config, progress_queue=None):
         return None
     return None
 
-def run_scan_thread(config, progress_queue, results_queue):
+def run_scan_thread(config, progress_queue, results_queue, cancel_event=None):
     progress_queue.put("Status: Starting scan...")
     is_asx = ".ax" in config['ticker_file'].lower() or "asx" in config['ticker_file'].lower()
     
@@ -222,10 +227,17 @@ def run_scan_thread(config, progress_queue, results_queue):
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         # Submit all analysis tasks to the executor.
         # The 'future' object represents a task that will be completed in the future.
-        future_to_ticker = {executor.submit(analyze_stock_core, ticker, config, progress_queue): ticker for ticker in tickers}
+        future_to_ticker = {
+            executor.submit(analyze_stock_core, ticker, config, progress_queue, cancel_event): ticker
+            for ticker in tickers
+        }
 
         completed_count = 0
         for future in concurrent.futures.as_completed(future_to_ticker):
+            if cancel_event and cancel_event.is_set():
+                progress_queue.put("Status: Scan cancelled.")
+                break
+
             ticker = future_to_ticker[future]
             completed_count += 1
 
@@ -250,8 +262,11 @@ def run_scan_thread(config, progress_queue, results_queue):
             # anymore, as many are being scanned at once.
             progress_queue.put(f"Status: Scanned {completed_count}/{total_tickers}. ETA: {eta_str}")
 
-    progress_queue.put("Status: Scan complete!")
-    progress_queue.put("DONE") # Signal completion
+    if cancel_event and cancel_event.is_set():
+        progress_queue.put("CANCELLED")
+    else:
+        progress_queue.put("Status: Scan complete!")
+    progress_queue.put("DONE")  # Signal completion
 
 # --- Tkinter Application ---
 class StockScannerApp:
@@ -260,10 +275,11 @@ class StockScannerApp:
         root.title("Stock Scanner")
         root.geometry("1200x700") # Adjusted for wider table
 
-        self.config = {} # To store UI settings
+        self.config = {}  # To store UI settings
         self.scan_thread = None
         self.progress_queue = queue.Queue()
         self.results_queue = queue.Queue()
+        self.stop_event = threading.Event()
 
         # --- UI Elements ---
         # Frame for inputs
@@ -319,9 +335,11 @@ class StockScannerApp:
         input_frame.columnconfigure(1, weight=1) # Make entry field expand
         input_frame.columnconfigure(3, weight=1)
 
-        # Run Button
+        # Run and Cancel Buttons
         self.run_button = ttk.Button(input_frame, text="Run Scan", command=self.start_scan)
-        self.run_button.grid(row=5, column=0, columnspan=4, pady=10)
+        self.run_button.grid(row=5, column=0, columnspan=2, pady=10)
+        self.cancel_button = ttk.Button(input_frame, text="Cancel Scan", command=self.cancel_scan, state=tk.DISABLED)
+        self.cancel_button.grid(row=5, column=2, columnspan=2, pady=10)
 
         # Status Label
         self.status_var = tk.StringVar(value="Ready.")
@@ -468,8 +486,10 @@ class StockScannerApp:
             self.config['data_fetch_years'] = (max_ma_period_weeks / 52) + (DEFAULT_AVG_VOLUME_WEEKS / 52) + 2 # +2 years buffer
 
             self.run_button.config(state=tk.DISABLED)
+            self.cancel_button.config(state=tk.NORMAL)
+            self.stop_event.clear()
             self.status_var.set("Status: Initializing scan...")
-            self.tree.delete(*self.tree.get_children()) # Clear previous results
+            self.tree.delete(*self.tree.get_children())  # Clear previous results
 
             # Update treeview headers with dynamic MA periods from the current scan settings
             self.tree.heading("MA_S_Pass", text=f"{ma_s}w Pass")
@@ -483,7 +503,7 @@ class StockScannerApp:
             
             self.scan_thread = threading.Thread(
                 target=run_scan_thread,
-                args=(self.config.copy(), self.progress_queue, self.results_queue) # Pass a copy of config
+                args=(self.config.copy(), self.progress_queue, self.results_queue, self.stop_event)  # Pass a copy of config
             )
             self.scan_thread.daemon = True # Allows main program to exit even if thread is running
             self.scan_thread.start()
@@ -495,6 +515,12 @@ class StockScannerApp:
             messagebox.showerror("Error", f"An unexpected error occurred: {e}")
             self.run_button.config(state=tk.NORMAL)
 
+    def cancel_scan(self):
+        if self.scan_thread and self.scan_thread.is_alive():
+            self.stop_event.set()
+            self.cancel_button.config(state=tk.DISABLED)
+            self.status_var.set("Status: Cancelling scan...")
+
     def check_queues(self):
         # Process progress queue
         try:
@@ -502,7 +528,12 @@ class StockScannerApp:
                 message = self.progress_queue.get_nowait()
                 if message == "DONE":
                     self.run_button.config(state=tk.NORMAL)
+                    self.cancel_button.config(state=tk.DISABLED)
                     # Final status update might be handled by the last message before "DONE"
+                elif message == "CANCELLED":
+                    self.status_var.set("Status: Scan cancelled.")
+                    self.run_button.config(state=tk.NORMAL)
+                    self.cancel_button.config(state=tk.DISABLED)
                 elif message.startswith("Status:"):
                      self.status_var.set(message)
                 elif message.startswith("Error:") or message.startswith("Warning:"):
