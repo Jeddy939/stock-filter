@@ -105,12 +105,23 @@ def analyze_stock_core(ticker, config, progress_queue=None):
 
         if weekly_data.empty: return None
 
-        # --- Exclude if too young for shortest MA ---
+        # --- Exclude if too young for required moving averages ---
         shortest_ma_period = config['ma_periods']['short']
+        intermediate_ma_period = config['ma_periods'].get('intermediate', 0)
+
         min_weeks_for_shortest_ma = shortest_ma_period + 1
         if len(weekly_data) < min_weeks_for_shortest_ma:
-            if progress_queue: progress_queue.put(f"Status: {ticker} too young for {shortest_ma_period}w MA. Skipping.")
-            return None # Exclude based on new rule
+            if progress_queue:
+                progress_queue.put(
+                    f"Status: {ticker} too young for {shortest_ma_period}w MA. Skipping.")
+            return None
+
+        min_weeks_for_intermediate_ma = intermediate_ma_period + 1
+        if intermediate_ma_period > 0 and len(weekly_data) < min_weeks_for_intermediate_ma:
+            if progress_queue:
+                progress_queue.put(
+                    f"Status: {ticker} too young for {intermediate_ma_period}w MA. Skipping.")
+            return None
 
         # --- Volume Spike Condition ---
         min_weeks_for_volume_avg = config['avg_volume_weeks'] + 1
