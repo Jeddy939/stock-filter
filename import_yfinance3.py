@@ -138,10 +138,16 @@ def analyze_stock_core(ticker, config, progress_queue=None):
         volume_condition_met = current_week_volume >= config['volume_multiplier'] * preceding_avg_volume
         volume_ratio = current_week_volume / preceding_avg_volume if preceding_avg_volume > 0 else float('inf')
 
-        if not volume_condition_met: return None
+        if not volume_condition_met:
+            return None
+
+        current_week_close_price = weekly_data['Close'].iloc[-1]
+        previous_week_close_price = weekly_data['Close'].iloc[-2]
+
+        if current_week_close_price <= previous_week_close_price:
+            return None
 
         # --- Price Moving Average Conditions ---
-        current_week_close_price = weekly_data['Close'].iloc[-1]
         price_conditions_met = True
         ma_values = {}
         ma_passes = {}
