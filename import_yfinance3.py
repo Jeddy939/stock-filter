@@ -13,6 +13,7 @@ import concurrent.futures # New import for parallelization
 DEFAULT_TICKER_FILE = "asx_200_tickers.txt" # Or your preferred default
 DEFAULT_VOLUME_MULTIPLIER = 2.0
 DEFAULT_MA_SHORT = 90
+DEFAULT_MA_INTERMEDIATE = 180
 DEFAULT_MA_MEDIUM = 360
 DEFAULT_MA_LONG = 700
 DEFAULT_AVG_VOLUME_WEEKS = 52
@@ -283,21 +284,27 @@ class StockScannerApp:
         self.ma_short_entry = ttk.Entry(input_frame, textvariable=self.ma_short_var, width=10)
         self.ma_short_entry.grid(row=3, column=1, sticky=tk.W, padx=5, pady=2)
 
-        ttk.Label(input_frame, text="MA Medium (weeks):").grid(row=3, column=2, sticky=tk.W, padx=5, pady=2)
+        ttk.Label(input_frame, text="MA Mid (weeks):").grid(row=3, column=2, sticky=tk.W, padx=5, pady=2)
+        self.ma_intermediate_var = tk.IntVar(value=DEFAULT_MA_INTERMEDIATE)
+        self.ma_intermediate_entry = ttk.Entry(input_frame, textvariable=self.ma_intermediate_var, width=10)
+        self.ma_intermediate_entry.grid(row=3, column=3, sticky=tk.W, padx=5, pady=2)
+
+        ttk.Label(input_frame, text="MA Medium (weeks):").grid(row=4, column=0, sticky=tk.W, padx=5, pady=2)
         self.ma_medium_var = tk.IntVar(value=DEFAULT_MA_MEDIUM)
         self.ma_medium_entry = ttk.Entry(input_frame, textvariable=self.ma_medium_var, width=10)
-        self.ma_medium_entry.grid(row=3, column=3, sticky=tk.W, padx=5, pady=2)
-        
-        ttk.Label(input_frame, text="MA Long (weeks):").grid(row=3, column=4, sticky=tk.W, padx=5, pady=2)
+        self.ma_medium_entry.grid(row=4, column=1, sticky=tk.W, padx=5, pady=2)
+
+        ttk.Label(input_frame, text="MA Long (weeks):").grid(row=4, column=2, sticky=tk.W, padx=5, pady=2)
         self.ma_long_var = tk.IntVar(value=DEFAULT_MA_LONG)
         self.ma_long_entry = ttk.Entry(input_frame, textvariable=self.ma_long_var, width=10)
-        self.ma_long_entry.grid(row=3, column=5, sticky=tk.W, padx=5, pady=2)
+        self.ma_long_entry.grid(row=4, column=3, sticky=tk.W, padx=5, pady=2)
         
         input_frame.columnconfigure(1, weight=1) # Make entry field expand
+        input_frame.columnconfigure(3, weight=1)
 
         # Run Button
         self.run_button = ttk.Button(input_frame, text="Run Scan", command=self.start_scan)
-        self.run_button.grid(row=4, column=0, columnspan=6, pady=10)
+        self.run_button.grid(row=5, column=0, columnspan=4, pady=10)
 
         # Status Label
         self.status_var = tk.StringVar(value="Ready.")
@@ -309,17 +316,18 @@ class StockScannerApp:
         results_frame.pack(expand=True, fill=tk.BOTH, padx=10, pady=5)
 
         self.columns = ("Ticker", "Date", "Close", "Market Cap", "AvgVol", "VolRatio",
-                        "MA_S_Pass", "MA_M_Pass", "MA_L_Pass")
+                        "MA_S_Pass", "MA_I_Pass", "MA_M_Pass", "MA_L_Pass")
         self.tree = ttk.Treeview(results_frame, columns=self.columns, show="headings")
-        
+
         col_widths = {
             "Ticker": 80, "Date": 80, "Close": 60, "Market Cap": 80, "AvgVol": 90, "VolRatio": 70,
-            "MA_S_Pass": 90, "MA_M_Pass": 90, "MA_L_Pass": 90
+            "MA_S_Pass": 90, "MA_I_Pass": 90, "MA_M_Pass": 90, "MA_L_Pass": 90
         }
 
         header_texts = {
             "Market Cap": "Mkt Cap", "AvgVol": "Avg Vol", "VolRatio": "Vol Ratio",
             "MA_S_Pass": "MA Short Pass",
+            "MA_I_Pass": "MA Mid Pass",
             "MA_M_Pass": "MA Medium Pass",
             "MA_L_Pass": "MA Long Pass"
         }
@@ -413,6 +421,7 @@ class StockScannerApp:
             self.config['avg_volume_weeks'] = DEFAULT_AVG_VOLUME_WEEKS # Stays default for now
 
             ma_s = self.ma_short_var.get()
+            ma_i = self.ma_intermediate_var.get()
             ma_m = self.ma_medium_var.get()
             ma_l = self.ma_long_var.get()
             
@@ -426,18 +435,18 @@ class StockScannerApp:
                 messagebox.showerror("Invalid Market Cap", "Min market cap cannot be greater than Max market cap.")
                 return
 
-            if not (ma_s > 0 and ma_m > 0 and ma_l > 0 and ma_s < ma_m < ma_l):
-                 messagebox.showerror("Invalid MA Periods", "MA periods must be positive and in increasing order (Short < Medium < Long).")
+            if not (ma_s > 0 and ma_i > 0 and ma_m > 0 and ma_l > 0 and ma_s < ma_i < ma_m < ma_l):
+                 messagebox.showerror("Invalid MA Periods", "MA periods must be positive and in increasing order (Short < Mid < Medium < Long).")
                  return
             if self.config['volume_multiplier'] <= 0:
                 messagebox.showerror("Invalid Volume Multiplier", "Volume multiplier must be positive.")
                 return
 
 
-            self.config['ma_periods'] = {"short": ma_s, "medium": ma_m, "long": ma_l}
+            self.config['ma_periods'] = {"short": ma_s, "intermediate": ma_i, "medium": ma_m, "long": ma_l}
             
             # Dynamic data fetch period
-            max_ma_period_weeks = max(ma_s, ma_m, ma_l)
+            max_ma_period_weeks = max(ma_s, ma_i, ma_m, ma_l)
             # Add avg volume weeks + buffer
             self.config['data_fetch_years'] = (max_ma_period_weeks / 52) + (DEFAULT_AVG_VOLUME_WEEKS / 52) + 2 # +2 years buffer
 
@@ -447,6 +456,7 @@ class StockScannerApp:
 
             # Update treeview headers with dynamic MA periods from the current scan settings
             self.tree.heading("MA_S_Pass", text=f"{ma_s}w Pass")
+            self.tree.heading("MA_I_Pass", text=f"{ma_i}w Pass")
             self.tree.heading("MA_M_Pass", text=f"{ma_m}w Pass")
             self.tree.heading("MA_L_Pass", text=f"{ma_l}w Pass")
 
@@ -522,7 +532,7 @@ class StockScannerApp:
         ]
         
         # Add MA passes dynamically based on the config used for that scan
-        for ma_key in ["short", "medium", "long"]: # Order matters for columns
+        for ma_key in ["short", "intermediate", "medium", "long"]: # Order matters for columns
             ma_pass_raw = result_item['ma_passes'].get(ma_key)
 
             ma_pass_str = "Omit" if ma_pass_raw == "Omitted" else ("Yes" if ma_pass_raw is True else ("No" if ma_pass_raw is False else "N/A"))
