@@ -103,7 +103,14 @@ def analyze_stock_core(ticker, config, progress_queue=None):
         weekly_data = weekly_data.dropna(subset=['Close', 'Volume'])
         weekly_data = weekly_data[weekly_data['Volume'] > 0]
 
-        if weekly_data.empty: return None
+        if weekly_data.empty:
+            return None
+
+        latest_week = weekly_data.index[-1]
+        if (end_date - latest_week).days > 7:
+            if progress_queue:
+                progress_queue.put(f"Status: {ticker} has no recent data. Skipping.")
+            return None
 
         # --- Exclude if too young for required moving averages ---
         shortest_ma_period = config['ma_periods']['short']
