@@ -1,0 +1,10 @@
+{
+    "min_market_cap": 0.0,
+    "max_market_cap": 0.0,
+    "volume_multiplier": 2.0,
+    "price_avg_weeks": 1,
+    "ma_short": 90,
+    "ma_intermediate": 180,
+    "ma_medium": 360,
+    "ma_long": 700
+}

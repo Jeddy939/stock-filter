@@ -111,6 +111,14 @@ def analyze_stock_core(ticker, config, progress_queue=None, cancel_event=None):
         if weekly_data.empty:
             return None
 
+        # Exclude incomplete week data if scan is run mid-week.
+        last_week_end_date = weekly_data.index[-1]
+        if datetime.now().date() < last_week_end_date.date():
+            weekly_data = weekly_data.iloc[:-1]
+
+        if weekly_data.empty:
+            return None
+
         latest_week = weekly_data.index[-1]
         if (end_date - latest_week).days > 7:
             if progress_queue:
@@ -153,10 +161,21 @@ def analyze_stock_core(ticker, config, progress_queue=None, cancel_event=None):
         if not volume_condition_met:
             return None
 
-        current_week_close_price = weekly_data['Close'].iloc[-1]
-        previous_week_close_price = weekly_data['Close'].iloc[-2]
+        # --- Price vs. Preceding Weeks Average Condition ---
+        price_avg_weeks = config.get('price_avg_weeks', 1)
+        if len(weekly_data) < price_avg_weeks + 1: # Need current week + number of weeks for average
+            return None
 
-        if current_week_close_price <= previous_week_close_price:
+        current_week_close_price = weekly_data['Close'].iloc[-1]
+        
+        # Calculate the average of the preceding N weeks
+        preceding_weeks_close = weekly_data['Close'].iloc[-1-price_avg_weeks:-1]
+        if preceding_weeks_close.empty:
+            return None # Not enough data for the average
+
+        average_preceding_price = preceding_weeks_close.mean()
+
+        if current_week_close_price <= average_preceding_price:
             return None
 
         # --- Price Moving Average Conditions ---
@@ -229,7 +248,7 @@ def run_scan_thread(config, progress_queue, results_queue, cancel_event=None):
     # The main bottleneck is waiting for the network, so this is very effective.
     # If you find it's still slow or you get errors, Yahoo Finance might be
     # rate-limiting you. Try reducing MAX_WORKERS to 4 or 5.
-    MAX_WORKERS = 6
+    MAX_WORKERS = config.get('max_workers', 6)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         # Submit all analysis tasks to the executor.
@@ -317,6 +336,16 @@ class StockScannerApp:
         self.volume_mult_var = tk.DoubleVar(value=DEFAULT_VOLUME_MULTIPLIER)
         self.volume_mult_entry = ttk.Entry(input_frame, textvariable=self.volume_mult_var, width=10)
         self.volume_mult_entry.grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
+
+        ttk.Label(input_frame, text="Price Avg Weeks (e.g., 1):").grid(row=2, column=2, sticky=tk.W, padx=5, pady=2)
+        self.price_avg_weeks_var = tk.IntVar(value=1)
+        self.price_avg_weeks_entry = ttk.Entry(input_frame, textvariable=self.price_avg_weeks_var, width=10)
+        self.price_avg_weeks_entry.grid(row=2, column=3, sticky=tk.W, padx=5, pady=2)
+
+        ttk.Label(input_frame, text="Max Workers:").grid(row=2, column=4, sticky=tk.W, padx=5, pady=2)
+        self.max_workers_var = tk.IntVar(value=6)
+        self.max_workers_entry = ttk.Entry(input_frame, textvariable=self.max_workers_var, width=10)
+        self.max_workers_entry.grid(row=2, column=5, sticky=tk.W, padx=5, pady=2)
 
         # MA Periods
         ttk.Label(input_frame, text="MA Short (weeks):").grid(row=3, column=0, sticky=tk.W, padx=5, pady=2)
@@ -458,6 +487,8 @@ class StockScannerApp:
         try:
             self.config['ticker_file'] = self.ticker_file_var.get()
             self.config['volume_multiplier'] = self.volume_mult_var.get()
+            self.config['price_avg_weeks'] = self.price_avg_weeks_var.get()
+            self.config['max_workers'] = self.max_workers_var.get()
             self.config['min_market_cap'] = self.min_cap_var.get()
             self.config['max_market_cap'] = self.max_cap_var.get()
             self.config['avg_volume_weeks'] = DEFAULT_AVG_VOLUME_WEEKS # Stays default for now
