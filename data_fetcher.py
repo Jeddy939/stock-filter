@@ -14,31 +14,24 @@ DEFAULT_OUTPUT_FILE = "stock_data.json"
 DEFAULT_DATA_YEARS = 15
 DEFAULT_MAX_WORKERS = 10
 
-def get_tickers_from_file(filename):
+"""def get_tickers_from_file(filename):
     """Reads tickers from a text file, handling different formats."""
     tickers = []
     is_asx_list = "asx" in filename.lower()
     try:
         with open(filename, 'r', encoding='utf-8') as f:
-            header_line_content = "Symbol|Security Name"
-            skipped_header = False
-            for line_content in f:
-                line = line_content.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if not skipped_header and header_line_content in line:
-                    skipped_header = True
-                    continue
-                
-                if '|' in line:
-                    ticker = line.split('|')[0].strip().upper()
-                else:
-                    ticker = line.strip().upper()
+            # More robust header skipping for files that might contain one
+            first_line = f.readline()
+            if "Symbol" in first_line and "Security Name" in first_line:
+                 # This looks like a header, so we process the rest of the file
+                 pass
+            else:
+                # This is not a header, so we process the first line
+                _process_line(first_line, is_asx_list, tickers)
 
-                if ticker:
-                    if is_asx_list and not ticker.endswith(".AX"):
-                        ticker += ".AX"
-                    tickers.append(ticker)
+            for line_content in f:
+                _process_line(line_content, is_asx_list, tickers)
+
         if not tickers:
             print(f"Warning: No tickers found in {filename}.")
         return tickers
@@ -48,6 +41,23 @@ def get_tickers_from_file(filename):
     except Exception as e:
         print(f"Error reading ticker file: {str(e)}")
         return []
+
+def _process_line(line_content, is_asx_list, tickers):
+    """Helper function to process a single line from a ticker file."""
+    line = line_content.strip()
+    if not line or line.startswith("#"):
+        return
+
+    if '|' in line:
+        ticker = line.split('|')[0].strip().upper()
+    else:
+        ticker = line.strip().upper()
+
+    if ticker and ticker != "SYMBOL": # Explicitly skip the header ticker
+        if is_asx_list and not ticker.endswith(".AX"):
+            ticker += ".AX"
+        tickers.append(ticker)
+""
 
 def fetch_stock_data(ticker, years):
     """Fetches historical data and info for a single stock with robust retry logic."""
