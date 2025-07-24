@@ -4,8 +4,10 @@ import json
 import argparse
 import time
 from datetime import datetime
-import concurrent.futures
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from queue import Queue
+from tqdm import tqdm
 
 # --- Configuration ---
 DEFAULT_OUTPUT_FILE = "stock_data.json"
@@ -48,75 +50,50 @@ def get_tickers_from_file(filename):
         return []
 
 def fetch_stock_data(ticker, years):
-    """Fetches historical data and info for a single stock with retry logic."""
-    max_retries = 3
-    retry_delay = 10 # seconds
-
-    for attempt in range(max_retries):
+    """Fetches historical data and info for a single stock with robust retry logic."""
+    retry_delay = 30
+    max_delay = 300
+    attempt = 1
+    while True:
         try:
             stock = yf.Ticker(ticker)
-            
-            # Fetch basic info
             info = stock.info
-            # Ensure market cap is present, otherwise the data is often not useful
             if info.get('marketCap') is None and info.get('regularMarketPrice') is None:
-                # This is a data issue, not a rate limit, so don't retry.
-                print(f"- Skipping {ticker}: Insufficient data (no market cap or price).")
-                return None, None
-
-            # Fetch historical data
+                return ticker, None, "Insufficient data (no market cap or price)"
+            
             end_date = datetime.now()
             start_date = end_date - pd.DateOffset(years=years)
-            hist = stock.history(start=start_date.strftime('%Y-%m-%d'), 
-                                 end=end_date.strftime('%Y-%m-%d'), 
-                                 interval="1d")
+            hist = stock.history(start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'), interval="1d")
             
             if hist.empty:
-                # Data is empty, not a rate limit, don't retry.
-                print(f"- Skipping {ticker}: No historical data found for the period.")
-                return None, None
+                return ticker, None, "No historical data found"
 
-            # Convert history to a JSON-serializable format
             hist_json = json.loads(hist.to_json(orient='split', date_format='iso'))
-
-            # Success
-            return info, hist_json
-
+            return ticker, {"info": info, "history": hist_json}, "Success"
+        
         except Exception as e:
-            # yfinance can throw various errors. We'll treat most network-related ones as retryable.
             error_str = str(e).lower()
-            # Common indicators of transient network/API issues.
-            if "failed to decrypt" in error_str or "404" in error_str or "429" in error_str or "failed to get data" in error_str:
-                 if attempt < max_retries - 1:
-                    print(f"! Rate limit or transient error for {ticker}. Retrying in {retry_delay}s... (Attempt {attempt + 1}/{max_retries})")
-                    time.sleep(retry_delay)
-                    continue # Go to the next attempt
-                 else:
-                    print(f"!! Failed to fetch {ticker} after {max_retries} attempts. Last error: {str(e)[:100]}")
-                    return None, None
+            if "failed to decrypt" in error_str or "404" in error_str or "429" in error_str or "failed to get data" in error_str or "too many requests" in error_str:
+                time.sleep(retry_delay)
+                attempt += 1
+                retry_delay = min(retry_delay + 30, max_delay)
+                continue
             else:
-                # For other errors (like JSON parsing, etc.), don't retry.
-                print(f"! Unhandled error fetching data for {ticker}: {str(e)[:100]}")
-                return None, None
-    
-    return None, None # Should be unreachable if loop logic is correct, but good for safety.
+                return ticker, None, f"Unhandled error: {str(e)[:100]}"
 
 def main():
     parser = argparse.ArgumentParser(description="Stock Data Fetcher for Moneymaker Pro")
     parser.add_argument("ticker_file", help="Path to the text file containing stock tickers.")
-    parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT_FILE, 
-                        help=f"Output JSON file name. (Default: {DEFAULT_OUTPUT_FILE})")
-    parser.add_argument("-y", "--years", type=int, default=DEFAULT_DATA_YEARS, 
-                        help=f"Number of years of historical data to fetch. (Default: {DEFAULT_DATA_YEARS})")
-    parser.add_argument("-w", "--workers", type=int, default=DEFAULT_MAX_WORKERS, 
-                        help=f"Number of parallel workers for fetching data. (Default: {DEFAULT_MAX_WORKERS})")
+    parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT_FILE, help=f"Output JSON file name. (Default: {DEFAULT_OUTPUT_FILE})")
+    parser.add_argument("-y", "--years", type=int, default=DEFAULT_DATA_YEARS, help=f"Number of years of historical data to fetch. (Default: {DEFAULT_DATA_YEARS})")
+    parser.add_argument("-w", "--workers", type=int, default=DEFAULT_MAX_WORKERS, help=f"Number of concurrent workers. (Default: {DEFAULT_MAX_WORKERS})")
     args = parser.parse_args()
 
-    print("--- Starting Data Fetcher ---")
+    print("--- Starting Data Fetcher (Concurrent Mode) ---")
     print(f"Ticker File: {args.ticker_file}")
     print(f"Data Years: {args.years}")
     print(f"Max Workers: {args.workers}")
-    print("-----------------------------")
+    print("-------------------------------------------------")
 
     tickers = get_tickers_from_file(args.ticker_file)
     if not tickers:
@@ -129,29 +106,24 @@ def main():
     all_stock_data = {}
     start_time = time.time()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
-        future_to_ticker = {executor.submit(fetch_stock_data, ticker, args.years): ticker for ticker in tickers}
-        
-        completed_count = 0
-        for future in concurrent.futures.as_completed(future_to_ticker):
-            ticker = future_to_ticker[future]
-            completed_count += 1
-            try:
-                info, hist = future.result()
-                if info and hist:
-                    all_stock_data[ticker] = {"info": info, "history": hist}
-            except Exception as exc:
-                print(f"!! Critical error processing {ticker}: {exc}")
-
-            # Progress Indicator
-            progress = (completed_count / total_tickers) * 100
-            print(f"Progress: {completed_count}/{total_tickers} ({progress:.2f}%) - Last processed: {ticker}")
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        with tqdm(total=total_tickers, desc="Fetching Data", unit="ticker") as pbar:
+            futures = {}
+            for ticker in tickers:
+                futures[executor.submit(fetch_stock_data, ticker, args.years)] = ticker
+                time.sleep(0.05)  # Stagger requests to reduce rate limiting issues
+            for future in as_completed(futures):
+                ticker, result, status = future.result()
+                if result:
+                    all_stock_data[ticker] = result
+                else:
+                    tqdm.write(f"- Skipping {ticker}: {status}")
+                pbar.update(1)
 
     print("\n--- Fetch Complete ---")
     successful_fetches = len(all_stock_data)
     print(f"Successfully fetched data for {successful_fetches}/{total_tickers} tickers.")
 
-    # Add metadata
     output_data = {
         "metadata": {
             "fetch_date_utc": datetime.utcnow().isoformat(),
@@ -161,7 +133,6 @@ def main():
         "stocks": all_stock_data
     }
 
-    # Save to file
     try:
         with open(args.output, 'w', encoding='utf-8') as f:
             json.dump(output_data, f, indent=2)
