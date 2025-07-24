@@ -9,6 +9,7 @@ import webbrowser
 import json
 import sv_ttk
 import subprocess
+import os
 
 # --- Default Configuration ---
 DEFAULT_DATA_FILE = "stock_data.json"
@@ -171,12 +172,13 @@ class MoneymakerProAlphaApp:
         self.run_fetch_button.config(state=tk.DISABLED)
         self.log_text.config(state='normal'); self.log_text.delete(1.0, tk.END); self.log_text.config(state='disabled')
 
-        command = ["python", "-u", "data_fetcher.py", self.ticker_file_var.get(), "-y", str(self.years_var.get()), "-w", str(self.workers_var.get()), "-o", self.output_file_var.get()]
-        threading.Thread(target=self.run_process, args=(command,), daemon=True).start()
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        command = ["python", "-u", os.path.join(script_dir, "data_fetcher.py"), self.ticker_file_var.get(), "-y", str(self.years_var.get()), "-o", self.output_file_var.get()]
+        threading.Thread(target=self.run_process, args=(command, script_dir), daemon=True).start()
 
-    def run_process(self, command):
+    def run_process(self, command, script_dir):
         try:
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW)
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW, cwd=script_dir)
             for line in iter(process.stdout.readline, ''): self.log_queue.put(line)
             process.stdout.close(); process.wait()
         except Exception as e:
