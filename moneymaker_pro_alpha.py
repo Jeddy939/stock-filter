@@ -32,28 +32,14 @@ def analyze_stock_from_local_data(ticker, data, config, progress_queue=None, log
         info = data.get('info', {})
         history_json = data.get('history')
         
-        # We must have history. Info is optional.
         if not history_json:
             if log_queue: log_queue.put(f"  -> SKIPPED: {ticker} - Missing essential history data.")
             return None
 
-        # --- Market Cap Filter ---
         market_cap = info.get('marketCap') if info else None
         min_cap_m = config.get('min_market_cap', 0)
         max_cap_m = config.get('max_market_cap', 0)
-        if market_cap is None:
-            if min_cap_m > 0:
-                if log_queue: log_queue.put(f"  -> SKIPPED: {ticker} - No market cap data, but min cap filter is active.")
-                return None
-        else:
-            market_cap_in_millions = market_cap / 1_000_000
-            if min_cap_m > 0 and market_cap_in_millions < min_cap_m:
-                if log_queue: log_queue.put(f"  -> SKIPPED: {ticker} - Mkt Cap ({market_cap_in_millions:.2f}M) is below min ({min_cap_m}M).")
-                return None
-            if max_cap_m > 0 and market_cap_in_millions > max_cap_m:
-                if log_queue: log_queue.put(f"  -> SKIPPED: {ticker} - Mkt Cap ({market_cap_in_millions:.2f}M) is above max ({max_cap_m}M).")
-                return None
-
+        
         hist_daily = pd.read_json(StringIO(json.dumps(history_json)), orient='split')
         if hist_daily.empty:
             if log_queue: log_queue.put(f"  -> SKIPPED: {ticker} - No historical data after processing.")
@@ -62,39 +48,91 @@ def analyze_stock_from_local_data(ticker, data, config, progress_queue=None, log
         agg_functions = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
         weekly_data = hist_daily.resample('W-MON').agg(agg_functions).dropna(subset=['Close', 'Volume'])
         weekly_data = weekly_data[weekly_data['Volume'] > 0]
-        if weekly_data.empty: return None
+        if weekly_data.empty:
+            if log_queue: log_queue.put(f"  -> SKIPPED: {ticker} - No valid weekly data.")
+            return None
 
         if datetime.now().date() < weekly_data.index[-1].date():
             weekly_data = weekly_data.iloc[:-1]
-        if weekly_data.empty: return None
+        if weekly_data.empty:
+            if log_queue: log_queue.put(f"  -> SKIPPED: {ticker} - No weekly data after removing incomplete week.")
+            return None
 
-        if len(weekly_data) < config['ma_periods']['short'] + 1: return None
-        if len(weekly_data) < config['avg_volume_weeks'] + 1: return None
+        lookback_weeks = config.get('lookback_weeks', 1)
 
-        avg_weekly_volume_series = weekly_data['Volume'].shift(1).rolling(window=config['avg_volume_weeks'], min_periods=int(config['avg_volume_weeks'] * 0.8)).mean()
-        current_week_volume = weekly_data['Volume'].iloc[-1]
-        target_week_start_date = weekly_data.index[-1]
-        preceding_avg_volume = avg_weekly_volume_series.get(target_week_start_date, float('nan'))
-        if pd.isna(preceding_avg_volume) or preceding_avg_volume == 0: return None
+        for i in range(1, lookback_weeks + 1):
+            if len(weekly_data) < i:
+                break 
 
-        if not current_week_volume >= config['volume_multiplier'] * preceding_avg_volume: return None
+            target_week_index = -i
+            
+            # --- Data Age / MA Period Checks for the target week ---
+            if len(weekly_data.iloc[:target_week_index]) < config['ma_periods']['short'] + 1:
+                if log_queue and i == 1: log_queue.put(f"  -> SKIPPED: {ticker} - Too young for shortest MA ({config['ma_periods']['short']} weeks).")
+                continue
+            if len(weekly_data.iloc[:target_week_index]) < config['avg_volume_weeks'] + 1:
+                if log_queue and i == 1: log_queue.put(f"  -> SKIPPED: {ticker} - Not enough data for volume average ({config['avg_volume_weeks']} weeks).")
+                continue
 
-        if len(weekly_data) < config.get('price_avg_weeks', 1) + 1: return None
-        current_week_close_price = weekly_data['Close'].iloc[-1]
-        if current_week_close_price <= weekly_data['Close'].iloc[-1-config.get('price_avg_weeks', 1):-1].mean(): return None
+            # --- Volume Spike Condition ---
+            avg_weekly_volume_series = weekly_data['Volume'].shift(1).rolling(window=config['avg_volume_weeks'], min_periods=int(config['avg_volume_weeks'] * 0.8)).mean()
+            current_week_volume = weekly_data['Volume'].iloc[target_week_index]
+            target_week_start_date = weekly_data.index[target_week_index]
+            preceding_avg_volume = avg_weekly_volume_series.get(target_week_start_date, float('nan'))
+            
+            if pd.isna(preceding_avg_volume) or preceding_avg_volume == 0:
+                continue
 
-        price_conditions_met = True
-        for period in config['ma_periods'].values():
-            if len(weekly_data) >= period + 1:
-                ma_series = weekly_data['Close'].shift(1).rolling(window=period, min_periods=int(period * 0.8)).mean()
-                if pd.isna(ma_series.get(target_week_start_date, float('nan'))) or current_week_close_price <= ma_series.get(target_week_start_date, float('nan')):
-                    price_conditions_met = False
-                    break
-        
-        if price_conditions_met:
-            return {"ticker": ticker, "date": target_week_start_date.strftime('%Y-%m-%d'), "close_price": current_week_close_price, "market_cap": market_cap, "avg_volume": preceding_avg_volume, "volume_ratio": current_week_volume / preceding_avg_volume if preceding_avg_volume > 0 else float('inf')}
+            if not current_week_volume >= config['volume_multiplier'] * preceding_avg_volume:
+                continue
+
+            # --- Price vs. Preceding Weeks Average Condition ---
+            if len(weekly_data.iloc[:target_week_index]) < config.get('price_avg_weeks', 1):
+                continue
+            current_week_close_price = weekly_data['Close'].iloc[target_week_index]
+            
+            price_avg_start_index = target_week_index - config.get('price_avg_weeks', 1)
+            if not weekly_data['Close'].iloc[price_avg_start_index:target_week_index].empty:
+                if current_week_close_price <= weekly_data['Close'].iloc[price_avg_start_index:target_week_index].mean():
+                    continue
+            else:
+                continue
+
+            # --- Price Moving Average Conditions ---
+            price_conditions_met = True
+            for ma_name, period in config['ma_periods'].items():
+                if len(weekly_data.iloc[:target_week_index]) >= period:
+                    ma_series = weekly_data['Close'].shift(1).rolling(window=period, min_periods=int(period * 0.8)).mean()
+                    ma_value = ma_series.get(target_week_start_date, float('nan'))
+                    if pd.isna(ma_value) or current_week_close_price <= ma_value:
+                        price_conditions_met = False
+                        break
+            
+            if price_conditions_met:
+                # Market cap check is performed last, only if all other conditions are met for a given week
+                if market_cap is None:
+                    if min_cap_m > 0:
+                        if log_queue: log_queue.put(f"  -> WEEK SKIPPED ({target_week_start_date.date()}): No market cap data, but min cap filter is active.")
+                        continue
+                else:
+                    market_cap_in_millions = market_cap / 1_000_000
+                    if min_cap_m > 0 and market_cap_in_millions < min_cap_m:
+                        if log_queue: log_queue.put(f"  -> WEEK SKIPPED ({target_week_start_date.date()}): Mkt Cap ({market_cap_in_millions:.2f}M) is below min ({min_cap_m}M).")
+                        continue
+                    if max_cap_m > 0 and market_cap_in_millions > max_cap_m:
+                        if log_queue: log_queue.put(f"  -> WEEK SKIPPED ({target_week_start_date.date()}): Mkt Cap ({market_cap_in_millions:.2f}M) is above max ({max_cap_m}M).")
+                        continue
+                
+                # If we get here, this week is a match
+                return {"ticker": ticker, "date": target_week_start_date.strftime('%Y-%m-%d'), "close_price": current_week_close_price, "market_cap": market_cap, "avg_volume": preceding_avg_volume, "volume_ratio": current_week_volume / preceding_avg_volume if preceding_avg_volume > 0 else float('inf')}
+
+        # If the loop finishes without finding a match
+        if log_queue: log_queue.put(f"  -> SKIPPED: {ticker} - No week in the lookback period met all criteria.")
+        return None
+
     except Exception as e:
         if progress_queue: progress_queue.put(f"Error processing {ticker}: {str(e)[:100]}")
+        if log_queue: log_queue.put(f"  -> ERROR: {ticker} - {str(e)[:100]}")
     return None
 
 def run_filter_thread(config, stock_data, results_queue, progress_queue):
@@ -132,11 +170,13 @@ class MoneymakerProAlphaApp:
 
         self.stock_data = {}
         self.filter_thread = None
+        self.data_loading_thread = None
         self.results_queue = queue.Queue()
         self.progress_queue = queue.Queue()
         self.log_queue = queue.Queue()
         self.filter_log_queue = queue.Queue()
         self.status_var = tk.StringVar()
+        self.filter_log_window = None
         self.filter_log_window = None
 
         self.notebook = ttk.Notebook(root)
@@ -150,7 +190,7 @@ class MoneymakerProAlphaApp:
         self._create_fetch_widgets(self.fetch_tab)
         self._create_filter_widgets(self.filter_tab)
 
-        self.load_data_on_startup()
+        self.status_var.set("Ready. Please load a data file to begin.")
         self.check_queues()
 
     def _create_fetch_widgets(self, parent):
@@ -334,6 +374,7 @@ class MoneymakerProAlphaApp:
         self.max_cap_var = tk.DoubleVar(value=0.0)
         self.volume_mult_var = tk.DoubleVar(value=DEFAULT_VOLUME_MULTIPLIER)
         self.price_avg_weeks_var = tk.IntVar(value=DEFAULT_PRICE_AVG_WEEKS)
+        self.lookback_weeks_var = tk.IntVar(value=1)
         self.ma_short_var = tk.IntVar(value=DEFAULT_MA_SHORT)
         self.ma_intermediate_var = tk.IntVar(value=DEFAULT_MA_INTERMEDIATE)
         self.ma_medium_var = tk.IntVar(value=DEFAULT_MA_MEDIUM)
@@ -347,6 +388,9 @@ class MoneymakerProAlphaApp:
         ttk.Entry(params_frame, textvariable=self.volume_mult_var, width=12).grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
         ttk.Label(params_frame, text="Price Avg Weeks:").grid(row=1, column=2, sticky=tk.W, padx=5, pady=5)
         ttk.Entry(params_frame, textvariable=self.price_avg_weeks_var, width=12).grid(row=1, column=3, sticky=tk.W, padx=5, pady=5)
+
+        ttk.Label(params_frame, text="Lookback Weeks:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Entry(params_frame, textvariable=self.lookback_weeks_var, width=12).grid(row=2, column=1, sticky=tk.W, padx=5, pady=5)
 
         ma_frame = ttk.LabelFrame(controls_frame, text="Moving Averages (Weeks)", padding=10)
         ma_frame.pack(fill=tk.X, pady=5)
@@ -442,6 +486,7 @@ class MoneymakerProAlphaApp:
                 self.max_cap_var.set(settings.get('max_market_cap', 0.0))
                 self.volume_mult_var.set(settings.get('volume_multiplier', DEFAULT_VOLUME_MULTIPLIER))
                 self.price_avg_weeks_var.set(settings.get('price_avg_weeks', DEFAULT_PRICE_AVG_WEEKS))
+                self.lookback_weeks_var.set(settings.get('lookback_weeks', 1))
                 self.ma_short_var.set(settings.get('ma_short', DEFAULT_MA_SHORT))
                 self.ma_intermediate_var.set(settings.get('ma_intermediate', DEFAULT_MA_INTERMEDIATE))
                 self.ma_medium_var.set(settings.get('ma_medium', DEFAULT_MA_MEDIUM))
@@ -495,7 +540,15 @@ class MoneymakerProAlphaApp:
         if self.filter_thread and self.filter_thread.is_alive(): messagebox.showwarning("In Progress", "A filter is already running."); return
 
         try:
-            config = {'volume_multiplier': self.volume_mult_var.get(), 'price_avg_weeks': self.price_avg_weeks_var.get(), 'min_market_cap': self.min_cap_var.get(), 'max_market_cap': self.max_cap_var.get(), 'avg_volume_weeks': DEFAULT_AVG_VOLUME_WEEKS, 'ma_periods': {"short": self.ma_short_var.get(), "intermediate": self.ma_intermediate_var.get(), "medium": self.ma_medium_var.get(), "long": self.ma_long_var.get()}}
+            config = {
+                'volume_multiplier': self.volume_mult_var.get(), 
+                'price_avg_weeks': self.price_avg_weeks_var.get(), 
+                'min_market_cap': self.min_cap_var.get(), 
+                'max_market_cap': self.max_cap_var.get(), 
+                'avg_volume_weeks': DEFAULT_AVG_VOLUME_WEEKS, 
+                'lookback_weeks': self.lookback_weeks_var.get(),
+                'ma_periods': {"short": self.ma_short_var.get(), "intermediate": self.ma_intermediate_var.get(), "medium": self.ma_medium_var.get(), "long": self.ma_long_var.get()}
+            }
             self.run_filter_button.config(state=tk.DISABLED)
             self.status_var.set("Status: Filtering...")
             self.tree.delete(*self.tree.get_children())
