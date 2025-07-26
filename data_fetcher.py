@@ -3,18 +3,16 @@ import pandas as pd
 import json
 import argparse
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from queue import Queue
 from tqdm import tqdm
+from curl_cffi import requests as cffi_requests
 
 # --- Configuration ---
 DEFAULT_OUTPUT_FILE = "stock_data.json"
 DEFAULT_DATA_YEARS = 15
-DEFAULT_MAX_WORKERS = 10
 
-"""def get_tickers_from_file(filename):
+def get_tickers_from_file(filename):
     """Reads tickers from a text file, handling different formats."""
     tickers = []
     is_asx_list = "asx" in filename.lower()
@@ -57,52 +55,42 @@ def _process_line(line_content, is_asx_list, tickers):
         if is_asx_list and not ticker.endswith(".AX"):
             ticker += ".AX"
         tickers.append(ticker)
-""
 
-def fetch_stock_data(ticker, years):
-    """Fetches historical data and info for a single stock with robust retry logic."""
-    retry_delay = 30
-    max_delay = 300
-    attempt = 1
-    while True:
+def fetch_info_individual(tickers):
+    """
+    Fetches .info data for a list of tickers one by one using yfinance.
+    This is slower but can be more reliable than batch API calls if they are getting blocked.
+    """
+    all_info_data = {}
+    print(f"\n--- Step 2 of 3: Fetching company info individually ---")
+    
+    for ticker in tqdm(tickers, desc="Fetching Info", unit="ticker"):
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
-            if info.get('marketCap') is None and info.get('regularMarketPrice') is None:
-                return ticker, None, "Insufficient data (no market cap or price)"
-            
-            end_date = datetime.now()
-            start_date = end_date - pd.DateOffset(years=years)
-            hist = stock.history(start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'), interval="1d")
-            
-            if hist.empty:
-                return ticker, None, "No historical data found"
-
-            hist_json = json.loads(hist.to_json(orient='split', date_format='iso'))
-            return ticker, {"info": info, "history": hist_json}, "Success"
-        
-        except Exception as e:
-            error_str = str(e).lower()
-            if "failed to decrypt" in error_str or "404" in error_str or "429" in error_str or "failed to get data" in error_str or "too many requests" in error_str:
-                time.sleep(retry_delay)
-                attempt += 1
-                retry_delay = min(retry_delay + 30, max_delay)
-                continue
+            # Check if we got meaningful data, not just an empty dict for a dead ticker
+            if info and info.get('regularMarketPrice') is not None:
+                all_info_data[ticker] = info
             else:
-                return ticker, None, f"Unhandled error: {str(e)[:100]}"
+                tqdm.write(f"[-] Warning: No valid info found for {ticker}.")
+        except Exception as e:
+            # This will catch network errors or errors for delisted tickers
+            tqdm.write(f"[-] Warning: Failed to fetch info for {ticker}. Error: {str(e)[:100]}")
+            
+    return all_info_data
+
+
 
 def main():
     parser = argparse.ArgumentParser(description="Stock Data Fetcher for Moneymaker Pro")
     parser.add_argument("ticker_file", help="Path to the text file containing stock tickers.")
     parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT_FILE, help=f"Output JSON file name. (Default: {DEFAULT_OUTPUT_FILE})")
     parser.add_argument("-y", "--years", type=int, default=DEFAULT_DATA_YEARS, help=f"Number of years of historical data to fetch. (Default: {DEFAULT_DATA_YEARS})")
-    parser.add_argument("-w", "--workers", type=int, default=DEFAULT_MAX_WORKERS, help=f"Number of concurrent workers. (Default: {DEFAULT_MAX_WORKERS})")
     args = parser.parse_args()
 
     print("--- Starting Data Fetcher (Concurrent Mode) ---")
     print(f"Ticker File: {args.ticker_file}")
     print(f"Data Years: {args.years}")
-    print(f"Max Workers: {args.workers}")
     print("-------------------------------------------------")
 
     tickers = get_tickers_from_file(args.ticker_file)
@@ -115,28 +103,72 @@ def main():
 
     all_stock_data = {}
     start_time = time.time()
+    
+    # --- Step 1: Batch download all historical data ---
+    # This is MUCH more efficient than one-by-one calls.
+    print("\n--- Step 1 of 3: Batch fetching historical data ---")
+    end_date = datetime.now()
+    start_date = end_date - pd.DateOffset(years=args.years)
 
-    with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        with tqdm(total=total_tickers, desc="Fetching Data", unit="ticker") as pbar:
-            futures = {}
-            for ticker in tickers:
-                futures[executor.submit(fetch_stock_data, ticker, args.years)] = ticker
-                time.sleep(0.05)  # Stagger requests to reduce rate limiting issues
-            for future in as_completed(futures):
-                ticker, result, status = future.result()
-                if result:
-                    all_stock_data[ticker] = result
-                else:
-                    tqdm.write(f"- Skipping {ticker}: {status}")
-                pbar.update(1)
+    hist_data_multi = yf.download(
+        tickers,
+        start=start_date.strftime('%Y-%m-%d'),
+        end=end_date.strftime('%Y-%m-%d'),
+        interval="1d",
+        group_by='ticker',
+        threads=True, # Let yfinance handle threading for this part
+        progress=True,
+        # session=session # REMOVED: Incompatible with recent yfinance versions that use curl_cffi
+    )
+    print("Historical data fetch complete.")
+
+    # --- Step 2: Fetch '.info' data (market cap, etc.) ---
+    # We now fetch individually as batch requests are often blocked. This is slower.
+    all_info_data = fetch_info_individual(tickers)
+    print(f"Company info fetch complete. Found info for {len(all_info_data)} tickers.")
+
+    # --- Step 3: Combine historical and info data ---
+    print("\n--- Step 3 of 3: Combining and saving data ---")
+    tickers_no_hist = 0
+    tickers_no_info = 0
+    tickers_no_mcap = 0
+
+    for ticker in tqdm(tickers, desc="Processing Tickers"):
+        info = all_info_data.get(ticker)
+        
+        # Check if we have historical data for this ticker. Info is optional.
+        if ticker not in hist_data_multi.columns.get_level_values(0):
+            tickers_no_hist += 1
+            continue
+
+        hist_single = hist_data_multi[ticker].dropna(how='all')
+        if hist_single.empty:
+            tickers_no_hist += 1
+            continue
+        
+        # If info is missing, we'll still save the history.
+        # The filter app can handle missing info.
+        if not info:
+            tickers_no_info += 1
+        elif info.get('marketCap') is None:
+            # This is common for indices, warrants, or delisted stocks.
+            tickers_no_mcap += 1
+
+        # Convert to the same JSON format as the original script
+        hist_json = json.loads(hist_single.to_json(orient='split', date_format='iso'))
+        all_stock_data[ticker] = {"info": info if info else {}, "history": hist_json}
 
     print("\n--- Fetch Complete ---")
     successful_fetches = len(all_stock_data)
-    print(f"Successfully fetched data for {successful_fetches}/{total_tickers} tickers.")
+    print(f"Successfully processed data for {successful_fetches}/{total_tickers} tickers.")
+    print(f"  - Skipped {tickers_no_hist} tickers with no historical data.")
+    print(f"  - {tickers_no_info} tickers had no company info (e.g., market cap).")
+    print(f"  - Of those with info, {tickers_no_mcap} were missing a market cap value.")
+    print("------------------------")
 
     output_data = {
         "metadata": {
-            "fetch_date_utc": datetime.utcnow().isoformat(),
+            "fetch_date_utc": datetime.now(timezone.utc).isoformat(),
             "source_ticker_file": args.ticker_file,
             "data_years_fetched": args.years
         },
