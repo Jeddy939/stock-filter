@@ -1,0 +1,1 @@
+Fix: Correct SyntaxError in data_fetcher.py
