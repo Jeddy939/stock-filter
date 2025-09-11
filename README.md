@@ -14,8 +14,8 @@ python -m moneymaker fetch asx_200_tickers.txt
 
 ## Legacy Scripts
 
-The GUI applications (`moneymaker_pro.py`, `moneymaker_pro_alpha.py`,
-`MoneymakerPro_Alpha_fetchfix.py`) now depend on the new package and share the
+The GUI applications (`moneymaker_app.py`, `moneymaker_pro.py`,
+`moneymaker_pro_alpha.py`, `MoneymakerPro_Alpha_fetchfix.py`) now depend on the new package and share the
 same filtering logic.
 
 ## Configuration

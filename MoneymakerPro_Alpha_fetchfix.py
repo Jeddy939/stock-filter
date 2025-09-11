@@ -14,7 +14,7 @@ except Exception:
 import subprocess
 import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from moneymaker.filters import analyze_stock_from_local_data
 
 
