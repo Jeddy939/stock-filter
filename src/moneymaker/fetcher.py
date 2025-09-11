@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 DEFAULT_OUTPUT_FILE = "stock_data.json"
 DEFAULT_DATA_YEARS = 15
+DEFAULT_WORKERS = 10
 
 
 def get_tickers_from_file(filename: str) -> List[str]:
@@ -70,8 +71,26 @@ def fetch_info_individual(tickers: List[str]) -> Dict[str, dict]:
     return all_info_data
 
 
-def fetch_stock_data(ticker_file: str, output: str = DEFAULT_OUTPUT_FILE, years: int = DEFAULT_DATA_YEARS) -> None:
-    """Fetches historical and info data for tickers and saves to ``output``."""
+def fetch_stock_data(
+    ticker_file: str,
+    output: str = DEFAULT_OUTPUT_FILE,
+    years: int = DEFAULT_DATA_YEARS,
+    workers: int = DEFAULT_WORKERS,
+) -> None:
+    """Fetches historical and info data for tickers and saves to ``output``.
+
+    Parameters
+    ----------
+    ticker_file:
+        Path to a text file containing ticker symbols.
+    output:
+        Destination JSON file for fetched data.
+    years:
+        Number of years of historical data to retrieve.
+    workers:
+        Number of worker threads used by ``yfinance`` when downloading
+        historical prices.
+    """
     print("--- Starting Data Fetcher (Concurrent Mode) ---")
     print(f"Ticker File: {ticker_file}")
     print(f"Data Years: {years}")
@@ -97,7 +116,7 @@ def fetch_stock_data(ticker_file: str, output: str = DEFAULT_OUTPUT_FILE, years:
         end=end_date.strftime("%Y-%m-%d"),
         interval="1d",
         group_by="ticker",
-        threads=True,
+        threads=workers,
         progress=True,
     )
     print("Historical data fetch complete.")
@@ -162,8 +181,15 @@ def cli() -> None:
     parser.add_argument(
         "-y", "--years", type=int, default=DEFAULT_DATA_YEARS, help=f"Number of years of historical data to fetch. (Default: {DEFAULT_DATA_YEARS})"
     )
+    parser.add_argument(
+        "-w",
+        "--workers",
+        type=int,
+        default=DEFAULT_WORKERS,
+        help=f"Number of threads for downloading data. (Default: {DEFAULT_WORKERS})",
+    )
     args = parser.parse_args()
-    fetch_stock_data(args.ticker_file, args.output, args.years)
+    fetch_stock_data(args.ticker_file, args.output, args.years, args.workers)
 
 
 if __name__ == "__main__":
