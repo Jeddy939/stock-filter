@@ -14,7 +14,7 @@ from io import StringIO
 
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent / "src"))
-from moneymaker.filters import analyze_stock_from_local_data
+from moneymaker.filters import analyze_stock_from_local_data, validate_latest_week
 
 # --- Helpers for subprocess path handling ---
 def _get_fetcher_path():
@@ -65,6 +65,27 @@ def run_filter_thread(config, stock_data, results_queue, progress_queue):
         
     progress_queue.put("DONE")
 
+
+def run_refiner_thread(candidates, stock_data, config, results_queue, progress_queue):
+    """Validate each ticker's latest week against the refined check."""
+    progress_queue.put("Status: Starting refinement...")
+    results = []
+    total = len(candidates)
+    for idx, ticker in enumerate(candidates, 1):
+        progress_queue.put(f"Status: Refining {idx}/{total}...")
+        data = stock_data.get(ticker)
+        if not data:
+            continue
+        res = validate_latest_week(ticker, data, config)
+        if res:
+            results.append(res)
+    for res in results:
+        results_queue.put(res)
+    progress_queue.put(
+        f"Status: Refinement complete! {len(results)} of {total} tickers passed."
+    )
+    progress_queue.put("DONE")
+
 class MoneymakerProAlphaApp:
     def __init__(self, root):
         self.root = root
@@ -77,24 +98,34 @@ class MoneymakerProAlphaApp:
         self.data_loading_thread = None
         self.results_queue = queue.Queue()
         self.progress_queue = queue.Queue()
+        self.refiner_results_queue = queue.Queue()
+        self.refiner_progress_queue = queue.Queue()
         self.log_queue = queue.Queue()
         self.filter_log_queue = queue.Queue()
         self.status_var = tk.StringVar()
+        self.refiner_status_var = tk.StringVar()
         self.filter_log_window = None
         self.filter_log_window = None
+        self.filter_results = []
+        self.refiner_candidates = []
+        self.refined_results = []
 
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         self.fetch_tab = ttk.Frame(self.notebook, padding=10)
         self.filter_tab = ttk.Frame(self.notebook, padding=10)
+        self.refiner_tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(self.fetch_tab, text='  Fetch Data  ')
         self.notebook.add(self.filter_tab, text='  Filter & Screen  ')
+        self.notebook.add(self.refiner_tab, text='  Refiner  ')
 
         self._create_fetch_widgets(self.fetch_tab)
         self._create_filter_widgets(self.filter_tab)
+        self._create_refiner_widgets(self.refiner_tab)
 
         self.status_var.set("Ready. Please load a data file to begin.")
+        self.refiner_status_var.set("Load filter results to begin.")
         self.check_queues()
 
     def _create_fetch_widgets(self, parent):
@@ -365,6 +396,58 @@ class MoneymakerProAlphaApp:
         status_frame = ttk.Frame(results_frame); status_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Label(status_frame, textvariable=self.status_var, anchor=tk.W).pack(fill=tk.X)
 
+    def _create_refiner_widgets(self, parent):
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
+
+        controls = ttk.Frame(parent, padding=10)
+        controls.grid(row=0, column=0, sticky="ew")
+        self.load_results_button = ttk.Button(
+            controls, text="Load Results", command=self.load_filter_results_for_refiner
+        )
+        self.load_results_button.pack(side=tk.LEFT, padx=5)
+        self.run_refiner_button = ttk.Button(
+            controls, text="Run Refiner", command=self.start_refiner, style="Accent.TButton"
+        )
+        self.run_refiner_button.pack(side=tk.LEFT, padx=5)
+
+        results_frame = ttk.Frame(parent, padding=10)
+        results_frame.grid(row=1, column=0, sticky="nsew")
+        results_frame.rowconfigure(0, weight=1)
+        results_frame.columnconfigure(0, weight=1)
+
+        self.refiner_tree = ttk.Treeview(results_frame, columns=self.columns, show="headings")
+        header_texts = {
+            "Market Cap": "Mkt Cap",
+            "AvgVol": "Avg Vol",
+            "VolRatio": "Vol Ratio",
+        }
+        col_widths = {
+            "Ticker": 100,
+            "Date": 100,
+            "Close": 80,
+            "Market Cap": 100,
+            "AvgVol": 110,
+            "VolRatio": 90,
+        }
+        for col in self.columns:
+            self.refiner_tree.heading(col, text=header_texts.get(col, col))
+            self.refiner_tree.column(col, width=col_widths.get(col, 80), anchor=tk.CENTER)
+        self.refiner_tree.tag_configure(
+            "hyperlink", foreground="#007bff", font=("TkDefaultFont", 10, "underline")
+        )
+        self.refiner_tree.bind("<Button-1>", self.on_tree_click)
+        vsb = ttk.Scrollbar(results_frame, orient="vertical", command=self.refiner_tree.yview)
+        hsb = ttk.Scrollbar(results_frame, orient="horizontal", command=self.refiner_tree.xview)
+        self.refiner_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self.refiner_tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+
+        status_frame = ttk.Frame(parent, padding=(10, 0, 10, 0))
+        status_frame.grid(row=2, column=0, sticky="ew")
+        ttk.Label(status_frame, textvariable=self.refiner_status_var, anchor=tk.W).pack(fill=tk.X)
+
     def save_filter_settings(self):
         settings = {
             'min_market_cap': self.min_cap_var.get(),
@@ -440,15 +523,16 @@ class MoneymakerProAlphaApp:
             self.status_var.set("Error loading file.")
 
     def on_tree_click(self, event):
-        if self.tree.identify_region(event.x, event.y) == "cell" and self.tree.identify_column(event.x) == "#1":
-            item_id = self.tree.identify_row(event.y)
+        tree = event.widget
+        if tree.identify_region(event.x, event.y) == "cell" and tree.identify_column(event.x) == "#1":
+            item_id = tree.identify_row(event.y)
             if item_id:
-                raw_ticker = self.tree.item(item_id, 'values')[0]
+                raw_ticker = tree.item(item_id, 'values')[0]
                 # TradingView uses a different format for some exchanges, e.g., ASX:TICKER for .AX
                 if raw_ticker.endswith(".AX"):
                     tv_symbol = f"ASX:{raw_ticker[:-3]}"
                 else:
-                    tv_symbol = raw_ticker # Works for US stocks
+                    tv_symbol = raw_ticker  # Works for US stocks
                 url = f"https://www.tradingview.com/chart/?symbol={tv_symbol}"
                 webbrowser.open_new_tab(url)
 
@@ -458,27 +542,69 @@ class MoneymakerProAlphaApp:
 
         try:
             config = {
-                'volume_multiplier': self.volume_mult_var.get(), 
-                'price_avg_weeks': self.price_avg_weeks_var.get(), 
-                'min_market_cap': self.min_cap_var.get(), 
-                'max_market_cap': self.max_cap_var.get(), 
-                'avg_volume_weeks': DEFAULT_AVG_VOLUME_WEEKS, 
+                'volume_multiplier': self.volume_mult_var.get(),
+                'price_avg_weeks': self.price_avg_weeks_var.get(),
+                'min_market_cap': self.min_cap_var.get(),
+                'max_market_cap': self.max_cap_var.get(),
+                'avg_volume_weeks': DEFAULT_AVG_VOLUME_WEEKS,
                 'lookback_weeks': self.lookback_weeks_var.get(),
                 'ma_periods': {"short": self.ma_short_var.get(), "intermediate": self.ma_intermediate_var.get(), "medium": self.ma_medium_var.get(), "long": self.ma_long_var.get()}
             }
+            self.last_config = config
             self.run_filter_button.config(state=tk.DISABLED)
             self.status_var.set("Status: Filtering...")
             self.tree.delete(*self.tree.get_children())
+            self.filter_results = []
             while not self.results_queue.empty(): self.results_queue.get_nowait()
             while not self.progress_queue.empty(): self.progress_queue.get_nowait()
             self.filter_thread = threading.Thread(target=run_filter_thread, args=(config, self.stock_data, self.results_queue, self.progress_queue), daemon=True).start()
         except ValueError: messagebox.showerror("Input Error", "Please enter valid numbers."); self.run_filter_button.config(state=tk.NORMAL)
 
+    def load_filter_results_for_refiner(self):
+        if not self.filter_results:
+            messagebox.showwarning(
+                "No Results", "Run the filter and load results first."
+            )
+            return
+        self.refiner_candidates = [item["ticker"] for item in self.filter_results]
+        self.refiner_status_var.set(
+            f"Loaded {len(self.refiner_candidates)} tickers from Filter & Screen."
+        )
+
+    def start_refiner(self):
+        if not self.refiner_candidates:
+            messagebox.showwarning(
+                "No Candidates", "Please load results from Filter & Screen first."
+            )
+            return
+        if not self.stock_data:
+            messagebox.showwarning("No Data", "Please load a stock data file first.")
+            return
+        self.refiner_tree.delete(*self.refiner_tree.get_children())
+        self.refined_results = []
+        while not self.refiner_results_queue.empty():
+            self.refiner_results_queue.get_nowait()
+        while not self.refiner_progress_queue.empty():
+            self.refiner_progress_queue.get_nowait()
+        self.run_refiner_button.config(state=tk.DISABLED)
+        self.refiner_status_var.set("Status: Refining...")
+        threading.Thread(
+            target=run_refiner_thread,
+            args=(
+                self.refiner_candidates,
+                self.stock_data,
+                getattr(self, "last_config", {}),
+                self.refiner_results_queue,
+                self.refiner_progress_queue,
+            ),
+            daemon=True,
+        ).start()
+
     def check_queues(self):
         try:
             while True:
                 line = self.log_queue.get_nowait()
-                if line is None: 
+                if line is None:
                     self.run_fetch_button.config(state=tk.NORMAL)
                     self.load_data(self.output_file_var.get(), silent=True)
                     self.notebook.select(self.filter_tab)
@@ -494,7 +620,21 @@ class MoneymakerProAlphaApp:
         except queue.Empty: pass
 
         try:
+            while True:
+                message = self.refiner_progress_queue.get_nowait()
+                if message == "DONE": self.run_refiner_button.config(state=tk.NORMAL)
+                self.refiner_status_var.set(message)
+        except queue.Empty: pass
+
+        try:
             while True: self.add_result_to_treeview(self.results_queue.get_nowait())
+        except queue.Empty: pass
+
+        try:
+            while True:
+                self.add_refiner_result_to_treeview(
+                    self.refiner_results_queue.get_nowait()
+                )
         except queue.Empty: pass
 
         try:
@@ -512,6 +652,12 @@ class MoneymakerProAlphaApp:
     def add_result_to_treeview(self, item):
         values = (item['ticker'], item['date'], f"{item['close_price']:.2f}", self._format_market_cap(item.get('market_cap')), f"{item['avg_volume']:,.0f}", f"{item['volume_ratio']:.2f}x")
         self.tree.insert("", tk.END, values=values, tags=("hyperlink",))
+        self.filter_results.append(item)
+
+    def add_refiner_result_to_treeview(self, item):
+        values = (item['ticker'], item['date'], f"{item['close_price']:.2f}", self._format_market_cap(item.get('market_cap')), f"{item['avg_volume']:,.0f}", f"{item['volume_ratio']:.2f}x")
+        self.refiner_tree.insert("", tk.END, values=values, tags=("hyperlink",))
+        self.refined_results.append(item)
 
     def _format_market_cap(self, mc):
         if mc is None: return "N/A"
