@@ -58,6 +58,14 @@ def analyze_stock_from_local_data(ticker, data, config, progress_queue=None, log
             if log_queue: log_queue.put(f"  -> SKIPPED: {ticker} - No weekly data after removing incomplete week.")
             return None
 
+        latest_week = weekly_data.index[-1]
+        if (datetime.now().date() - latest_week.date()).days > 7:
+            if progress_queue:
+                progress_queue.put(f"Status: {ticker} has no recent data. Skipping.")
+            if log_queue:
+                log_queue.put(f"  -> SKIPPED: {ticker} - No recent data.")
+            return None
+
         lookback_weeks = config.get('lookback_weeks', 1)
 
         for i in range(1, lookback_weeks + 1):

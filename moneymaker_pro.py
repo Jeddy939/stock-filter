@@ -52,6 +52,12 @@ def analyze_stock_from_local_data(ticker, data, config, progress_queue=None):
             weekly_data = weekly_data.iloc[:-1]
         if weekly_data.empty: return None
 
+        latest_week = weekly_data.index[-1]
+        if (datetime.now().date() - latest_week.date()).days > 7:
+            if progress_queue:
+                progress_queue.put(f"Status: {ticker} has no recent data. Skipping.")
+            return None
+
         if len(weekly_data) < config['ma_periods']['short'] + 1: return None
         if len(weekly_data) < config['avg_volume_weeks'] + 1: return None
 
