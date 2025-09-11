@@ -101,6 +101,12 @@ def analyze_stock_from_local_data(
             if len(weekly_data.iloc[:target_week_index]) < config.get("price_avg_weeks", 1):
                 continue
             current_week_close_price = weekly_data["Close"].iloc[target_week_index]
+            if len(weekly_data) < i + 1:
+                continue
+            previous_week_close_price = weekly_data["Close"].iloc[target_week_index - 1]
+            if current_week_close_price <= previous_week_close_price:
+                continue
+
             price_avg_start_index = target_week_index - config.get("price_avg_weeks", 1)
             if not weekly_data["Close"].iloc[price_avg_start_index:target_week_index].empty:
                 if current_week_close_price <= weekly_data["Close"].iloc[price_avg_start_index:target_week_index].mean():
@@ -237,6 +243,20 @@ def validate_latest_week(
         if log_queue:
             log_queue.put(
                 f"  -> REJECTED: {ticker} - Weekly close price not higher than open."
+            )
+        return None
+
+    if len(weekly_data) < 2:
+        if log_queue:
+            log_queue.put(
+                f"  -> REJECTED: {ticker} - No preceding week to compare close price."
+            )
+        return None
+    previous_week_close = weekly_data["Close"].iloc[-2]
+    if latest_week_row["Close"] <= previous_week_close:
+        if log_queue:
+            log_queue.put(
+                f"  -> REJECTED: {ticker} - Weekly close price not higher than prior week's close."
             )
         return None
 
