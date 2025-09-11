@@ -10,12 +10,20 @@ import json
 import sv_ttk
 import subprocess
 import sys
-import os
 from io import StringIO
 
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent / "src"))
 from moneymaker.filters import analyze_stock_from_local_data
+
+# --- Helpers for subprocess path handling ---
+def _get_fetcher_path():
+    """Return the path to ``data_fetcher.py`` located beside this script."""
+    try:
+        here = Path(__file__).resolve().parent
+    except Exception:
+        here = Path('.')
+    return here / 'data_fetcher.py'
 
 # --- Default Configuration ---
 DEFAULT_DATA_FILE = "stock_data.json"
@@ -195,18 +203,31 @@ class MoneymakerProAlphaApp:
         self.run_fetch_button.config(state=tk.DISABLED)
         self.log_text.config(state='normal'); self.log_text.delete(1.0, tk.END); self.log_text.config(state='disabled')
 
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        command = [
-            sys.executable, "-u", 
-            os.path.join(script_dir, "data_fetcher.py"), 
-            self.ticker_file_var.get(), 
-            "-y", str(self.years_var.get()), 
-            "-o", self.output_file_var.get()]
-        threading.Thread(target=self.run_process, args=(command, script_dir), daemon=True).start()
+        fetcher = _get_fetcher_path()
+        if not fetcher.exists():
+            messagebox.showerror("Missing file", f"Couldn't find data_fetcher.py at:\n{fetcher}\nPut it next to this app.")
+            return
 
-    def run_process(self, command, script_dir):
+        command = [
+            sys.executable, "-u",
+            str(fetcher),
+            self.ticker_file_var.get(),
+            "-y", str(self.years_var.get()),
+            "-o", self.output_file_var.get()
+        ]
+        threading.Thread(target=self.run_process, args=(command, fetcher.parent), daemon=True).start()
+
+    def run_process(self, command, working_dir):
         try:
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW, cwd=script_dir)
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding='utf-8',
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+                cwd=str(working_dir)
+            )
             for line in iter(process.stdout.readline, ''): self.log_queue.put(line)
             process.stdout.close(); process.wait()
         except Exception as e:
