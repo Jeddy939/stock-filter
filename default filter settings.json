@@ -6,5 +6,6 @@
     "ma_short": 90,
     "ma_intermediate": 180,
     "ma_medium": 360,
-    "ma_long": 700
+    "ma_long": 700,
+    "lookback_weeks": 1
 }

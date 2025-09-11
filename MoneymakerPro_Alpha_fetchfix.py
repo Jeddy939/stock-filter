@@ -13,6 +13,10 @@ except Exception:
     sv_ttk = None
 import subprocess
 import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent / "src"))
+from moneymaker.filters import analyze_stock_from_local_data
+
 
 
 # --- Helpers for subprocess path handling ---
@@ -38,70 +42,6 @@ DEFAULT_DATA_YEARS = 15
 DEFAULT_MAX_WORKERS = 10
 
 # --- Core Filtering Logic (operates on pre-loaded data) ---
-def analyze_stock_from_local_data(ticker, data, config, progress_queue=None):
-    try:
-        info = data.get('info', {})
-        history_json = data.get('history')
-        if not info or not history_json: return None
-
-        market_cap = info.get('marketCap')
-        min_cap_m = config.get('min_market_cap', 0)
-        max_cap_m = config.get('max_market_cap', 0)
-        if market_cap is None:
-            if min_cap_m > 0: return None
-        else:
-            market_cap_in_millions = market_cap / 1_000_000
-            if min_cap_m > 0 and market_cap_in_millions < min_cap_m: return None
-            if max_cap_m > 0 and market_cap_in_millions > max_cap_m: return None
-
-        hist_daily = pd.read_json(json.dumps(history_json), orient='split')
-        if hist_daily.empty: return None
-
-        agg_functions = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
-        weekly_data = hist_daily.resample('W-MON').agg(agg_functions).dropna(subset=['Close', 'Volume'])
-        weekly_data = weekly_data[weekly_data['Volume'] > 0]
-        if weekly_data.empty: return None
-
-        # If the last entry is from the current week, drop it as it's incomplete.
-        if not weekly_data.empty and weekly_data.index[-1].isocalendar()[:2] == datetime.now().isocalendar()[:2]:
-            weekly_data = weekly_data.iloc[:-1]
-        if weekly_data.empty: return None
-
-        latest_week = weekly_data.index[-1]
-        if (datetime.now().date() - latest_week.date()).days > 7:
-            if progress_queue:
-                progress_queue.put(f"Status: {ticker} has no recent data. Skipping.")
-            return None
-
-        if len(weekly_data) < config['ma_periods']['short'] + 1: return None
-        if len(weekly_data) < config['avg_volume_weeks'] + 1: return None
-
-        avg_weekly_volume_series = weekly_data['Volume'].shift(1).rolling(window=config['avg_volume_weeks'], min_periods=int(config['avg_volume_weeks'] * 0.8)).mean()
-        current_week_volume = weekly_data['Volume'].iloc[-1]
-        target_week_start_date = weekly_data.index[-1]
-        preceding_avg_volume = avg_weekly_volume_series.get(target_week_start_date, float('nan'))
-        if pd.isna(preceding_avg_volume) or preceding_avg_volume == 0: return None
-
-        if not current_week_volume >= config['volume_multiplier'] * preceding_avg_volume: return None
-
-        if len(weekly_data) < config.get('price_avg_weeks', 1) + 1: return None
-        current_week_close_price = weekly_data['Close'].iloc[-1]
-        if current_week_close_price <= weekly_data['Close'].iloc[-1-config.get('price_avg_weeks', 1):-1].mean(): return None
-
-        price_conditions_met = True
-        for period in config['ma_periods'].values():
-            if len(weekly_data) >= period + 1:
-                ma_series = weekly_data['Close'].shift(1).rolling(window=period, min_periods=int(period * 0.8)).mean()
-                if pd.isna(ma_series.get(target_week_start_date, float('nan'))) or current_week_close_price <= ma_series.get(target_week_start_date, float('nan')):
-                    price_conditions_met = False
-                    break
-        
-        if price_conditions_met:
-            return {"ticker": ticker, "date": target_week_start_date.strftime('%Y-%m-%d'), "close_price": current_week_close_price, "market_cap": market_cap, "avg_volume": preceding_avg_volume, "volume_ratio": current_week_volume / preceding_avg_volume if preceding_avg_volume > 0 else float('inf')}
-    except Exception as e:
-        if progress_queue: progress_queue.put(f"Error processing {ticker}: {str(e)[:100]}")
-    return None
-
 def run_filter_thread(config, stock_data, results_queue, progress_queue):
     progress_queue.put("Status: Starting filter...")
     results = [res for ticker, data in stock_data.items() if (res := analyze_stock_from_local_data(ticker, data, config, progress_queue))]
