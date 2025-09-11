@@ -24,10 +24,17 @@ def main() -> None:
         default=fetcher.DEFAULT_DATA_YEARS,
         help=f"Number of years of historical data (default: {fetcher.DEFAULT_DATA_YEARS})",
     )
+    fetch_cmd.add_argument(
+        "-w",
+        "--workers",
+        type=int,
+        default=fetcher.DEFAULT_WORKERS,
+        help=f"Number of threads for downloading data (default: {fetcher.DEFAULT_WORKERS})",
+    )
 
     args = parser.parse_args()
     if args.command == "fetch":
-        fetcher.fetch_stock_data(args.ticker_file, args.output, args.years)
+        fetcher.fetch_stock_data(args.ticker_file, args.output, args.years, args.workers)
     else:
         parser.print_help()
 

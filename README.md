@@ -12,6 +12,13 @@ The package exposes a small CLI. To fetch data into `stock_data.json` run:
 python -m moneymaker fetch asx_200_tickers.txt
 ```
 
+You can control the number of threads used when downloading data with the
+`--workers` option (default is 10):
+
+```bash
+python -m moneymaker fetch asx_200_tickers.txt --workers 20
+```
+
 ## Legacy Scripts
 
 The GUI application (`moneymaker_pro_alpha.py`) now depends on the new package and shares the
