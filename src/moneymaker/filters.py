@@ -164,3 +164,80 @@ def analyze_stock_from_local_data(
         if log_queue:
             log_queue.put(f"  -> ERROR: {ticker} - {str(e)[:100]}")
     return None
+
+
+def validate_latest_week(
+    ticker: str,
+    data: Dict,
+    config: Dict,
+    progress_queue: Optional[object] = None,
+    log_queue: Optional[object] = None,
+) -> Optional[Dict]:
+    """Validate only the most recent completed week for a given ``ticker``.
+
+    This is a convenience wrapper around :func:`analyze_stock_from_local_data`
+    that forces ``lookback_weeks`` to ``1`` and then performs additional
+    validations:
+
+    * ensures the returned week corresponds to the latest *completed* week
+    * verifies the week had a positive price change (close > open)
+
+    If all checks pass, the result from
+    :func:`analyze_stock_from_local_data` is returned.  Otherwise ``None`` is
+    returned.
+    """
+
+    cfg = dict(config)
+    cfg["lookback_weeks"] = 1
+    result = analyze_stock_from_local_data(
+        ticker, data, cfg, progress_queue, log_queue
+    )
+    if not result:
+        return None
+
+    history_json = data.get("history")
+    if not history_json:
+        return None
+
+    hist_daily = pd.read_json(StringIO(json.dumps(history_json)), orient="split")
+    if hist_daily.empty:
+        return None
+
+    agg_functions = {
+        "Open": "first",
+        "High": "max",
+        "Low": "min",
+        "Close": "last",
+        "Volume": "sum",
+    }
+    weekly_data = (
+        hist_daily.resample("W-MON").agg(agg_functions).dropna(subset=["Close", "Volume"])
+    )
+    weekly_data = weekly_data[weekly_data["Volume"] > 0]
+    if weekly_data.empty:
+        return None
+
+    if datetime.now().date() < weekly_data.index[-1].date():
+        weekly_data = weekly_data.iloc[:-1]
+    if weekly_data.empty:
+        return None
+
+    latest_week_start = weekly_data.index[-1]
+
+    # Reject if the analysis result is not for the most recent completed week
+    if result["date"] != latest_week_start.strftime("%Y-%m-%d"):
+        if log_queue:
+            log_queue.put(
+                f"  -> REJECTED: {ticker} - Result is not from the latest completed week."
+            )
+        return None
+
+    latest_week_row = weekly_data.loc[latest_week_start]
+    if latest_week_row["Close"] <= latest_week_row["Open"]:
+        if log_queue:
+            log_queue.put(
+                f"  -> REJECTED: {ticker} - Weekly close price not higher than open."
+            )
+        return None
+
+    return result
