@@ -528,12 +528,9 @@ class MoneymakerProAlphaApp:
             item_id = tree.identify_row(event.y)
             if item_id:
                 raw_ticker = tree.item(item_id, 'values')[0]
-                # TradingView uses a different format for some exchanges, e.g., ASX:TICKER for .AX
-                if raw_ticker.endswith(".AX"):
-                    tv_symbol = f"ASX:{raw_ticker[:-3]}"
-                else:
-                    tv_symbol = raw_ticker  # Works for US stocks
-                url = f"https://www.tradingview.com/chart/?symbol={tv_symbol}"
+                # Yahoo Finance supports the standard ticker symbols including the .AX suffix
+                yf_symbol = raw_ticker
+                url = f"https://finance.yahoo.com/quote/{yf_symbol}/chart?p={yf_symbol}"
                 webbrowser.open_new_tab(url)
 
     def start_filter(self):
