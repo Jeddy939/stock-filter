@@ -69,17 +69,33 @@ def analyze_stock_from_local_data(
             return None
 
         lookback_weeks = config.get("lookback_weeks", 1)
+        ma_periods = {
+            name: int(period)
+            for name, period in (config.get("ma_periods") or {}).items()
+            if period and int(period) > 0
+        }
+
         for i in range(1, lookback_weeks + 1):
             if len(weekly_data) < i:
                 break
             target_week_index = -i
-            if len(weekly_data.iloc[:target_week_index]) < config["ma_periods"]["short"] + 1:
+            pre_target_slice = weekly_data.iloc[:target_week_index]
+            available_weeks = len(pre_target_slice)
+
+            missing_ma_periods = [
+                (name, period) for name, period in ma_periods.items() if available_weeks < period
+            ]
+            if missing_ma_periods:
                 if log_queue and i == 1:
+                    formatted_periods = ", ".join(
+                        f"{name} ({period} weeks)" for name, period in missing_ma_periods
+                    )
                     log_queue.put(
-                        f"  -> SKIPPED: {ticker} - Too young for shortest MA ({config['ma_periods']['short']} weeks)."
+                        f"  -> SKIPPED: {ticker} - Not enough data for moving averages: {formatted_periods}."
                     )
                 continue
-            if len(weekly_data.iloc[:target_week_index]) < config["avg_volume_weeks"] + 1:
+
+            if available_weeks < config["avg_volume_weeks"] + 1:
                 if log_queue and i == 1:
                     log_queue.put(
                         f"  -> SKIPPED: {ticker} - Not enough data for volume average ({config['avg_volume_weeks']} weeks)."
@@ -98,7 +114,7 @@ def analyze_stock_from_local_data(
             if not current_week_volume >= config["volume_multiplier"] * preceding_avg_volume:
                 continue
 
-            if len(weekly_data.iloc[:target_week_index]) < config.get("price_avg_weeks", 1):
+            if available_weeks < config.get("price_avg_weeks", 1):
                 continue
             current_week_close_price = weekly_data["Close"].iloc[target_week_index]
             if len(weekly_data) < i + 1:
@@ -115,15 +131,14 @@ def analyze_stock_from_local_data(
                 continue
 
             price_conditions_met = True
-            for ma_name, period in config["ma_periods"].items():
-                if len(weekly_data.iloc[:target_week_index]) >= period:
-                    ma_series = weekly_data["Close"].shift(1).rolling(
-                        window=period, min_periods=int(period * 0.8)
-                    ).mean()
-                    ma_value = ma_series.get(target_week_start_date, float("nan"))
-                    if pd.isna(ma_value) or current_week_close_price <= ma_value:
-                        price_conditions_met = False
-                        break
+            for ma_name, period in ma_periods.items():
+                ma_series = weekly_data["Close"].shift(1).rolling(
+                    window=period, min_periods=int(period * 0.8)
+                ).mean()
+                ma_value = ma_series.get(target_week_start_date, float("nan"))
+                if pd.isna(ma_value) or current_week_close_price <= ma_value:
+                    price_conditions_met = False
+                    break
 
             if price_conditions_met:
                 if market_cap is None:
