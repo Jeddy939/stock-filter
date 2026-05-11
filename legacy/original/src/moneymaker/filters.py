@@ -2,76 +2,11 @@
 
 
 from datetime import datetime
+from io import StringIO
 from typing import Dict, Optional
 
+import json
 import pandas as pd
-
-_WEEKLY_AGGREGATIONS = {
-    "Open": "first",
-    "High": "max",
-    "Low": "min",
-    "Close": "last",
-    "Volume": "sum",
-}
-
-
-def _history_index_to_datetime(index_values) -> pd.DatetimeIndex:
-    """Parse split-orient JSON indexes without the overhead of read_json."""
-
-    values = list(index_values or [])
-    if not values:
-        return pd.DatetimeIndex([])
-
-    first_value = next((value for value in values if value is not None), None)
-    if isinstance(first_value, (int, float)):
-        return pd.to_datetime(values, unit="ms")
-    return pd.to_datetime(values)
-
-
-def _daily_frame_from_history(history_json: Dict) -> pd.DataFrame:
-    """Convert the saved split-orient history payload back into a DataFrame."""
-
-    if not isinstance(history_json, dict):
-        return pd.DataFrame()
-
-    columns = history_json.get("columns")
-    rows = history_json.get("data")
-    index_values = history_json.get("index")
-    if columns is None or rows is None or index_values is None:
-        return pd.DataFrame()
-
-    frame = pd.DataFrame(rows, columns=columns)
-    frame.index = _history_index_to_datetime(index_values)
-    if frame.empty:
-        return frame
-
-    frame = frame.sort_index()
-    for column in _WEEKLY_AGGREGATIONS:
-        if column not in frame.columns:
-            return pd.DataFrame()
-        frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    return frame
-
-
-def _weekly_data_from_history(history_json: Dict) -> pd.DataFrame:
-    """Build completed weekly OHLCV bars from saved daily history."""
-
-    hist_daily = _daily_frame_from_history(history_json)
-    if hist_daily.empty:
-        return pd.DataFrame()
-
-    weekly_data = (
-        hist_daily.resample("W-MON")
-        .agg(_WEEKLY_AGGREGATIONS)
-        .dropna(subset=["Close", "Volume"])
-    )
-    weekly_data = weekly_data[weekly_data["Volume"] > 0]
-    if weekly_data.empty:
-        return weekly_data
-
-    if datetime.now().date() < weekly_data.index[-1].date():
-        weekly_data = weekly_data.iloc[:-1]
-    return weekly_data
 
 
 def analyze_stock_from_local_data(
@@ -98,10 +33,31 @@ def analyze_stock_from_local_data(
         min_cap_m = config.get("min_market_cap", 0)
         max_cap_m = config.get("max_market_cap", 0)
 
-        weekly_data = _weekly_data_from_history(history_json)
+        hist_daily = pd.read_json(StringIO(json.dumps(history_json)), orient="split")
+        if hist_daily.empty:
+            if log_queue:
+                log_queue.put(f"  -> SKIPPED: {ticker} - No historical data after processing.")
+            return None
+
+        agg_functions = {
+            "Open": "first",
+            "High": "max",
+            "Low": "min",
+            "Close": "last",
+            "Volume": "sum",
+        }
+        weekly_data = hist_daily.resample("W-MON").agg(agg_functions).dropna(subset=["Close", "Volume"])
+        weekly_data = weekly_data[weekly_data["Volume"] > 0]
         if weekly_data.empty:
             if log_queue:
                 log_queue.put(f"  -> SKIPPED: {ticker} - No valid weekly data.")
+            return None
+
+        if datetime.now().date() < weekly_data.index[-1].date():
+            weekly_data = weekly_data.iloc[:-1]
+        if weekly_data.empty:
+            if log_queue:
+                log_queue.put(f"  -> SKIPPED: {ticker} - No weekly data after removing incomplete week.")
             return None
 
         latest_week = weekly_data.index[-1]
@@ -117,22 +73,6 @@ def analyze_stock_from_local_data(
             name: int(period)
             for name, period in (config.get("ma_periods") or {}).items()
             if period and int(period) > 0
-        }
-        avg_volume_weeks = max(1, int(config["avg_volume_weeks"]))
-        price_avg_weeks = max(1, int(config.get("price_avg_weeks", 1)))
-        avg_weekly_volume_series = weekly_data["Volume"].shift(1).rolling(
-            window=avg_volume_weeks,
-            min_periods=int(avg_volume_weeks * 0.8),
-        ).mean()
-        price_avg_series = weekly_data["Close"].shift(1).rolling(
-            window=price_avg_weeks,
-            min_periods=price_avg_weeks,
-        ).mean()
-        ma_series_by_name = {
-            name: weekly_data["Close"].shift(1).rolling(
-                window=period, min_periods=int(period * 0.8)
-            ).mean()
-            for name, period in ma_periods.items()
         }
 
         for i in range(1, lookback_weeks + 1):
@@ -155,13 +95,17 @@ def analyze_stock_from_local_data(
                     )
                 continue
 
-            if available_weeks < avg_volume_weeks + 1:
+            if available_weeks < config["avg_volume_weeks"] + 1:
                 if log_queue and i == 1:
                     log_queue.put(
-                        f"  -> SKIPPED: {ticker} - Not enough data for volume average ({avg_volume_weeks} weeks)."
+                        f"  -> SKIPPED: {ticker} - Not enough data for volume average ({config['avg_volume_weeks']} weeks)."
                     )
                 continue
 
+            avg_weekly_volume_series = weekly_data["Volume"].shift(1).rolling(
+                window=config["avg_volume_weeks"],
+                min_periods=int(config["avg_volume_weeks"] * 0.8),
+            ).mean()
             current_week_volume = weekly_data["Volume"].iloc[target_week_index]
             target_week_start_date = weekly_data.index[target_week_index]
             preceding_avg_volume = avg_weekly_volume_series.get(target_week_start_date, float("nan"))
@@ -170,7 +114,7 @@ def analyze_stock_from_local_data(
             if not current_week_volume >= config["volume_multiplier"] * preceding_avg_volume:
                 continue
 
-            if available_weeks < price_avg_weeks:
+            if available_weeks < config.get("price_avg_weeks", 1):
                 continue
             current_week_close_price = weekly_data["Close"].iloc[target_week_index]
             if len(weekly_data) < i + 1:
@@ -179,13 +123,19 @@ def analyze_stock_from_local_data(
             if current_week_close_price <= previous_week_close_price:
                 continue
 
-            price_avg_value = price_avg_series.get(target_week_start_date, float("nan"))
-            if pd.isna(price_avg_value) or current_week_close_price <= price_avg_value:
+            price_avg_start_index = target_week_index - config.get("price_avg_weeks", 1)
+            if not weekly_data["Close"].iloc[price_avg_start_index:target_week_index].empty:
+                if current_week_close_price <= weekly_data["Close"].iloc[price_avg_start_index:target_week_index].mean():
+                    continue
+            else:
                 continue
 
             price_conditions_met = True
             for ma_name, period in ma_periods.items():
-                ma_value = ma_series_by_name[ma_name].get(target_week_start_date, float("nan"))
+                ma_series = weekly_data["Close"].shift(1).rolling(
+                    window=period, min_periods=int(period * 0.8)
+                ).mean()
+                ma_value = ma_series.get(target_week_start_date, float("nan"))
                 if pd.isna(ma_value) or current_week_close_price <= ma_value:
                     price_conditions_met = False
                     break
@@ -270,7 +220,26 @@ def validate_latest_week(
     if not history_json:
         return None
 
-    weekly_data = _weekly_data_from_history(history_json)
+    hist_daily = pd.read_json(StringIO(json.dumps(history_json)), orient="split")
+    if hist_daily.empty:
+        return None
+
+    agg_functions = {
+        "Open": "first",
+        "High": "max",
+        "Low": "min",
+        "Close": "last",
+        "Volume": "sum",
+    }
+    weekly_data = (
+        hist_daily.resample("W-MON").agg(agg_functions).dropna(subset=["Close", "Volume"])
+    )
+    weekly_data = weekly_data[weekly_data["Volume"] > 0]
+    if weekly_data.empty:
+        return None
+
+    if datetime.now().date() < weekly_data.index[-1].date():
+        weekly_data = weekly_data.iloc[:-1]
     if weekly_data.empty:
         return None
 

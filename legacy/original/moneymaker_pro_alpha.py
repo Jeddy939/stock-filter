@@ -1,7 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
+import yfinance as yf
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import threading
 import queue
 import webbrowser
@@ -9,6 +10,7 @@ import json
 import sv_ttk
 import subprocess
 import sys
+from io import StringIO
 
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent / "src"))
@@ -172,19 +174,15 @@ class MoneymakerProAlphaApp:
             try:
                 url = 'https://en.wikipedia.org/wiki/S%26P/ASX_All_Ordinaries'
                 tables = pd.read_html(url)
-                df = None
+                # Usually the first table is the one we want
+                df = tables[0]
+                
+                # Find the column with the tickers. It's often named 'Code' or 'ASX code'.
+                # Let's be flexible.
                 ticker_col = None
-
-                # Pick the largest table with a code/ticker column. Wikipedia table
-                # order changes, so table[0] is not reliable enough for data extraction.
-                for table in sorted(tables, key=len, reverse=True):
-                    for col in table.columns:
-                        col_name = str(col).lower()
-                        if 'code' in col_name or 'ticker' in col_name:
-                            df = table
-                            ticker_col = col
-                            break
-                    if ticker_col is not None:
+                for col in df.columns:
+                    if 'code' in col.lower():
+                        ticker_col = col
                         break
                 
                 if ticker_col is None:
@@ -193,14 +191,8 @@ class MoneymakerProAlphaApp:
 
                 tickers = df[ticker_col].tolist()
                 
-                cleaned_tickers = []
-                seen = set()
-                for ticker in tickers:
-                    ticker = str(ticker).strip().upper().replace("ASX:", "")
-                    ticker = ticker.split("[", 1)[0].strip()
-                    if ticker and ticker != "NAN" and ticker not in seen:
-                        seen.add(ticker)
-                        cleaned_tickers.append(ticker)
+                # Clean up tickers (remove any extra text if necessary)
+                cleaned_tickers = [str(t).strip().upper() for t in tickers]
                 
                 filename = f"all_ords_tickers_Current_{datetime.now().strftime('%Y-%m-%d')}.txt"
                 with open(filename, 'w', encoding='utf-8') as f:
@@ -466,7 +458,6 @@ class MoneymakerProAlphaApp:
             'ma_intermediate': self.ma_intermediate_var.get(),
             'ma_medium': self.ma_medium_var.get(),
             'ma_long': self.ma_long_var.get(),
-            'lookback_weeks': self.lookback_weeks_var.get(),
         }
         filename = filedialog.asksaveasfilename(
             title="Save Filter Settings",
@@ -563,8 +554,7 @@ class MoneymakerProAlphaApp:
             self.filter_results = []
             while not self.results_queue.empty(): self.results_queue.get_nowait()
             while not self.progress_queue.empty(): self.progress_queue.get_nowait()
-            self.filter_thread = threading.Thread(target=run_filter_thread, args=(config, self.stock_data, self.results_queue, self.progress_queue), daemon=True)
-            self.filter_thread.start()
+            self.filter_thread = threading.Thread(target=run_filter_thread, args=(config, self.stock_data, self.results_queue, self.progress_queue), daemon=True).start()
         except ValueError: messagebox.showerror("Input Error", "Please enter valid numbers."); self.run_filter_button.config(state=tk.NORMAL)
 
     def load_filter_results_for_refiner(self):

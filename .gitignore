@@ -1,1 +1,10 @@
 stock_data.json
+stock_data_*.json
+stock_cache.sqlite
+stock_cache.sqlite-shm
+stock_cache.sqlite-wal
+__pycache__/
+*.py[cod]
+rate_limit_calibration*.json
+rate_limit_calibration*.sqlite*
+yfinance_rate_limit_measurement*.json
