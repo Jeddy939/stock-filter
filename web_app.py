@@ -444,7 +444,13 @@ def _chart_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
             ).fetchone()
             ticker = row["ticker"] if row else ""
         if not ticker:
-            return {"ok": True, "ticker": "", "candles": [], "interval": interval, "range": range_key}
+            return {"ok": True, "ticker": "", "company": {}, "candles": [], "interval": interval, "range": range_key}
+
+        info_row = conn.execute(
+            "SELECT info_json FROM company_info WHERE ticker = ?",
+            (ticker,),
+        ).fetchone()
+        company_profile = _company_profile_payload(info_row["info_json"] if info_row else "")
 
         rows = conn.execute(
             """
@@ -460,6 +466,7 @@ def _chart_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
         return {
             "ok": True,
             "ticker": ticker,
+            "company": company_profile,
             "candles": [],
             "interval": interval,
             "range": range_key,
@@ -506,6 +513,7 @@ def _chart_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
         "ok": True,
         "ticker": ticker,
         "provider": provider,
+        "company": company_profile,
         "interval": interval,
         "range": range_key,
         "candles": data,
@@ -514,6 +522,33 @@ def _chart_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
         "start": data[0]["date"] if data else None,
         "end": data[-1]["date"] if data else None,
     }
+
+
+def _company_profile_payload(raw_info: str) -> Dict[str, Any]:
+    """Return a compact company profile for the chart header."""
+
+    if not raw_info:
+        return {}
+    try:
+        info = json.loads(raw_info)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(info, dict):
+        return {}
+
+    summary = str(info.get("longBusinessSummary") or "").strip()
+    if len(summary) > 620:
+        summary = summary[:617].rsplit(" ", 1)[0].rstrip(".,;:") + "..."
+
+    profile = {
+        "name": info.get("longName") or info.get("shortName"),
+        "sector": info.get("sector"),
+        "industry": info.get("industry"),
+        "country": info.get("country"),
+        "website": info.get("website"),
+        "summary": summary,
+    }
+    return {key: value for key, value in profile.items() if value}
 
 
 def _parse_ma_periods(raw_periods: str) -> List[int]:
@@ -1285,6 +1320,36 @@ INDEX_HTML = r"""<!doctype html>
       border-radius: 50%;
       display: inline-block;
     }
+    .company-profile {
+      margin: 0 0 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #101715;
+    }
+    .company-profile.empty {
+      color: var(--muted);
+    }
+    .company-profile h3 {
+      margin: 0 0 4px;
+      font-size: 15px;
+      font-weight: 650;
+    }
+    .company-profile .company-meta {
+      margin: 0 0 7px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .company-profile p {
+      margin: 0;
+      color: #d6e0da;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .company-profile a {
+      color: var(--accent-2);
+      text-decoration: none;
+    }
     #priceChart {
       display: block;
       width: 100%;
@@ -1620,6 +1685,9 @@ INDEX_HTML = r"""<!doctype html>
           <label class="ma-toggle"><input class="ma-check" type="checkbox" value="360"><span class="ma-dot" style="background:#ff9f7a"></span>MA 360</label>
           <label class="ma-toggle"><input class="ma-check" type="checkbox" value="700"><span class="ma-dot" style="background:#d9e672"></span>MA 700</label>
         </div>
+        <div class="company-profile empty" id="companyProfile">
+          <p>Load a cached ticker to show the company description.</p>
+        </div>
         <div class="chart-box">
           <canvas id="priceChart"></canvas>
         </div>
@@ -1697,6 +1765,44 @@ INDEX_HTML = r"""<!doctype html>
       if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
       if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
       return fmt.format(Math.round(value));
+    }
+
+    function renderCompanyProfile(company, ticker) {
+      const box = $("companyProfile");
+      box.replaceChildren();
+      if (!company || (!company.summary && !company.name && !company.sector && !company.industry)) {
+        box.className = "company-profile empty";
+        const p = document.createElement("p");
+        p.textContent = `${ticker || "Ticker"}: no cached company description yet. Run a fetch with company info enabled to fill this in.`;
+        box.appendChild(p);
+        return;
+      }
+
+      box.className = "company-profile";
+      const heading = document.createElement("h3");
+      heading.textContent = company.name || ticker;
+      box.appendChild(heading);
+
+      const metaParts = [company.sector, company.industry, company.country].filter(Boolean);
+      if (metaParts.length || company.website) {
+        const meta = document.createElement("div");
+        meta.className = "company-meta";
+        meta.appendChild(document.createTextNode(metaParts.join(" / ")));
+        if (company.website) {
+          if (metaParts.length) meta.appendChild(document.createTextNode(" / "));
+          const link = document.createElement("a");
+          link.href = company.website;
+          link.target = "_blank";
+          link.rel = "noreferrer";
+          link.textContent = "Website";
+          meta.appendChild(link);
+        }
+        box.appendChild(meta);
+      }
+
+      const summary = document.createElement("p");
+      summary.textContent = company.summary || "No business summary was included in the cached company info.";
+      box.appendChild(summary);
     }
 
     function priceLabel(value) {
@@ -1789,11 +1895,13 @@ INDEX_HTML = r"""<!doctype html>
       });
       try {
         const payload = await api(`/api/chart?${params.toString()}`);
+        renderCompanyProfile(payload.company || {}, payload.ticker || selectedTicker);
         drawCandles(payload.candles || [], payload.ticker, payload.moving_averages || {});
         $("chartStatus").textContent = payload.count
           ? `${payload.ticker} ${payload.interval} candles, ${payload.start} to ${payload.end}`
           : `${payload.ticker || selectedTicker}: no cached candles`;
       } catch (error) {
+        renderCompanyProfile({}, selectedTicker);
         $("chartStatus").textContent = error.message;
         $("chartStatus").className = "status-line bad";
       }
