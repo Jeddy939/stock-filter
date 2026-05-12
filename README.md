@@ -73,6 +73,15 @@ historical data.
 
 ## Browser UI
 
+On Windows, double-click:
+
+```text
+START_MONEYMAKER.bat
+```
+
+The launcher opens the browser UI and starts the local server. Leave the command
+window open while using the app.
+
 Run the local browser UI from the repository root:
 
 ```bash
