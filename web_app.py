@@ -1350,6 +1350,10 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--accent-2);
       text-decoration: none;
     }
+    .company-profile.focused {
+      border-color: var(--accent-2);
+      box-shadow: 0 0 0 2px rgba(103, 177, 142, .18);
+    }
     #priceChart {
       display: block;
       width: 100%;
@@ -1646,7 +1650,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="metric"><span>Latest bar</span><strong id="metricLatest">-</strong></div>
         <div class="metric"><span>Matches</span><strong id="metricMatches">0</strong></div>
       </div>
-      <div class="panel">
+      <div class="panel" id="chartPanel">
         <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
           <h2 style="margin:0">Chart</h2>
           <span class="status-line" id="chartStatus">Select a cached ticker</span>
@@ -1876,15 +1880,23 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    async function loadChart(ticker = null) {
+    function focusChartPanel() {
+      $("chartPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+      $("companyProfile").classList.add("focused");
+      window.setTimeout(() => $("companyProfile").classList.remove("focused"), 1600);
+    }
+
+    async function loadChart(ticker = null, focusChart = false) {
       if (ticker) $("chartTicker").value = ticker;
       const selectedTicker = $("chartTicker").value.trim().toUpperCase();
       if (!selectedTicker) {
         $("chartStatus").textContent = "Enter a ticker";
+        if (focusChart) focusChartPanel();
         return;
       }
       $("chartTicker").value = selectedTicker;
       $("chartStatus").textContent = "Loading candles...";
+      $("chartStatus").className = "status-line";
       const params = new URLSearchParams({
         cache_file: $("cacheFile").value.trim() || "stock_cache.sqlite",
         provider: $("provider").value,
@@ -1904,6 +1916,8 @@ INDEX_HTML = r"""<!doctype html>
         renderCompanyProfile({}, selectedTicker);
         $("chartStatus").textContent = error.message;
         $("chartStatus").className = "status-line bad";
+      } finally {
+        if (focusChart) focusChartPanel();
       }
     }
 
@@ -2282,7 +2296,7 @@ INDEX_HTML = r"""<!doctype html>
       body.querySelectorAll(".chart-link").forEach((link) => {
         link.addEventListener("click", (event) => {
           event.preventDefault();
-          loadChart(link.dataset.ticker);
+          loadChart(link.dataset.ticker, true);
         });
       });
       body.querySelectorAll(".label-btn").forEach((button) => {
