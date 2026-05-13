@@ -461,7 +461,7 @@ def _chart_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
             "ok": True,
             "ticker": ticker,
             "provider": provider,
-            "company": {},
+            "company": _company_profile_payload("", ticker),
             "interval": interval,
             "range": range_key,
             "candles": [],
@@ -486,7 +486,7 @@ def _chart_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
             "SELECT info_json FROM company_info WHERE ticker = ?",
             (ticker,),
         ).fetchone()
-        company_profile = _company_profile_payload(info_row["info_json"] if info_row else "")
+        company_profile = _company_profile_payload(info_row["info_json"] if info_row else "", ticker)
 
         rows = conn.execute(
             """
@@ -560,28 +560,36 @@ def _chart_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
     }
 
 
-def _company_profile_payload(raw_info: str) -> Dict[str, Any]:
+def _company_profile_payload(raw_info: str, ticker: str = "") -> Dict[str, Any]:
     """Return a compact company profile for the chart header."""
 
+    yahoo_ticker = str(ticker or "").strip().upper()
+    base_profile = (
+        {"yahoo_url": f"https://finance.yahoo.com/quote/{yahoo_ticker}"}
+        if yahoo_ticker
+        else {}
+    )
     if not raw_info:
-        return {}
+        return base_profile
     try:
         info = json.loads(raw_info)
     except (TypeError, json.JSONDecodeError):
-        return {}
+        return base_profile
     if not isinstance(info, dict):
-        return {}
+        return base_profile
 
     summary = str(info.get("longBusinessSummary") or "").strip()
     if len(summary) > 620:
         summary = summary[:617].rsplit(" ", 1)[0].rstrip(".,;:") + "..."
 
+    yahoo_ticker = yahoo_ticker or str(info.get("symbol") or "").strip().upper()
     profile = {
         "name": info.get("longName") or info.get("shortName"),
         "sector": info.get("sector"),
         "industry": info.get("industry"),
         "country": info.get("country"),
         "website": info.get("website"),
+        "yahoo_url": f"https://finance.yahoo.com/quote/{yahoo_ticker}" if yahoo_ticker else None,
         "summary": summary,
     }
     return {key: value for key, value in profile.items() if value}
@@ -1872,6 +1880,17 @@ INDEX_HTML = r"""<!doctype html>
         const p = document.createElement("p");
         p.textContent = `${ticker || "Ticker"}: no cached company description yet. Run a fetch with company info enabled to fill this in.`;
         box.appendChild(p);
+        if (company && company.yahoo_url) {
+          const meta = document.createElement("div");
+          meta.className = "company-meta";
+          const yahoo = document.createElement("a");
+          yahoo.href = company.yahoo_url;
+          yahoo.target = "_blank";
+          yahoo.rel = "noreferrer";
+          yahoo.textContent = "Yahoo Finance";
+          meta.appendChild(yahoo);
+          box.appendChild(meta);
+        }
         return;
       }
 
@@ -1881,7 +1900,7 @@ INDEX_HTML = r"""<!doctype html>
       box.appendChild(heading);
 
       const metaParts = [company.sector, company.industry, company.country].filter(Boolean);
-      if (metaParts.length || company.website) {
+      if (metaParts.length || company.website || company.yahoo_url) {
         const meta = document.createElement("div");
         meta.className = "company-meta";
         meta.appendChild(document.createTextNode(metaParts.join(" / ")));
@@ -1893,6 +1912,15 @@ INDEX_HTML = r"""<!doctype html>
           link.rel = "noreferrer";
           link.textContent = "Website";
           meta.appendChild(link);
+        }
+        if (company.yahoo_url) {
+          if (metaParts.length || company.website) meta.appendChild(document.createTextNode(" / "));
+          const yahoo = document.createElement("a");
+          yahoo.href = company.yahoo_url;
+          yahoo.target = "_blank";
+          yahoo.rel = "noreferrer";
+          yahoo.textContent = "Yahoo Finance";
+          meta.appendChild(yahoo);
         }
         box.appendChild(meta);
       }
