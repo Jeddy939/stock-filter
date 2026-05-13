@@ -114,9 +114,11 @@ Trader symbol directories. The same command is available from the CLI:
 python -m moneymaker us-tickers -o us_tickers_nasdaqtrader.txt
 ```
 
-US mode uses yfinance by default and keeps its own cache. Stooq remains available
-as an optional provider, but recent live checks showed Stooq's CSV endpoint can
-ask for an API key, so it is not used as the default no-key US path.
+US mode uses yfinance by default and keeps its own cache. The browser UI writes
+to SQLite only and skips the legacy JSON export, which avoids multi-GB JSON
+files at the end of large US fetches. Stooq remains available as an optional
+provider, but recent live checks showed Stooq's CSV endpoint can ask for an API
+key, so it is not used as the default no-key US path.
 
 The fetch panel lists local `.txt` ticker files from the repository root. If
 you enable the cleaned ticker file option, a fetch will create a new

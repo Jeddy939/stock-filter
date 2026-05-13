@@ -61,6 +61,11 @@ def main() -> None:
         help="Disable SQLite caching and fetch the requested data directly",
     )
     fetch_cmd.add_argument(
+        "--no-json-export",
+        action="store_true",
+        help="Update SQLite cache without writing the legacy JSON export.",
+    )
+    fetch_cmd.add_argument(
         "--info-refresh-days",
         type=int,
         default=fetcher.DEFAULT_INFO_REFRESH_DAYS,
@@ -121,6 +126,7 @@ def main() -> None:
             args.rate_limit_pause_seconds,
             args.max_rate_limit_retries,
             args.stop_on_rate_limit,
+            not args.no_json_export,
         )
         if not success:
             raise SystemExit(1)

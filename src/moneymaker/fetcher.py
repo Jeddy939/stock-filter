@@ -1242,6 +1242,7 @@ def fetch_stock_data(
     rate_limit_pause_seconds: float = DEFAULT_RATE_LIMIT_PAUSE_SECONDS,
     max_rate_limit_retries: int = DEFAULT_RATE_LIMIT_RETRIES,
     stop_on_rate_limit: bool = DEFAULT_STOP_ON_RATE_LIMIT,
+    export_json: bool = True,
 ) -> bool:
     """Fetches historical and info data for tickers and saves to ``output``.
 
@@ -1271,6 +1272,9 @@ def fetch_stock_data(
     prune_missing_tickers:
         Create a new ticker file without attempted missing-history tickers.
         The source ticker file is left unchanged.
+    export_json:
+        Write the legacy JSON export. The browser UI reads SQLite directly and
+        can disable this to avoid multi-GB end-of-fetch exports.
     """
     provider = normalize_provider(provider)
     print("--- Starting Data Fetcher (Concurrent Mode) ---")
@@ -1279,6 +1283,7 @@ def fetch_stock_data(
     print(f"Data Years: {years}")
     print(f"Provider: {provider}")
     print(f"Cache File: {cache_file if cache_file else 'disabled'}")
+    print(f"JSON Export: {'enabled' if export_json else 'disabled'}")
     print(
         "Rate limit settings: "
         f"history_chunk_size={history_chunk_size}, "
@@ -1361,7 +1366,12 @@ def fetch_stock_data(
         ticker for ticker, info in all_info_data.items() if ticker in tickers and info.get("marketCap") is None
     )
 
-    _emit_progress(progress_callback, "Combining", 0, total_tickers, "Combining history and company info.")
+    combine_message = (
+        "Counting usable cached histories."
+        if not export_json
+        else "Combining history and company info."
+    )
+    _emit_progress(progress_callback, "Combining", 0, total_tickers, combine_message)
     for processed_count, ticker in enumerate(tqdm(tickers, desc="Processing Tickers"), 1):
         info = all_info_data.get(ticker)
         hist_single = hist_data.get(ticker)
@@ -1375,18 +1385,23 @@ def fetch_stock_data(
                 f"Skipped {processed_count}/{total_tickers}: {ticker} has no history.",
             )
             continue
-        hist_json = json.loads(hist_single.to_json(orient="split", date_format="iso"))
-        all_stock_data[ticker] = {"info": info if info else {}, "history": hist_json}
+        if export_json:
+            hist_json = json.loads(hist_single.to_json(orient="split", date_format="iso"))
+            all_stock_data[ticker] = {"info": info if info else {}, "history": hist_json}
         _emit_progress(
             progress_callback,
             "Combining",
             processed_count,
             total_tickers,
-            f"Combined {processed_count}/{total_tickers}: {ticker}",
+            (
+                f"Combined {processed_count}/{total_tickers}: {ticker}"
+                if export_json
+                else f"Counted {processed_count}/{total_tickers}: {ticker}"
+            ),
         )
 
     print("\n--- Fetch Complete ---")
-    successful_fetches = len(all_stock_data)
+    successful_fetches = len(hist_data) if not export_json else len(all_stock_data)
     successful_histories = sorted(hist_data.keys())
     missing_histories = sorted(set(tickers) - set(hist_data.keys()))
     cleaned_ticker_file = None
@@ -1416,8 +1431,16 @@ def fetch_stock_data(
             if successful_fetches > 0
             else "No historical data was fetched for any requested ticker.",
             "provider": provider,
-            "storage": "sqlite-cache-plus-json-export" if cache_file else "json-export",
+            "storage": (
+                "sqlite-cache"
+                if cache_file and not export_json
+                else "sqlite-cache-plus-json-export"
+                if cache_file
+                else "json-export"
+            ),
             "cache_file": cache_file,
+            "json_exported": export_json,
+            "json_output": output if export_json else None,
             "requested_tickers": tickers,
             "requested_ticker_count": total_tickers,
             "source_ticker_count": total_requested_tickers,
@@ -1446,16 +1469,25 @@ def fetch_stock_data(
         "stocks": all_stock_data,
     }
 
-    with open(output, "w", encoding="utf-8") as f:
-        json.dump(output_data, f, indent=2)
+    if export_json:
+        _emit_progress(progress_callback, "JSON export", 0, 1, f"Writing JSON export to {output}.")
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(output_data, f, indent=2)
+        _emit_progress(progress_callback, "JSON export", 1, 1, f"JSON export written to {output}.")
     end_time = time.time()
     if total_tickers > 0 and successful_fetches == 0:
-        print(f"Diagnostic data saved to {output}")
+        if export_json:
+            print(f"Diagnostic data saved to {output}")
+        else:
+            print("Diagnostic JSON export skipped.")
         print(f"Total execution time: {end_time - start_time:.2f} seconds.")
         print("ERROR: No historical data was fetched for any requested ticker.")
         _emit_progress(progress_callback, "Failed", 0, total_tickers, "No historical data was fetched.")
         return False
-    print(f"Data successfully saved to {output}")
+    if export_json:
+        print(f"Data successfully saved to {output}")
+    else:
+        print("SQLite cache updated. JSON export skipped.")
     print(f"Total execution time: {end_time - start_time:.2f} seconds.")
     _emit_progress(
         progress_callback,
@@ -1521,6 +1553,11 @@ def cli() -> None:
         "--no-cache",
         action="store_true",
         help="Disable SQLite caching and fetch the requested data directly.",
+    )
+    fetch_cmd.add_argument(
+        "--no-json-export",
+        action="store_true",
+        help="Update SQLite cache without writing the legacy JSON export.",
     )
     fetch_cmd.add_argument(
         "--info-refresh-days",
@@ -1607,6 +1644,7 @@ def cli() -> None:
         args.rate_limit_pause_seconds,
         args.max_rate_limit_retries,
         args.stop_on_rate_limit,
+        not args.no_json_export,
     )
     if not success:
         raise SystemExit(1)

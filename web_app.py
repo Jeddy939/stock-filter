@@ -933,6 +933,7 @@ def _fetch_worker(payload: Dict[str, Any]) -> None:
         rate_limit_pause_seconds = float(payload.get("rate_limit_pause_seconds") or fetcher.DEFAULT_RATE_LIMIT_PAUSE_SECONDS)
         max_rate_limit_retries = int(payload.get("max_rate_limit_retries") or fetcher.DEFAULT_RATE_LIMIT_RETRIES)
         stop_on_rate_limit = bool(payload.get("stop_on_rate_limit"))
+        export_json = bool(payload.get("export_json", False))
 
         with contextlib.redirect_stdout(log_writer), contextlib.redirect_stderr(log_writer):
             success = fetcher.fetch_stock_data(
@@ -953,6 +954,7 @@ def _fetch_worker(payload: Dict[str, Any]) -> None:
                 rate_limit_pause_seconds=rate_limit_pause_seconds,
                 max_rate_limit_retries=max_rate_limit_retries,
                 stop_on_rate_limit=stop_on_rate_limit,
+                export_json=export_json,
             )
         message = "Fetch complete" if success else "Fetch failed"
     except Exception:
@@ -2328,7 +2330,8 @@ INDEX_HTML = r"""<!doctype html>
         rate_limit_pause_seconds: numberValue("ratePause"),
         max_rate_limit_retries: numberValue("rateRetries"),
         stop_on_rate_limit: $("stopOnRateLimit").checked,
-        prune_missing_tickers: $("pruneMissing").checked
+        prune_missing_tickers: $("pruneMissing").checked,
+        export_json: false
       };
       try {
         const response = await api("/api/fetch", { method: "POST", body: JSON.stringify(payload) });
