@@ -1291,6 +1291,30 @@ INDEX_HTML = r"""<!doctype html>
       overflow: hidden;
       position: relative;
     }
+    #chartPanel.fullscreen {
+      position: fixed;
+      inset: 12px;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      overflow: auto;
+      background: var(--panel);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .48);
+    }
+    body.chart-fullscreen {
+      overflow: hidden;
+    }
+    #chartPanel.fullscreen .chart-box {
+      flex: 1 1 auto;
+      height: auto;
+      min-height: 560px;
+    }
+    .chart-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: flex-end;
+    }
     .ma-controls {
       display: flex;
       flex-wrap: wrap;
@@ -1653,7 +1677,10 @@ INDEX_HTML = r"""<!doctype html>
       <div class="panel" id="chartPanel">
         <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
           <h2 style="margin:0">Chart</h2>
-          <span class="status-line" id="chartStatus">Select a cached ticker</span>
+          <div class="chart-header-actions">
+            <span class="status-line" id="chartStatus">Select a cached ticker</span>
+            <button id="toggleChartFullscreen" type="button" aria-pressed="false">Fullscreen</button>
+          </div>
         </div>
         <div class="chart-controls">
           <div>
@@ -1886,6 +1913,23 @@ INDEX_HTML = r"""<!doctype html>
       window.setTimeout(() => $("companyProfile").classList.remove("focused"), 1600);
     }
 
+    function redrawChartSoon() {
+      window.setTimeout(() => {
+        if (lastCandles.length) drawCandles(lastCandles, lastChartTicker, lastMovingAverages);
+      }, 80);
+    }
+
+    function toggleChartFullscreen(force = null) {
+      const panel = $("chartPanel");
+      const button = $("toggleChartFullscreen");
+      const enabled = force === null ? !panel.classList.contains("fullscreen") : !!force;
+      panel.classList.toggle("fullscreen", enabled);
+      document.body.classList.toggle("chart-fullscreen", enabled);
+      button.textContent = enabled ? "Exit Fullscreen" : "Fullscreen";
+      button.setAttribute("aria-pressed", String(enabled));
+      redrawChartSoon();
+    }
+
     async function loadChart(ticker = null, focusChart = false) {
       if (ticker) $("chartTicker").value = ticker;
       const selectedTicker = $("chartTicker").value.trim().toUpperCase();
@@ -1948,11 +1992,13 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
 
-      const pad = { left: 58, right: 12, top: 44, bottom: 72 };
+      const pad = { left: 58, right: 12, top: 44, bottom: 28 };
+      const volumeBandHeight = Math.max(70, Math.min(150, height * 0.22));
+      const volumeGap = 16;
       const priceTop = pad.top;
-      const priceBottom = height - pad.bottom;
-      const volumeTop = height - 54;
-      const volumeBottom = height - 24;
+      const volumeBottom = height - pad.bottom;
+      const volumeTop = volumeBottom - volumeBandHeight;
+      const priceBottom = Math.max(priceTop + 80, volumeTop - volumeGap);
       const chartWidth = width - pad.left - pad.right;
       const priceHeight = priceBottom - priceTop;
 
@@ -1983,6 +2029,16 @@ INDEX_HTML = r"""<!doctype html>
         ctx.stroke();
         ctx.fillText(priceLabel(price), pad.left - 8, py);
       }
+
+      ctx.strokeStyle = "#1f2d27";
+      ctx.beginPath();
+      ctx.moveTo(pad.left, volumeTop);
+      ctx.lineTo(width - pad.right, volumeTop);
+      ctx.stroke();
+      ctx.fillStyle = "#9fb0a8";
+      ctx.font = "11px Segoe UI, sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText("Volume", pad.left - 8, volumeTop + 12);
 
       candles.forEach((candle, index) => {
         const x = pad.left + index * candleStep + candleStep / 2;
@@ -2313,6 +2369,7 @@ INDEX_HTML = r"""<!doctype html>
     $("startFetch").addEventListener("click", startFetch);
     $("runFilter").addEventListener("click", runFilter);
     $("loadChart").addEventListener("click", () => loadChart());
+    $("toggleChartFullscreen").addEventListener("click", () => toggleChartFullscreen());
     $("chartInterval").addEventListener("change", () => loadChart());
     $("chartRange").addEventListener("change", () => loadChart());
     document.querySelectorAll(".ma-check").forEach((input) => {
@@ -2323,6 +2380,11 @@ INDEX_HTML = r"""<!doctype html>
     });
     window.addEventListener("resize", () => {
       if (lastCandles.length) drawCandles(lastCandles, lastChartTicker, lastMovingAverages);
+    });
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && $("chartPanel").classList.contains("fullscreen")) {
+        toggleChartFullscreen(false);
+      }
     });
     $("closeProgress").addEventListener("click", () => $("progressModal").classList.add("hidden"));
     loadTickerFiles();
