@@ -98,6 +98,26 @@ The web UI reads `stock_cache.sqlite` directly for cache status and filter
 scans. Fetches run in the background and update the cache before exporting a
 JSON compatibility file.
 
+The UI has separate market defaults:
+
+```text
+ASX -> stock_cache.sqlite, yfinance, ASX ticker files
+US  -> stock_cache_us.sqlite, yfinance, us_tickers_nasdaqtrader.txt
+```
+
+Use the **Market** selector to switch between ASX and US mode. US mode keeps its
+own SQLite cache so American data does not mix with ASX data. Click **Download
+US Tickers** to refresh `us_tickers_nasdaqtrader.txt` from the official Nasdaq
+Trader symbol directories. The same command is available from the CLI:
+
+```bash
+python -m moneymaker us-tickers -o us_tickers_nasdaqtrader.txt
+```
+
+US mode uses yfinance by default and keeps its own cache. Stooq remains available
+as an optional provider, but recent live checks showed Stooq's CSV endpoint can
+ask for an API key, so it is not used as the default no-key US path.
+
 The fetch panel lists local `.txt` ticker files from the repository root. If
 you enable the cleaned ticker file option, a fetch will create a new
 `*_cleaned_YYYY-MM-DD.txt` file excluding attempted tickers that returned no

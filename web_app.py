@@ -30,9 +30,29 @@ from moneymaker import fetcher
 from moneymaker.filters import analyze_stock_from_local_data
 
 DEFAULT_CACHE_FILE = fetcher.DEFAULT_CACHE_FILE
+DEFAULT_US_CACHE_FILE = fetcher.DEFAULT_US_CACHE_FILE
 DEFAULT_TICKER_FILE = "asx_200_tickers.txt"
+DEFAULT_US_TICKER_FILE = fetcher.DEFAULT_US_TICKER_FILE
 DEFAULT_OUTPUT_FILE = "stock_data_web.json"
 VALID_LABELS = {"winner", "potential_winner", "maybe", "bad"}
+MARKET_DEFAULTS = {
+    "asx": {
+        "label": "ASX",
+        "cache_file": DEFAULT_CACHE_FILE,
+        "ticker_file": DEFAULT_TICKER_FILE,
+        "provider": "yfinance",
+        "chart_ticker": "CBA.AX",
+        "output_file": DEFAULT_OUTPUT_FILE,
+    },
+    "us": {
+        "label": "US",
+        "cache_file": DEFAULT_US_CACHE_FILE,
+        "ticker_file": DEFAULT_US_TICKER_FILE,
+        "provider": "yfinance",
+        "chart_ticker": "AAPL",
+        "output_file": "stock_data_us_web.json",
+    },
+}
 
 JOB_LOCK = threading.Lock()
 CURRENT_JOB: Dict[str, Any] = {
@@ -435,6 +455,22 @@ def _chart_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
     range_key = params.get("range", ["1y"])[0].lower()
     ticker = params.get("ticker", [""])[0].strip().upper()
     ma_periods = _parse_ma_periods(params.get("ma", [""])[0])
+
+    if not _cache_path(cache_file).exists():
+        return {
+            "ok": True,
+            "ticker": ticker,
+            "provider": provider,
+            "company": {},
+            "interval": interval,
+            "range": range_key,
+            "candles": [],
+            "moving_averages": {},
+            "count": 0,
+            "start": None,
+            "end": None,
+            "message": f"Cache file not found: {cache_file}",
+        }
 
     with _connect_readonly(cache_file) as conn:
         if not ticker:
@@ -1049,7 +1085,7 @@ class AppHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/filter/job":
                 _json_response(self, {"ok": True, "job": _filter_job_snapshot()})
             elif parsed.path == "/api/config":
-                _json_response(self, {"ok": True, "config": _load_default_config()})
+                _json_response(self, {"ok": True, "config": _load_default_config(), "markets": MARKET_DEFAULTS})
             else:
                 _json_response(self, {"ok": False, "error": "Not found"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -1060,6 +1096,9 @@ class AppHandler(BaseHTTPRequestHandler):
             payload = _read_json(self)
             if self.path == "/api/fetch":
                 _json_response(self, _start_fetch_job(payload))
+            elif self.path == "/api/us-tickers":
+                output_file = str(payload.get("output_file") or DEFAULT_US_TICKER_FILE)
+                _json_response(self, {"ok": True, "result": fetcher.write_us_ticker_file(output_file)})
             elif self.path == "/api/filter/start":
                 _json_response(self, _start_filter_job(payload))
             elif self.path == "/api/filter":
@@ -1520,6 +1559,11 @@ INDEX_HTML = r"""<!doctype html>
     <aside>
       <div class="panel">
         <h2>Cache</h2>
+        <label for="marketSelect">Market</label>
+        <select id="marketSelect">
+          <option value="asx">ASX</option>
+          <option value="us">US</option>
+        </select>
         <label for="cacheFile">SQLite file</label>
         <input id="cacheFile" value="stock_cache.sqlite">
         <div class="actions">
@@ -1530,6 +1574,10 @@ INDEX_HTML = r"""<!doctype html>
 
       <div class="panel">
         <h2>Fetch</h2>
+        <div class="actions" style="margin-top:0">
+          <button id="downloadUsTickers" type="button">Download US Tickers</button>
+          <span class="status-line" id="tickerSourceStatus">Nasdaq Trader source</span>
+        </div>
         <label for="tickerFileSelect">Available ticker files</label>
         <select id="tickerFileSelect"></select>
         <label for="tickerFile">Ticker file</label>
@@ -1785,6 +1833,22 @@ INDEX_HTML = r"""<!doctype html>
       "360": "#ff9f7a",
       "700": "#d9e672"
     };
+    const marketDefaults = {
+      asx: {
+        cacheFile: "stock_cache.sqlite",
+        tickerFile: "asx_200_tickers.txt",
+        provider: "yfinance",
+        chartTicker: "CBA.AX",
+        output: "stock_data_web.json"
+      },
+      us: {
+        cacheFile: "stock_cache_us.sqlite",
+        tickerFile: "us_tickers_nasdaqtrader.txt",
+        provider: "yfinance",
+        chartTicker: "AAPL",
+        output: "stock_data_us_web.json"
+      }
+    };
 
     function numberValue(id) {
       const value = $(id).value.trim();
@@ -1871,6 +1935,26 @@ INDEX_HTML = r"""<!doctype html>
       return payload;
     }
 
+    function currentMarketDefaults() {
+      return marketDefaults[$("marketSelect").value] || marketDefaults.asx;
+    }
+
+    function applyMarketDefaults() {
+      const defaults = currentMarketDefaults();
+      $("cacheFile").value = defaults.cacheFile;
+      $("tickerFile").value = defaults.tickerFile;
+      $("provider").value = defaults.provider;
+      $("chartTicker").value = defaults.chartTicker;
+      $("tickerSourceStatus").textContent = $("marketSelect").value === "us"
+        ? "US uses Nasdaq Trader tickers and a separate SQLite cache"
+        : "ASX uses the existing local ticker files and cache";
+      loadTickerFiles();
+      refreshStatus().catch((error) => {
+        $("topStatus").textContent = error.message;
+        $("topStatus").className = "status-line bad";
+      }).finally(() => loadChart());
+    }
+
     async function refreshStatus() {
       const cache = encodeURIComponent($("cacheFile").value.trim() || "stock_cache.sqlite");
       const payload = await api(`/api/status?cache_file=${cache}`);
@@ -1904,6 +1988,26 @@ INDEX_HTML = r"""<!doctype html>
       } catch (error) {
         $("fetchStatus").textContent = error.message;
         $("fetchStatus").className = "status-line bad";
+      }
+    }
+
+    async function downloadUsTickers() {
+      $("tickerSourceStatus").textContent = "Downloading US ticker list...";
+      $("tickerSourceStatus").className = "status-line warn";
+      try {
+        const response = await api("/api/us-tickers", {
+          method: "POST",
+          body: JSON.stringify({ output_file: marketDefaults.us.tickerFile })
+        });
+        const result = response.result;
+        $("marketSelect").value = "us";
+        await loadTickerFiles();
+        applyMarketDefaults();
+        $("tickerSourceStatus").textContent = `Wrote ${fmt.format(result.ticker_count || 0)} symbols to ${result.output_file}`;
+        $("tickerSourceStatus").className = "status-line ok";
+      } catch (error) {
+        $("tickerSourceStatus").textContent = error.message;
+        $("tickerSourceStatus").className = "status-line bad";
       }
     }
 
@@ -2215,7 +2319,7 @@ INDEX_HTML = r"""<!doctype html>
         years: numberValue("years"),
         workers: numberValue("workers"),
         cache_file: $("cacheFile").value.trim(),
-        output: "stock_data_web.json",
+        output: currentMarketDefaults().output,
         info_refresh_days: numberValue("infoRefresh"),
         history_refresh_days: numberValue("historyRefresh"),
         history_chunk_size: numberValue("historyChunkSize"),
@@ -2360,12 +2464,14 @@ INDEX_HTML = r"""<!doctype html>
       });
     }
 
+    $("marketSelect").addEventListener("change", applyMarketDefaults);
     $("refreshStatus").addEventListener("click", refreshStatus);
     bindLimitToggle("useFetchLimit", "fetchLimit");
     bindLimitToggle("useScanLimit", "scanLimit");
     $("tickerFileSelect").addEventListener("change", () => {
       if ($("tickerFileSelect").value) $("tickerFile").value = $("tickerFileSelect").value;
     });
+    $("downloadUsTickers").addEventListener("click", downloadUsTickers);
     $("startFetch").addEventListener("click", startFetch);
     $("runFilter").addEventListener("click", runFilter);
     $("loadChart").addEventListener("click", () => loadChart());
@@ -2387,11 +2493,7 @@ INDEX_HTML = r"""<!doctype html>
       }
     });
     $("closeProgress").addEventListener("click", () => $("progressModal").classList.add("hidden"));
-    loadTickerFiles();
-    refreshStatus().catch((error) => {
-      $("topStatus").textContent = error.message;
-      $("topStatus").className = "status-line bad";
-    }).finally(() => loadChart());
+    applyMarketDefaults();
   </script>
 </body>
 </html>

@@ -18,6 +18,8 @@ from tqdm import tqdm
 
 DEFAULT_OUTPUT_FILE = "stock_data.json"
 DEFAULT_CACHE_FILE = "stock_cache.sqlite"
+DEFAULT_US_CACHE_FILE = "stock_cache_us.sqlite"
+DEFAULT_US_TICKER_FILE = "us_tickers_nasdaqtrader.txt"
 DEFAULT_DATA_YEARS = 15
 DEFAULT_WORKERS = 10
 DEFAULT_PROVIDER = "yfinance"
@@ -36,6 +38,8 @@ _HEADER_TOKENS = {"SYMBOL", "CODE", "ASX CODE", "TICKER"}
 _ASX_FILENAME_TOKENS = ("asx", "all_ords", "all ords", "ordinaries")
 _STOOQ_COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
 _OHLCV_COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
+NASDAQ_LISTED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
+NASDAQ_OTHER_LISTED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
 ProgressCallback = Optional[Callable[[str, int, Optional[int], str], None]]
 
 
@@ -355,6 +359,90 @@ def _provider_limitations(provider: str) -> List[str]:
     ]
 
 
+def _read_url_text(url: str, timeout: int = 30) -> str:
+    """Read UTF-8-ish text from a public data endpoint."""
+
+    with urlopen(url, timeout=timeout) as response:  # nosec B310 - fixed public market-data endpoint
+        return response.read().decode("utf-8", errors="replace")
+
+
+def _normalize_us_symbol(symbol: str) -> str:
+    """Normalize Nasdaq Trader symbols for Stooq/yfinance-style US lookups."""
+
+    ticker = str(symbol or "").strip().upper()
+    if not ticker or ticker in {"SYMBOL", "ACT SYMBOL"}:
+        return ""
+    ticker = ticker.replace("/", "-")
+    ticker = ticker.replace("^", "-")
+    ticker = re.sub(r"[^A-Z0-9.\-]", "", ticker)
+    return ticker.strip(".-")
+
+
+def _parse_nasdaq_trader_symbols(content: str, symbol_column: str) -> List[str]:
+    """Parse Nasdaq Trader pipe-delimited symbol directory content."""
+
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    if not lines:
+        return []
+    headers = [part.strip() for part in lines[0].split("|")]
+    try:
+        symbol_index = headers.index(symbol_column)
+    except ValueError:
+        return []
+
+    test_issue_index = headers.index("Test Issue") if "Test Issue" in headers else None
+    symbols: List[str] = []
+    seen: Set[str] = set()
+    for line in lines[1:]:
+        if line.lower().startswith("file creation time"):
+            break
+        parts = line.split("|")
+        if len(parts) <= symbol_index:
+            continue
+        if test_issue_index is not None and len(parts) > test_issue_index and parts[test_issue_index].upper() == "Y":
+            continue
+        ticker = _normalize_us_symbol(parts[symbol_index])
+        if ticker and ticker not in seen:
+            seen.add(ticker)
+            symbols.append(ticker)
+    return symbols
+
+
+def fetch_us_tickers_from_nasdaq_trader() -> List[str]:
+    """Return active US-listed symbols from Nasdaq Trader symbol directories."""
+
+    nasdaq = _parse_nasdaq_trader_symbols(_read_url_text(NASDAQ_LISTED_URL), "Symbol")
+    other = _parse_nasdaq_trader_symbols(_read_url_text(NASDAQ_OTHER_LISTED_URL), "ACT Symbol")
+    seen: Set[str] = set()
+    tickers: List[str] = []
+    for ticker in nasdaq + other:
+        if ticker not in seen:
+            seen.add(ticker)
+            tickers.append(ticker)
+    return sorted(tickers)
+
+
+def write_us_ticker_file(output_file: str = DEFAULT_US_TICKER_FILE) -> Dict[str, object]:
+    """Download current US symbols and write a local ticker file."""
+
+    tickers = fetch_us_tickers_from_nasdaq_trader()
+    output = Path(output_file)
+    generated_at = datetime.now(timezone.utc).isoformat()
+    with output.open("w", encoding="utf-8") as handle:
+        handle.write("Symbol\n")
+        handle.write(f"# Generated from Nasdaq Trader symbol directories at {generated_at}\n")
+        handle.write(f"# Sources: {NASDAQ_LISTED_URL} and {NASDAQ_OTHER_LISTED_URL}\n")
+        handle.write("# Includes common stocks and ETFs. Test issues are excluded.\n")
+        for ticker in tickers:
+            handle.write(f"{ticker}\n")
+    return {
+        "output_file": str(output),
+        "ticker_count": len(tickers),
+        "generated_at_utc": generated_at,
+        "sources": [NASDAQ_LISTED_URL, NASDAQ_OTHER_LISTED_URL],
+    }
+
+
 def get_tickers_from_file(filename: str) -> List[str]:
     """Reads tickers from a text file, handling different formats."""
     tickers: List[str] = []
@@ -601,6 +689,8 @@ def _stooq_symbol(ticker: str) -> str:
     normalized = ticker.strip().lower()
     if normalized.endswith(".ax"):
         return f"{normalized[:-3]}.au"
+    normalized = normalized.replace("/", "-")
+    normalized = normalized.replace("^", "-")
     if "." not in normalized:
         return f"{normalized}.us"
     return normalized
@@ -1386,48 +1476,59 @@ def cli() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Stock Data Fetcher")
-    parser.add_argument("ticker_file", help="Path to the text file containing stock tickers.")
-    parser.add_argument(
+    sub = parser.add_subparsers(dest="command")
+
+    us_tickers_cmd = sub.add_parser("us-tickers", help="Download a US ticker file from Nasdaq Trader")
+    us_tickers_cmd.add_argument(
+        "-o",
+        "--output",
+        default=DEFAULT_US_TICKER_FILE,
+        help=f"Output ticker file name. (Default: {DEFAULT_US_TICKER_FILE})",
+    )
+
+    fetch_cmd = sub.add_parser("fetch", help="Fetch stock data")
+    fetch_cmd.add_argument("ticker_file", help="Path to the text file containing stock tickers.")
+    fetch_cmd.add_argument(
         "-o", "--output", default=DEFAULT_OUTPUT_FILE, help=f"Output JSON file name. (Default: {DEFAULT_OUTPUT_FILE})"
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "-y", "--years", type=int, default=DEFAULT_DATA_YEARS, help=f"Number of years of historical data to fetch. (Default: {DEFAULT_DATA_YEARS})"
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "-w",
         "--workers",
         type=int,
         default=DEFAULT_WORKERS,
         help=f"Number of threads for downloading data. (Default: {DEFAULT_WORKERS})",
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "--provider",
         choices=SUPPORTED_PROVIDERS,
         default=DEFAULT_PROVIDER,
         help=f"Historical OHLCV provider. (Default: {DEFAULT_PROVIDER})",
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "--limit",
         type=int,
         help="Only fetch the first N tickers from the ticker file.",
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "--cache-file",
         default=DEFAULT_CACHE_FILE,
         help=f"SQLite cache file for incremental fetches. (Default: {DEFAULT_CACHE_FILE})",
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "--no-cache",
         action="store_true",
         help="Disable SQLite caching and fetch the requested data directly.",
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "--info-refresh-days",
         type=int,
         default=DEFAULT_INFO_REFRESH_DAYS,
         help=f"Refresh cached company info after this many days. (Default: {DEFAULT_INFO_REFRESH_DAYS})",
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "--history-refresh-days",
         type=int,
         default=DEFAULT_HISTORY_REFRESH_DAYS,
@@ -1436,7 +1537,7 @@ def cli() -> None:
             f"to catch corrections. (Default: {DEFAULT_HISTORY_REFRESH_DAYS})"
         ),
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "--prune-missing-tickers",
         action="store_true",
         help=(
@@ -1444,43 +1545,50 @@ def cli() -> None:
             "historical data removed. The original file is not changed."
         ),
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "--history-chunk-size",
         type=int,
         default=DEFAULT_HISTORY_CHUNK_SIZE,
         help=f"Tickers per yfinance history batch. Lower is slower but gentler. (Default: {DEFAULT_HISTORY_CHUNK_SIZE})",
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "--history-pause-seconds",
         type=float,
         default=DEFAULT_HISTORY_PAUSE_SECONDS,
         help=f"Pause between yfinance history batches. (Default: {DEFAULT_HISTORY_PAUSE_SECONDS})",
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "--info-pause-seconds",
         type=float,
         default=DEFAULT_INFO_PAUSE_SECONDS,
         help=f"Pause between company info requests when workers=1. (Default: {DEFAULT_INFO_PAUSE_SECONDS})",
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "--rate-limit-pause-seconds",
         type=float,
         default=DEFAULT_RATE_LIMIT_PAUSE_SECONDS,
         help=f"Base pause after a yfinance rate-limit response. (Default: {DEFAULT_RATE_LIMIT_PAUSE_SECONDS})",
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "--max-rate-limit-retries",
         type=int,
         default=DEFAULT_RATE_LIMIT_RETRIES,
         help=f"Retries for rate-limit responses before giving up on a batch/ticker. (Default: {DEFAULT_RATE_LIMIT_RETRIES})",
     )
-    parser.add_argument(
+    fetch_cmd.add_argument(
         "--stop-on-rate-limit",
         action="store_true",
         default=DEFAULT_STOP_ON_RATE_LIMIT,
         help="Stop the fetch when yfinance rate-limits history data so cached progress can resume later.",
     )
     args = parser.parse_args()
+    if args.command == "us-tickers":
+        result = write_us_ticker_file(args.output)
+        print(f"Wrote {result['ticker_count']} US tickers to {result['output_file']}")
+        return
+    if args.command != "fetch":
+        parser.print_help()
+        return
     success = fetch_stock_data(
         args.ticker_file,
         args.output,

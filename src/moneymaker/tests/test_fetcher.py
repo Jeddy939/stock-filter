@@ -61,7 +61,40 @@ def test_normalize_provider_rejects_unknown_values():
 def test_stooq_symbol_maps_common_yahoo_symbols():
     assert fetcher._stooq_symbol("AAPL") == "aapl.us"
     assert fetcher._stooq_symbol("BHP.AX") == "bhp.au"
+    assert fetcher._stooq_symbol("BRK/B") == "brk-b.us"
     assert fetcher._stooq_symbol("vod.uk") == "vod.uk"
+
+
+def test_parse_nasdaq_trader_symbols_excludes_test_issues():
+    content = (
+        "Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares\n"
+        "AAPL|Apple Inc.|Q|N|N|100|N|N\n"
+        "ZZZZ|Example Test Issue|Q|Y|N|100|N|N\n"
+        "BRK/B|Berkshire Hathaway Inc.|Q|N|N|100|N|N\n"
+        "File Creation Time: 0513202612:00\n"
+    )
+
+    assert fetcher._parse_nasdaq_trader_symbols(content, "Symbol") == ["AAPL", "BRK-B"]
+
+
+def test_write_us_ticker_file_uses_nasdaq_trader_sources(tmp_path, monkeypatch):
+    responses = {
+        fetcher.NASDAQ_LISTED_URL: (
+            "Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares\n"
+            "AAPL|Apple Inc.|Q|N|N|100|N|N\n"
+        ),
+        fetcher.NASDAQ_OTHER_LISTED_URL: (
+            "ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol\n"
+            "IBM|International Business Machines|N|IBM|N|100|N|IBM\n"
+        ),
+    }
+    monkeypatch.setattr(fetcher, "_read_url_text", lambda url, timeout=30: responses[url])
+    output = tmp_path / "us_tickers.txt"
+
+    result = fetcher.write_us_ticker_file(str(output))
+
+    assert result["ticker_count"] == 2
+    assert output.read_text(encoding="utf-8").splitlines()[-2:] == ["AAPL", "IBM"]
 
 
 def test_fetch_stock_data_uses_provider_limit_and_metadata(tmp_path, monkeypatch):

@@ -9,6 +9,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="moneymaker", description="Utilities for fetching and filtering stock data")
     sub = parser.add_subparsers(dest="command")
 
+    us_tickers_cmd = sub.add_parser("us-tickers", help="Download a US ticker file from Nasdaq Trader")
+    us_tickers_cmd.add_argument(
+        "-o",
+        "--output",
+        default=fetcher.DEFAULT_US_TICKER_FILE,
+        help=f"Output ticker file name (default: {fetcher.DEFAULT_US_TICKER_FILE})",
+    )
+
     fetch_cmd = sub.add_parser("fetch", help="Download stock data to JSON")
     fetch_cmd.add_argument("ticker_file", help="File containing ticker symbols")
     fetch_cmd.add_argument(
@@ -91,7 +99,10 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    if args.command == "fetch":
+    if args.command == "us-tickers":
+        result = fetcher.write_us_ticker_file(args.output)
+        print(f"Wrote {result['ticker_count']} US tickers to {result['output_file']}")
+    elif args.command == "fetch":
         success = fetcher.fetch_stock_data(
             args.ticker_file,
             args.output,
