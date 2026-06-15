@@ -82,6 +82,19 @@ START_MONEYMAKER.bat
 The launcher opens the browser UI and starts the local server. Leave the command
 window open while using the app.
 
+If you do not want a command window, double-click:
+
+```text
+START_MONEYMAKER_NO_CMD.vbs
+```
+
+That starts the app hidden and opens the browser. To stop the hidden server,
+double-click:
+
+```text
+STOP_MONEYMAKER_NO_CMD.vbs
+```
+
 Run the local browser UI from the repository root:
 
 ```bash
