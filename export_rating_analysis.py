@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
-DEFAULT_CENTRAL_DB = "central_stock_ratings.sqlite"
+DEFAULT_CENTRAL_DB = "ratings/central_stock_ratings.sqlite"
+LEGACY_CENTRAL_DB = "central_stock_ratings.sqlite"
 
 
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
@@ -73,6 +74,8 @@ def _days_between(start_date: Any, end_date: Optional[str]) -> Optional[int]:
 
 def load_events(central_db: str) -> List[Dict[str, Any]]:
     path = Path(central_db)
+    if not path.exists() and central_db == DEFAULT_CENTRAL_DB and Path(LEGACY_CENTRAL_DB).exists():
+        path = Path(LEGACY_CENTRAL_DB)
     if not path.exists():
         return []
     conn = sqlite3.connect(str(path))

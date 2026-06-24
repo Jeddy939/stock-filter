@@ -9,6 +9,7 @@ import json
 import math
 import numbers
 import os
+import shutil
 import sqlite3
 import sys
 import threading
@@ -36,7 +37,8 @@ DEFAULT_US_CACHE_FILE = fetcher.DEFAULT_US_CACHE_FILE
 DEFAULT_TICKER_FILE = "asx_yfinance_valid_stocks_2026-05-11.txt"
 DEFAULT_US_TICKER_FILE = fetcher.DEFAULT_US_TICKER_FILE
 DEFAULT_OUTPUT_FILE = "stock_data_web.json"
-DEFAULT_CENTRAL_RATINGS_FILE = "central_stock_ratings.sqlite"
+DEFAULT_CENTRAL_RATINGS_FILE = "ratings/central_stock_ratings.sqlite"
+LEGACY_CENTRAL_RATINGS_FILE = "central_stock_ratings.sqlite"
 DEFAULT_CENTRAL_RATINGS_JSON_FILE = "central_stock_ratings.json"
 DEFAULT_CENTRAL_RATINGS_JSONL_FILE = "central_stock_ratings.jsonl"
 VALID_LABELS = {"winner", "potential_winner", "maybe", "bad"}
@@ -157,7 +159,14 @@ def _connect_write(cache_file: str = DEFAULT_CACHE_FILE) -> sqlite3.Connection:
 
 def _central_ratings_path() -> Path:
     configured = str(os.environ.get("MONEYMAKER_CENTRAL_RATINGS_DB", "")).strip()
-    return _cache_path(configured or DEFAULT_CENTRAL_RATINGS_FILE)
+    if configured:
+        return _cache_path(configured)
+    path = _cache_path(DEFAULT_CENTRAL_RATINGS_FILE)
+    legacy_path = _cache_path(LEGACY_CENTRAL_RATINGS_FILE)
+    if legacy_path.exists() and not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(legacy_path, path)
+    return path
 
 
 def _central_ratings_json_path() -> Path:
@@ -973,7 +982,13 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "clear",
             )
             conn.commit()
-            return {"ok": True, "scan_id": scan_id, "ticker": ticker, "label": None}
+            return {
+                "ok": True,
+                "scan_id": scan_id,
+                "ticker": ticker,
+                "label": None,
+                "central_ratings_file": str(_central_ratings_path()),
+            }
         if label not in VALID_LABELS:
             raise ValueError("label must be winner, potential_winner, maybe, bad, or clear")
 
@@ -2701,9 +2716,10 @@ INDEX_HTML = r"""<!doctype html>
           })
         });
         applyRowLabel(ticker, response.label);
+        const centralMessage = response.central_ratings_file ? " - saved to central ratings DB" : "";
         $("resultMeta").textContent = response.label
-          ? `${ticker} marked ${labelText(response.label)} in scan ${currentScanId}`
-          : `${ticker} label cleared in scan ${currentScanId}`;
+          ? `${ticker} marked ${labelText(response.label)} in scan ${currentScanId}${centralMessage}`
+          : `${ticker} label cleared in scan ${currentScanId}${centralMessage}`;
       } catch (error) {
         $("resultMeta").textContent = error.message;
         $("resultMeta").className = "status-line bad";

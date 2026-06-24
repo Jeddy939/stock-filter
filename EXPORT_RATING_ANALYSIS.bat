@@ -4,6 +4,9 @@ setlocal
 cd /d "%~dp0"
 title Export MoneyMaker Rating Analysis
 
+if not exist "ratings" mkdir "ratings"
+if "%MONEYMAKER_CENTRAL_RATINGS_DB%"=="" set "MONEYMAKER_CENTRAL_RATINGS_DB=%~dp0ratings\central_stock_ratings.sqlite"
+
 set "PYTHON_CMD="
 
 if exist ".venv\Scripts\python.exe" (
@@ -25,8 +28,9 @@ if "%PYTHON_CMD%"=="" (
     exit /b 1
 )
 
-echo Exporting central rating analysis...
-%PYTHON_CMD% export_rating_analysis.py
+echo Exporting central rating analysis from:
+echo %MONEYMAKER_CENTRAL_RATINGS_DB%
+%PYTHON_CMD% export_rating_analysis.py --central-db "%MONEYMAKER_CENTRAL_RATINGS_DB%"
 echo.
 echo Done. Check the exports folder.
 pause

@@ -15,3 +15,7 @@ exports/
 central_stock_ratings.sqlite
 central_stock_ratings.sqlite-shm
 central_stock_ratings.sqlite-wal
+ratings/*.sqlite
+ratings/*.sqlite-shm
+ratings/*.sqlite-wal
+!ratings/README.md

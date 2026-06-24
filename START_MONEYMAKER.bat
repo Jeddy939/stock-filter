@@ -4,6 +4,10 @@ setlocal
 cd /d "%~dp0"
 title Moneymaker Stock Filter
 
+if not exist "ratings" mkdir "ratings"
+set "MONEYMAKER_CENTRAL_RATINGS_DB=%~dp0ratings\central_stock_ratings.sqlite"
+if "%MONEYMAKER_RATER_NAME%"=="" set "MONEYMAKER_RATER_NAME=%USERNAME%"
+
 set "PYTHON_CMD="
 
 if exist ".venv\Scripts\python.exe" (
@@ -26,6 +30,8 @@ if "%PYTHON_CMD%"=="" (
 )
 
 echo Starting Moneymaker Stock Filter...
+echo Central ratings database:
+echo %MONEYMAKER_CENTRAL_RATINGS_DB%
 echo.
 
 %PYTHON_CMD% -c "import pandas, yfinance, curl_cffi, tqdm" >nul 2>nul

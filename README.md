@@ -106,13 +106,22 @@ It writes timestamped TXT and CSV files into the local `exports/` folder. If
 someone else labelled stocks on their machine, copy their `stock_cache.sqlite`
 or `stock_cache_us.sqlite` into this folder first, then run the exporter.
 
-New ratings are also appended to a local central database:
+New ratings are appended to the main local analysis database:
 
 ```text
-central_stock_ratings.sqlite
+ratings\central_stock_ratings.sqlite
 ```
 
-They are also written into GitHub-friendly rating files in the repository:
+That SQLite file is the source of truth for analysis. Every rating click adds a
+timestamped event, so you can track what was selected, when it was selected,
+who selected it, and whether the price later moved in the right direction.
+Open the folder with:
+
+```text
+OPEN_RATINGS_FOLDER.bat
+```
+
+Ratings are also written into GitHub-friendly backup files in the repository:
 
 ```text
 central_stock_ratings.json
@@ -123,24 +132,22 @@ Each event records the rating timestamp, rater name, ticker, label, scan id,
 rank, signal date, close price, volume ratio, market cap, sector, industry,
 cache source, and Yahoo Finance link.
 
-After rating stocks, double-click this to push the central JSON rating file to
-GitHub:
+If you want a GitHub backup, double-click this after rating stocks:
 
 ```text
 PUSH_RATINGS_TO_GITHUB.bat
 ```
 
-Double-click this to export the richer local central database history with
-latest cached price and return percentage:
+Double-click this to export the SQLite rating history with latest cached price
+and return percentage:
 
 ```text
 EXPORT_RATING_ANALYSIS.bat
 ```
 
-To make multiple people write to the same central file, set the environment
-variable `MONEYMAKER_CENTRAL_RATINGS_DB` to a shared path before launching the
-app, for example a shared OneDrive/Dropbox file path. Set
-`MONEYMAKER_RATER_NAME` if you want a friendly name instead of the Windows
+If you want the central SQLite file somewhere else, set the environment variable
+`MONEYMAKER_CENTRAL_RATINGS_DB` before launching the app. Set
+`MONEYMAKER_RATER_NAME` if you want a friendly name instead of your Windows
 username in the export.
 
 Run the local browser UI from the repository root:
