@@ -95,6 +95,17 @@ double-click:
 STOP_MONEYMAKER_NO_CMD.vbs
 ```
 
+To export saved scan labels such as Winner, Potential Winner, Maybe, and Bad,
+double-click:
+
+```text
+EXPORT_SCAN_LABELS.bat
+```
+
+It writes timestamped TXT and CSV files into the local `exports/` folder. If
+someone else labelled stocks on their machine, copy their `stock_cache.sqlite`
+or `stock_cache_us.sqlite` into this folder first, then run the exporter.
+
 Run the local browser UI from the repository root:
 
 ```bash

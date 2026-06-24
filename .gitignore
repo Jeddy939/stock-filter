@@ -11,3 +11,4 @@ __pycache__/
 rate_limit_calibration*.json
 rate_limit_calibration*.sqlite*
 yfinance_rate_limit_measurement*.json
+exports/
