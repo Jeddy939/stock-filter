@@ -106,15 +106,43 @@ It writes timestamped TXT and CSV files into the local `exports/` folder. If
 someone else labelled stocks on their machine, copy their `stock_cache.sqlite`
 or `stock_cache_us.sqlite` into this folder first, then run the exporter.
 
-New ratings are appended to the main local analysis database:
+For the easiest online central ratings file, use Google Sheets. Every rating
+click can be sent straight to one Sheet, while still being saved locally as a
+backup.
+
+Setup:
+
+1. Create a blank Google Sheet.
+2. In that Sheet, open Extensions > Apps Script.
+3. Copy the contents of `google_sheets_rating_webhook.gs` into Apps Script.
+4. Deploy it as a Web App.
+5. Set access to allow the people using MoneyMaker.
+6. Copy the Web App URL.
+7. Double-click:
+
+```text
+CONFIGURE_GOOGLE_SHEETS_RATINGS.bat
+```
+
+After that, start MoneyMaker normally. When you click Winner, Potential Winner,
+Maybe, or Bad, the app saves the rating locally and sends it to the Sheet. If
+Google Sheets cannot be reached, the event is queued locally. Retry queued
+events with:
+
+```text
+SYNC_PENDING_SHEETS_RATINGS.bat
+```
+
+Ratings are also appended to the local analysis database:
 
 ```text
 ratings\central_stock_ratings.sqlite
 ```
 
-That SQLite file is the source of truth for analysis. Every rating click adds a
-timestamped event, so you can track what was selected, when it was selected,
-who selected it, and whether the price later moved in the right direction.
+That SQLite file is the local backup/source for deeper analysis. Every rating
+click adds a timestamped event, so you can track what was selected, when it was
+selected, who selected it, and whether the price later moved in the right
+direction.
 Open the folder with:
 
 ```text

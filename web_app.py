@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 from urllib.parse import parse_qs, urlparse
+from urllib.request import Request, urlopen
 
 import pandas as pd
 
@@ -41,6 +42,7 @@ DEFAULT_CENTRAL_RATINGS_FILE = "ratings/central_stock_ratings.sqlite"
 LEGACY_CENTRAL_RATINGS_FILE = "central_stock_ratings.sqlite"
 DEFAULT_CENTRAL_RATINGS_JSON_FILE = "central_stock_ratings.json"
 DEFAULT_CENTRAL_RATINGS_JSONL_FILE = "central_stock_ratings.jsonl"
+DEFAULT_SHEETS_PENDING_FILE = "ratings/google_sheets_pending_ratings.jsonl"
 VALID_LABELS = {"winner", "potential_winner", "maybe", "bad"}
 MARKET_DEFAULTS = {
     "asx": {
@@ -179,6 +181,11 @@ def _central_ratings_jsonl_path() -> Path:
     return _cache_path(configured or DEFAULT_CENTRAL_RATINGS_JSONL_FILE)
 
 
+def _sheets_pending_path() -> Path:
+    configured = str(os.environ.get("MONEYMAKER_GOOGLE_SHEETS_PENDING_FILE", "")).strip()
+    return _cache_path(configured or DEFAULT_SHEETS_PENDING_FILE)
+
+
 def _ensure_central_ratings_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -270,6 +277,50 @@ def _write_central_rating_json_event(event: Dict[str, Any]) -> None:
         temp_path.replace(json_path)
 
 
+def _queue_google_sheets_rating_event(event: Dict[str, Any], error: str) -> None:
+    pending_path = _sheets_pending_path()
+    pending_path.parent.mkdir(parents=True, exist_ok=True)
+    queued = dict(event)
+    queued["queued_at_utc"] = datetime.utcnow().isoformat(timespec="seconds")
+    queued["queue_error"] = error[:1000]
+    with RATING_FILE_LOCK:
+        with pending_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(queued, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _post_google_sheets_rating_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    webhook_url = str(
+        os.environ.get("MONEYMAKER_GOOGLE_SHEETS_WEBHOOK_URL")
+        or os.environ.get("MONEYMAKER_GOOGLE_SHEETS_WEBHOOK")
+        or ""
+    ).strip()
+    if not webhook_url:
+        return {"configured": False, "sent": False, "queued": False}
+
+    payload = dict(event)
+    secret = str(os.environ.get("MONEYMAKER_GOOGLE_SHEETS_SECRET", "")).strip()
+    if secret:
+        payload["secret"] = secret
+
+    try:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(webhook_url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(request, timeout=10) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            if response.status >= 400:
+                raise RuntimeError(f"HTTP {response.status}: {body[:500]}")
+            try:
+                result = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                result = {"raw": body}
+            if isinstance(result, dict) and result.get("ok") is False:
+                raise RuntimeError(str(result.get("error") or result))
+        return {"configured": True, "sent": True, "queued": False}
+    except Exception as exc:
+        _queue_google_sheets_rating_event(event, str(exc))
+        return {"configured": True, "sent": False, "queued": True, "error": str(exc)}
+
+
 def _record_central_rating_event(
     source_conn: sqlite3.Connection,
     cache_file: str,
@@ -279,7 +330,7 @@ def _record_central_rating_event(
     note: Optional[str],
     event_at: str,
     action: str,
-) -> None:
+) -> Optional[Dict[str, Any]]:
     """Append a rating event to the central ratings database."""
 
     row = source_conn.execute(
@@ -304,7 +355,7 @@ def _record_central_rating_event(
         (scan_id, ticker),
     ).fetchone()
     if not row:
-        return
+        return None
 
     event = {
         "event_id": str(uuid.uuid4()),
@@ -332,6 +383,7 @@ def _record_central_rating_event(
         "yahoo_url": f"https://finance.yahoo.com/quote/{ticker}",
     }
     _write_central_rating_json_event(event)
+    sheets_result = _post_google_sheets_rating_event(event)
 
     central_path = _central_ratings_path()
     central_path.parent.mkdir(parents=True, exist_ok=True)
@@ -373,6 +425,8 @@ def _record_central_rating_event(
             ),
         )
         central_conn.commit()
+    event["google_sheets"] = sheets_result
+    return event
 
 
 def _ensure_scan_schema(conn: sqlite3.Connection) -> None:
@@ -971,7 +1025,7 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
         labeled_at = datetime.utcnow().isoformat(timespec="seconds")
         if label in ("", "clear", "none", "unlabelled", "unlabeled"):
             conn.execute("DELETE FROM scan_labels WHERE scan_id = ? AND ticker = ?", (scan_id, ticker))
-            _record_central_rating_event(
+            event = _record_central_rating_event(
                 conn,
                 cache_file,
                 scan_id,
@@ -988,6 +1042,7 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "ticker": ticker,
                 "label": None,
                 "central_ratings_file": str(_central_ratings_path()),
+                "google_sheets": (event or {}).get("google_sheets", {"configured": False}),
             }
         if label not in VALID_LABELS:
             raise ValueError("label must be winner, potential_winner, maybe, bad, or clear")
@@ -1003,7 +1058,7 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
             """,
             (scan_id, ticker, label, note, labeled_at),
         )
-        _record_central_rating_event(
+        event = _record_central_rating_event(
             conn,
             cache_file,
             scan_id,
@@ -1021,6 +1076,7 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
         "label": label,
         "note": note,
         "central_ratings_file": str(_central_ratings_path()),
+        "google_sheets": (event or {}).get("google_sheets", {"configured": False}),
     }
 
 
@@ -2716,7 +2772,14 @@ INDEX_HTML = r"""<!doctype html>
           })
         });
         applyRowLabel(ticker, response.label);
-        const centralMessage = response.central_ratings_file ? " - saved to central ratings DB" : "";
+        let centralMessage = response.central_ratings_file ? " - saved to central ratings DB" : "";
+        if (response.google_sheets?.sent) {
+          centralMessage += " and Google Sheets";
+        } else if (response.google_sheets?.queued) {
+          centralMessage += " - Google Sheets queued for retry";
+        } else if (response.google_sheets?.configured === false) {
+          centralMessage += " - Google Sheets not configured";
+        }
         $("resultMeta").textContent = response.label
           ? `${ticker} marked ${labelText(response.label)} in scan ${currentScanId}${centralMessage}`
           : `${ticker} label cleared in scan ${currentScanId}${centralMessage}`;
