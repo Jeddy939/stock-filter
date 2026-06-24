@@ -112,10 +112,26 @@ New ratings are also appended to a local central database:
 central_stock_ratings.sqlite
 ```
 
+They are also written into GitHub-friendly rating files in the repository:
+
+```text
+central_stock_ratings.json
+central_stock_ratings.jsonl
+```
+
 Each event records the rating timestamp, rater name, ticker, label, scan id,
 rank, signal date, close price, volume ratio, market cap, sector, industry,
-cache source, and Yahoo Finance link. Double-click this to export the central
-rating history with latest cached price and return percentage:
+cache source, and Yahoo Finance link.
+
+After rating stocks, double-click this to push the central JSON rating file to
+GitHub:
+
+```text
+PUSH_RATINGS_TO_GITHUB.bat
+```
+
+Double-click this to export the richer local central database history with
+latest cached price and return percentage:
 
 ```text
 EXPORT_RATING_ANALYSIS.bat

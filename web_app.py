@@ -13,6 +13,7 @@ import sqlite3
 import sys
 import threading
 import traceback
+import uuid
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,6 +37,8 @@ DEFAULT_TICKER_FILE = "asx_yfinance_valid_stocks_2026-05-11.txt"
 DEFAULT_US_TICKER_FILE = fetcher.DEFAULT_US_TICKER_FILE
 DEFAULT_OUTPUT_FILE = "stock_data_web.json"
 DEFAULT_CENTRAL_RATINGS_FILE = "central_stock_ratings.sqlite"
+DEFAULT_CENTRAL_RATINGS_JSON_FILE = "central_stock_ratings.json"
+DEFAULT_CENTRAL_RATINGS_JSONL_FILE = "central_stock_ratings.jsonl"
 VALID_LABELS = {"winner", "potential_winner", "maybe", "bad"}
 MARKET_DEFAULTS = {
     "asx": {
@@ -71,6 +74,7 @@ CURRENT_JOB: Dict[str, Any] = {
     "log": "",
 }
 FILTER_LOCK = threading.Lock()
+RATING_FILE_LOCK = threading.Lock()
 FILTER_JOB: Dict[str, Any] = {
     "running": False,
     "started_at": None,
@@ -156,6 +160,16 @@ def _central_ratings_path() -> Path:
     return _cache_path(configured or DEFAULT_CENTRAL_RATINGS_FILE)
 
 
+def _central_ratings_json_path() -> Path:
+    configured = str(os.environ.get("MONEYMAKER_CENTRAL_RATINGS_JSON", "")).strip()
+    return _cache_path(configured or DEFAULT_CENTRAL_RATINGS_JSON_FILE)
+
+
+def _central_ratings_jsonl_path() -> Path:
+    configured = str(os.environ.get("MONEYMAKER_CENTRAL_RATINGS_JSONL", "")).strip()
+    return _cache_path(configured or DEFAULT_CENTRAL_RATINGS_JSONL_FILE)
+
+
 def _ensure_central_ratings_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -210,6 +224,43 @@ def _central_rater_name() -> Optional[str]:
     return str(os.environ.get("USERNAME") or os.environ.get("USER") or "").strip() or None
 
 
+def _safe_json_object(raw: Any) -> Dict[str, Any]:
+    try:
+        value = json.loads(str(raw or "{}"))
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _write_central_rating_json_event(event: Dict[str, Any]) -> None:
+    """Write a GitHub-friendly central rating log beside the app."""
+
+    json_path = _central_ratings_json_path()
+    jsonl_path = _central_ratings_jsonl_path()
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with RATING_FILE_LOCK:
+        with jsonl_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+
+        events: List[Dict[str, Any]] = []
+        if json_path.exists():
+            try:
+                loaded = json.loads(json_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, list):
+                    events = [item for item in loaded if isinstance(item, dict)]
+            except json.JSONDecodeError:
+                backup = json_path.with_suffix(f".bad-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.json")
+                json_path.replace(backup)
+                events = []
+
+        events.append(event)
+        temp_path = json_path.with_suffix(".tmp")
+        temp_path.write_text(json.dumps(events, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        temp_path.replace(json_path)
+
+
 def _record_central_rating_event(
     source_conn: sqlite3.Connection,
     cache_file: str,
@@ -246,6 +297,33 @@ def _record_central_rating_event(
     if not row:
         return
 
+    event = {
+        "event_id": str(uuid.uuid4()),
+        "event_at_utc": event_at,
+        "action": action,
+        "rated_by": _central_rater_name(),
+        "market": _central_market_from_cache(cache_file),
+        "cache_file": str(_cache_path(cache_file)),
+        "scan_id": scan_id,
+        "scan_created_at_utc": row["scan_created_at_utc"],
+        "provider": row["provider"],
+        "query": row["query"],
+        "ticker": ticker,
+        "label": label,
+        "note": note,
+        "rank": row["rank"],
+        "signal_date": row["signal_date"],
+        "close_price": _float_or_none(row["close_price"]),
+        "market_cap": _float_or_none(row["market_cap"]),
+        "avg_volume": _float_or_none(row["avg_volume"]),
+        "volume_ratio": _float_or_none(row["volume_ratio"]),
+        "sector": row["sector"],
+        "industry": row["industry"],
+        "result": _safe_json_object(row["result_json"]),
+        "yahoo_url": f"https://finance.yahoo.com/quote/{ticker}",
+    }
+    _write_central_rating_json_event(event)
+
     central_path = _central_ratings_path()
     central_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(str(central_path)) as central_conn:
@@ -261,28 +339,28 @@ def _record_central_rating_event(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                event_at,
-                action,
-                _central_rater_name(),
-                _central_market_from_cache(cache_file),
-                str(_cache_path(cache_file)),
-                scan_id,
-                row["scan_created_at_utc"],
-                row["provider"],
-                row["query"],
-                ticker,
-                label,
-                note,
-                row["rank"],
-                row["signal_date"],
-                _float_or_none(row["close_price"]),
-                _float_or_none(row["market_cap"]),
-                _float_or_none(row["avg_volume"]),
-                _float_or_none(row["volume_ratio"]),
-                row["sector"],
-                row["industry"],
+                event["event_at_utc"],
+                event["action"],
+                event["rated_by"],
+                event["market"],
+                event["cache_file"],
+                event["scan_id"],
+                event["scan_created_at_utc"],
+                event["provider"],
+                event["query"],
+                event["ticker"],
+                event["label"],
+                event["note"],
+                event["rank"],
+                event["signal_date"],
+                event["close_price"],
+                event["market_cap"],
+                event["avg_volume"],
+                event["volume_ratio"],
+                event["sector"],
+                event["industry"],
                 row["result_json"],
-                f"https://finance.yahoo.com/quote/{ticker}",
+                event["yahoo_url"],
             ),
         )
         central_conn.commit()
