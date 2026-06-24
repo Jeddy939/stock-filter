@@ -4,8 +4,12 @@ setlocal
 cd /d "%~dp0"
 title Export MoneyMaker Rating Analysis
 
-if not exist "ratings" mkdir "ratings"
-if "%MONEYMAKER_CENTRAL_RATINGS_DB%"=="" set "MONEYMAKER_CENTRAL_RATINGS_DB=%~dp0ratings\central_stock_ratings.sqlite"
+if "%MONEYMAKER_CENTRAL_RATINGS_DB%"=="" (
+    if not exist "ratings" mkdir "ratings"
+    set "MONEYMAKER_CENTRAL_RATINGS_DB=%~dp0ratings\central_stock_ratings.sqlite"
+) else (
+    for %%I in ("%MONEYMAKER_CENTRAL_RATINGS_DB%") do if not exist "%%~dpI" mkdir "%%~dpI"
+)
 
 set "PYTHON_CMD="
 

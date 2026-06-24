@@ -150,6 +150,41 @@ If you want the central SQLite file somewhere else, set the environment variable
 `MONEYMAKER_RATER_NAME` if you want a friendly name instead of your Windows
 username in the export.
 
+For a OneDrive-backed ratings file, double-click:
+
+```text
+USE_ONEDRIVE_RATINGS.bat
+```
+
+That points MoneyMaker at:
+
+```text
+%OneDrive%\MoneyMaker\ratings\central_stock_ratings.sqlite
+```
+
+Then start the app with:
+
+```text
+START_MONEYMAKER_ONEDRIVE.bat
+```
+
+Open the OneDrive ratings folder with:
+
+```text
+OPEN_ONEDRIVE_RATINGS_FOLDER.bat
+```
+
+Export the OneDrive ratings database with:
+
+```text
+EXPORT_RATING_ANALYSIS_ONEDRIVE.bat
+```
+
+OneDrive is file sync, not a live database server. It works best for one main
+user, or for a small number of people who are not rating at the exact same time.
+Anyone else must have the shared OneDrive folder synced on their computer and
+must launch MoneyMaker with the OneDrive launcher.
+
 Run the local browser UI from the repository root:
 
 ```bash

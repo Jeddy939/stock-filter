@@ -4,8 +4,12 @@ setlocal
 cd /d "%~dp0"
 title Moneymaker Stock Filter
 
-if not exist "ratings" mkdir "ratings"
-set "MONEYMAKER_CENTRAL_RATINGS_DB=%~dp0ratings\central_stock_ratings.sqlite"
+if "%MONEYMAKER_CENTRAL_RATINGS_DB%"=="" (
+    if not exist "ratings" mkdir "ratings"
+    set "MONEYMAKER_CENTRAL_RATINGS_DB=%~dp0ratings\central_stock_ratings.sqlite"
+) else (
+    for %%I in ("%MONEYMAKER_CENTRAL_RATINGS_DB%") do if not exist "%%~dpI" mkdir "%%~dpI"
+)
 if "%MONEYMAKER_RATER_NAME%"=="" set "MONEYMAKER_RATER_NAME=%USERNAME%"
 
 set "PYTHON_CMD="
