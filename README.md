@@ -9,7 +9,7 @@ screening filters used by the desktop tools.
 The package exposes a small CLI. To fetch data into `stock_data.json` run:
 
 ```bash
-python -m moneymaker fetch asx_200_tickers.txt
+python -m moneymaker fetch asx_yfinance_valid_stocks_2026-05-11.txt
 ```
 
 Fetches use a SQLite cache by default (`stock_cache.sqlite`). The first run
@@ -22,19 +22,19 @@ You can control the number of threads used when downloading data with the
 `--workers` option (default is 10):
 
 ```bash
-python -m moneymaker fetch asx_200_tickers.txt --workers 20
+python -m moneymaker fetch asx_yfinance_valid_stocks_2026-05-11.txt --workers 20
 ```
 
 To run a cached incremental update and export JSON:
 
 ```bash
-python -m moneymaker fetch asx_200_tickers.txt --cache-file stock_cache.sqlite --output stock_data.json
+python -m moneymaker fetch asx_yfinance_valid_stocks_2026-05-11.txt --cache-file stock_cache.sqlite --output stock_data.json
 ```
 
 To force a direct uncached fetch:
 
 ```bash
-python -m moneymaker fetch asx_200_tickers.txt --no-cache --output stock_data.json
+python -m moneymaker fetch asx_yfinance_valid_stocks_2026-05-11.txt --no-cache --output stock_data.json
 ```
 
 The cache also stores company info. By default, company info is refreshed after
@@ -42,7 +42,7 @@ The cache also stores company info. By default, company info is refreshed after
 late adjustments or corrections. You can tune that behavior:
 
 ```bash
-python -m moneymaker fetch asx_200_tickers.txt --info-refresh-days 14 --history-refresh-days 7
+python -m moneymaker fetch asx_yfinance_valid_stocks_2026-05-11.txt --info-refresh-days 14 --history-refresh-days 7
 ```
 
 `yfinance` remains the default data provider for compatibility. For a smaller
@@ -50,13 +50,13 @@ smoke test, limit the run to the first 100 symbols without editing the source
 file:
 
 ```bash
-python -m moneymaker fetch your_nasdaq_screener_list.txt --limit 100 --output stock_data_100.json
+python -m moneymaker fetch us_tickers_nasdaqtrader.txt --limit 100 --output stock_data_100.json
 ```
 
 An opt-in Stooq historical OHLCV source is also available:
 
 ```bash
-python -m moneymaker fetch your_nasdaq_screener_list.txt --provider stooq --limit 100 --output stock_data_100_stooq.json
+python -m moneymaker fetch us_tickers_nasdaqtrader.txt --provider stooq --limit 100 --output stock_data_100_stooq.json
 ```
 
 Stooq is used for daily historical prices only; company info and market cap are
@@ -117,6 +117,10 @@ The UI has separate market defaults:
 ASX -> stock_cache.sqlite, yfinance, ASX ticker files
 US  -> stock_cache_us.sqlite, yfinance, us_tickers_nasdaqtrader.txt
 ```
+
+The active ASX ticker file is `asx_yfinance_valid_stocks_2026-05-11.txt`.
+Older ticker lists and test screener inputs are kept under
+`legacy/unused_screeners/` so they do not clutter the app dropdown.
 
 Use the **Market** selector to switch between ASX and US mode. US mode keeps its
 own SQLite cache so American data does not mix with ASX data. Click **Download

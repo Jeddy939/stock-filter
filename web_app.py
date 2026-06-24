@@ -31,7 +31,7 @@ from moneymaker.filters import analyze_stock_from_local_data
 
 DEFAULT_CACHE_FILE = fetcher.DEFAULT_CACHE_FILE
 DEFAULT_US_CACHE_FILE = fetcher.DEFAULT_US_CACHE_FILE
-DEFAULT_TICKER_FILE = "asx_200_tickers.txt"
+DEFAULT_TICKER_FILE = "asx_yfinance_valid_stocks_2026-05-11.txt"
 DEFAULT_US_TICKER_FILE = fetcher.DEFAULT_US_TICKER_FILE
 DEFAULT_OUTPUT_FILE = "stock_data_web.json"
 VALID_LABELS = {"winner", "potential_winner", "maybe", "bad"}
@@ -1591,7 +1591,7 @@ INDEX_HTML = r"""<!doctype html>
         <label for="tickerFileSelect">Available ticker files</label>
         <select id="tickerFileSelect"></select>
         <label for="tickerFile">Ticker file</label>
-        <input id="tickerFile" value="asx_200_tickers.txt">
+        <input id="tickerFile" value="asx_yfinance_valid_stocks_2026-05-11.txt">
         <div class="grid-2">
           <div>
             <label for="provider">Provider</label>
@@ -1846,7 +1846,7 @@ INDEX_HTML = r"""<!doctype html>
     const marketDefaults = {
       asx: {
         cacheFile: "stock_cache.sqlite",
-        tickerFile: "asx_200_tickers.txt",
+        tickerFile: "asx_yfinance_valid_stocks_2026-05-11.txt",
         provider: "yfinance",
         chartTicker: "CBA.AX",
         output: "stock_data_web.json"
