@@ -106,6 +106,27 @@ It writes timestamped TXT and CSV files into the local `exports/` folder. If
 someone else labelled stocks on their machine, copy their `stock_cache.sqlite`
 or `stock_cache_us.sqlite` into this folder first, then run the exporter.
 
+New ratings are also appended to a local central database:
+
+```text
+central_stock_ratings.sqlite
+```
+
+Each event records the rating timestamp, rater name, ticker, label, scan id,
+rank, signal date, close price, volume ratio, market cap, sector, industry,
+cache source, and Yahoo Finance link. Double-click this to export the central
+rating history with latest cached price and return percentage:
+
+```text
+EXPORT_RATING_ANALYSIS.bat
+```
+
+To make multiple people write to the same central file, set the environment
+variable `MONEYMAKER_CENTRAL_RATINGS_DB` to a shared path before launching the
+app, for example a shared OneDrive/Dropbox file path. Set
+`MONEYMAKER_RATER_NAME` if you want a friendly name instead of the Windows
+username in the export.
+
 Run the local browser UI from the repository root:
 
 ```bash

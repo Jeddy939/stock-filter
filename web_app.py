@@ -8,6 +8,7 @@ import io
 import json
 import math
 import numbers
+import os
 import sqlite3
 import sys
 import threading
@@ -34,6 +35,7 @@ DEFAULT_US_CACHE_FILE = fetcher.DEFAULT_US_CACHE_FILE
 DEFAULT_TICKER_FILE = "asx_yfinance_valid_stocks_2026-05-11.txt"
 DEFAULT_US_TICKER_FILE = fetcher.DEFAULT_US_TICKER_FILE
 DEFAULT_OUTPUT_FILE = "stock_data_web.json"
+DEFAULT_CENTRAL_RATINGS_FILE = "central_stock_ratings.sqlite"
 VALID_LABELS = {"winner", "potential_winner", "maybe", "bad"}
 MARKET_DEFAULTS = {
     "asx": {
@@ -147,6 +149,143 @@ def _connect_write(cache_file: str = DEFAULT_CACHE_FILE) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _central_ratings_path() -> Path:
+    configured = str(os.environ.get("MONEYMAKER_CENTRAL_RATINGS_DB", "")).strip()
+    return _cache_path(configured or DEFAULT_CENTRAL_RATINGS_FILE)
+
+
+def _ensure_central_ratings_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS rating_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_at_utc TEXT NOT NULL,
+            action TEXT NOT NULL,
+            rated_by TEXT,
+            market TEXT,
+            cache_file TEXT NOT NULL,
+            scan_id INTEGER NOT NULL,
+            scan_created_at_utc TEXT,
+            provider TEXT,
+            query TEXT,
+            ticker TEXT NOT NULL,
+            label TEXT,
+            note TEXT,
+            rank INTEGER,
+            signal_date TEXT,
+            close_price REAL,
+            market_cap REAL,
+            avg_volume REAL,
+            volume_ratio REAL,
+            sector TEXT,
+            industry TEXT,
+            result_json TEXT,
+            yahoo_url TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_rating_events_ticker
+            ON rating_events(ticker);
+        CREATE INDEX IF NOT EXISTS idx_rating_events_label
+            ON rating_events(label);
+        CREATE INDEX IF NOT EXISTS idx_rating_events_event_at
+            ON rating_events(event_at_utc);
+        """
+    )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(rating_events)")}
+    if "rated_by" not in columns:
+        conn.execute("ALTER TABLE rating_events ADD COLUMN rated_by TEXT")
+    conn.commit()
+
+
+def _central_market_from_cache(cache_file: str) -> str:
+    return "US" if "us" in Path(cache_file).stem.lower() else "ASX"
+
+
+def _central_rater_name() -> Optional[str]:
+    configured = str(os.environ.get("MONEYMAKER_RATER_NAME", "")).strip()
+    if configured:
+        return configured
+    return str(os.environ.get("USERNAME") or os.environ.get("USER") or "").strip() or None
+
+
+def _record_central_rating_event(
+    source_conn: sqlite3.Connection,
+    cache_file: str,
+    scan_id: int,
+    ticker: str,
+    label: Optional[str],
+    note: Optional[str],
+    event_at: str,
+    action: str,
+) -> None:
+    """Append a rating event to the central ratings database."""
+
+    row = source_conn.execute(
+        """
+        SELECT
+            sr.rank,
+            sr.signal_date,
+            sr.close_price,
+            sr.market_cap,
+            sr.avg_volume,
+            sr.volume_ratio,
+            sr.sector,
+            sr.industry,
+            sr.result_json,
+            s.created_at_utc AS scan_created_at_utc,
+            s.provider,
+            s.query
+        FROM scan_results sr
+        JOIN scan_runs s ON s.id = sr.scan_id
+        WHERE sr.scan_id = ? AND sr.ticker = ?
+        """,
+        (scan_id, ticker),
+    ).fetchone()
+    if not row:
+        return
+
+    central_path = _central_ratings_path()
+    central_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(central_path)) as central_conn:
+        _ensure_central_ratings_schema(central_conn)
+        central_conn.execute(
+            """
+            INSERT INTO rating_events (
+                event_at_utc, action, rated_by, market, cache_file, scan_id,
+                scan_created_at_utc, provider, query, ticker, label, note,
+                rank, signal_date, close_price, market_cap, avg_volume,
+                volume_ratio, sector, industry, result_json, yahoo_url
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_at,
+                action,
+                _central_rater_name(),
+                _central_market_from_cache(cache_file),
+                str(_cache_path(cache_file)),
+                scan_id,
+                row["scan_created_at_utc"],
+                row["provider"],
+                row["query"],
+                ticker,
+                label,
+                note,
+                row["rank"],
+                row["signal_date"],
+                _float_or_none(row["close_price"]),
+                _float_or_none(row["market_cap"]),
+                _float_or_none(row["avg_volume"]),
+                _float_or_none(row["volume_ratio"]),
+                row["sector"],
+                row["industry"],
+                row["result_json"],
+                f"https://finance.yahoo.com/quote/{ticker}",
+            ),
+        )
+        central_conn.commit()
 
 
 def _ensure_scan_schema(conn: sqlite3.Connection) -> None:
@@ -742,14 +881,24 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
         if not exists:
             raise ValueError(f"{ticker} is not in scan {scan_id}")
 
+        labeled_at = datetime.utcnow().isoformat(timespec="seconds")
         if label in ("", "clear", "none", "unlabelled", "unlabeled"):
             conn.execute("DELETE FROM scan_labels WHERE scan_id = ? AND ticker = ?", (scan_id, ticker))
+            _record_central_rating_event(
+                conn,
+                cache_file,
+                scan_id,
+                ticker,
+                None,
+                note,
+                labeled_at,
+                "clear",
+            )
             conn.commit()
             return {"ok": True, "scan_id": scan_id, "ticker": ticker, "label": None}
         if label not in VALID_LABELS:
             raise ValueError("label must be winner, potential_winner, maybe, bad, or clear")
 
-        labeled_at = datetime.utcnow().isoformat(timespec="seconds")
         conn.execute(
             """
             INSERT INTO scan_labels (scan_id, ticker, label, note, labeled_at_utc)
@@ -761,8 +910,25 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
             """,
             (scan_id, ticker, label, note, labeled_at),
         )
+        _record_central_rating_event(
+            conn,
+            cache_file,
+            scan_id,
+            ticker,
+            label,
+            note,
+            labeled_at,
+            "label",
+        )
         conn.commit()
-    return {"ok": True, "scan_id": scan_id, "ticker": ticker, "label": label, "note": note}
+    return {
+        "ok": True,
+        "scan_id": scan_id,
+        "ticker": ticker,
+        "label": label,
+        "note": note,
+        "central_ratings_file": str(_central_ratings_path()),
+    }
 
 
 def _scan_summary(params: Dict[str, List[str]]) -> Dict[str, Any]:

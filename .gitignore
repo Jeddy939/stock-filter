@@ -12,3 +12,6 @@ rate_limit_calibration*.json
 rate_limit_calibration*.sqlite*
 yfinance_rate_limit_measurement*.json
 exports/
+central_stock_ratings.sqlite
+central_stock_ratings.sqlite-shm
+central_stock_ratings.sqlite-wal
