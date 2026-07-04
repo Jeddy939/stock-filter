@@ -43,6 +43,7 @@ LEGACY_CENTRAL_RATINGS_FILE = "central_stock_ratings.sqlite"
 DEFAULT_CENTRAL_RATINGS_JSON_FILE = "central_stock_ratings.json"
 DEFAULT_CENTRAL_RATINGS_JSONL_FILE = "central_stock_ratings.jsonl"
 DEFAULT_SHEETS_PENDING_FILE = "ratings/google_sheets_pending_ratings.jsonl"
+FILTER_HISTORY_CHUNK_SIZE = 250
 VALID_LABELS = {"winner", "potential_winner", "maybe", "bad"}
 MARKET_DEFAULTS = {
     "asx": {
@@ -688,6 +689,47 @@ def _load_info_map(conn: sqlite3.Connection, tickers: Iterable[str]) -> Dict[str
     return info
 
 
+def _load_cached_history_frames(
+    conn: sqlite3.Connection,
+    provider: str,
+    tickers: Sequence[str],
+    start: datetime,
+    end: datetime,
+) -> Dict[str, pd.DataFrame]:
+    if not tickers:
+        return {}
+    placeholders = ",".join("?" for _ in tickers)
+    rows = conn.execute(
+        f"""
+        SELECT ticker, date, open, high, low, close, volume
+        FROM price_history
+        WHERE provider = ?
+          AND ticker IN ({placeholders})
+          AND date >= ?
+          AND date <= ?
+        ORDER BY ticker, date
+        """,
+        (
+            provider,
+            *tickers,
+            fetcher._date_string(start),
+            fetcher._date_string(end),
+        ),
+    ).fetchall()
+    if not rows:
+        return {}
+
+    frame = pd.DataFrame(
+        rows,
+        columns=["Ticker", "Date", "Open", "High", "Low", "Close", "Volume"],
+    )
+    frame["Date"] = pd.to_datetime(frame["Date"])
+    histories: Dict[str, pd.DataFrame] = {}
+    for ticker, group in frame.groupby("Ticker", sort=False):
+        histories[str(ticker)] = group.set_index("Date")[["Open", "High", "Low", "Close", "Volume"]]
+    return histories
+
+
 def _range_start(latest: pd.Timestamp, range_key: str) -> Optional[pd.Timestamp]:
     """Return the earliest timestamp for a chart range."""
 
@@ -1152,33 +1194,37 @@ def _run_filter(payload: Dict[str, Any], progress_callback=None) -> Dict[str, An
 
         end = datetime.now()
         start = end - pd.DateOffset(years=years)
-        histories = fetcher._load_cached_histories(conn, provider, tickers, start.to_pydatetime(), end)
+        start_dt = start.to_pydatetime() if hasattr(start, "to_pydatetime") else start
         info_map = _load_info_map(conn, tickers)
 
-    results = []
-    skipped = 0
-    if progress_callback:
-        progress_callback("Filtering", 0, len(tickers), f"Scanning {len(tickers)} cached tickers.")
-    for index, ticker in enumerate(tickers, 1):
-        history = histories.get(ticker)
-        if history is None or history.empty:
-            skipped += 1
-            if progress_callback:
-                progress_callback("Filtering", index, len(tickers), f"Skipped {ticker}: no cached history.")
-            continue
-        result = analyze_stock_from_local_data(
-            ticker,
-            {
-                "info": info_map.get(ticker, {}),
-                "history": _split_history(history),
-            },
-            config,
-        )
-        if result:
-            result.update(_company_features(info_map.get(ticker, {})))
-            results.append(result)
+        results = []
+        skipped = 0
         if progress_callback:
-            progress_callback("Filtering", index, len(tickers), f"Filtered {index}/{len(tickers)}: {ticker}")
+            progress_callback("Filtering", 0, len(tickers), f"Scanning {len(tickers)} cached tickers.")
+        for chunk_start in range(0, len(tickers), FILTER_HISTORY_CHUNK_SIZE):
+            chunk = tickers[chunk_start : chunk_start + FILTER_HISTORY_CHUNK_SIZE]
+            histories = _load_cached_history_frames(conn, provider, chunk, start_dt, end)
+            for offset, ticker in enumerate(chunk, 1):
+                index = chunk_start + offset
+                history = histories.get(ticker)
+                if history is None or history.empty:
+                    skipped += 1
+                    if progress_callback:
+                        progress_callback("Filtering", index, len(tickers), f"Skipped {ticker}: no cached history.")
+                    continue
+                result = analyze_stock_from_local_data(
+                    ticker,
+                    {
+                        "info": info_map.get(ticker, {}),
+                        "history": _split_history(history),
+                    },
+                    config,
+                )
+                if result:
+                    result.update(_company_features(info_map.get(ticker, {})))
+                    results.append(result)
+                if progress_callback:
+                    progress_callback("Filtering", index, len(tickers), f"Filtered {index}/{len(tickers)}: {ticker}")
     results.sort(
         key=lambda item: (
             int(item.get("ma_history_sort") or (0 if item.get("ma_data_complete", True) else 99)),
