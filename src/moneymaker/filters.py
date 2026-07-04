@@ -168,6 +168,13 @@ def analyze_stock_from_local_data(
                 for name, period in ma_periods.items()
                 if available_weeks < period
             ]
+            shortest_ma_period = min(ma_periods.values()) if ma_periods else 0
+            if shortest_ma_period and available_weeks < shortest_ma_period:
+                if log_queue and i == 1:
+                    log_queue.put(
+                        f"  -> SKIPPED: {ticker} - Not enough data for shortest moving average ({shortest_ma_period} weeks)."
+                    )
+                continue
 
             if available_weeks < avg_volume_weeks + 1:
                 if log_queue and i == 1:
