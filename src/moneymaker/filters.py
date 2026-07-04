@@ -143,17 +143,10 @@ def analyze_stock_from_local_data(
             available_weeks = len(pre_target_slice)
 
             missing_ma_periods = [
-                (name, period) for name, period in ma_periods.items() if available_weeks < period
+                {"name": name, "period": period, "available_weeks": available_weeks}
+                for name, period in ma_periods.items()
+                if available_weeks < period
             ]
-            if missing_ma_periods:
-                if log_queue and i == 1:
-                    formatted_periods = ", ".join(
-                        f"{name} ({period} weeks)" for name, period in missing_ma_periods
-                    )
-                    log_queue.put(
-                        f"  -> SKIPPED: {ticker} - Not enough data for moving averages: {formatted_periods}."
-                    )
-                continue
 
             if available_weeks < avg_volume_weeks + 1:
                 if log_queue and i == 1:
@@ -185,6 +178,8 @@ def analyze_stock_from_local_data(
 
             price_conditions_met = True
             for ma_name, period in ma_periods.items():
+                if available_weeks < period:
+                    continue
                 ma_value = ma_series_by_name[ma_name].get(target_week_start_date, float("nan"))
                 if pd.isna(ma_value) or current_week_close_price <= ma_value:
                     price_conditions_met = False
@@ -222,6 +217,10 @@ def analyze_stock_from_local_data(
                     "volume_ratio": current_week_volume / preceding_avg_volume
                     if preceding_avg_volume > 0
                     else float("inf"),
+                    "ma_data_complete": not missing_ma_periods,
+                    "missing_ma_periods": missing_ma_periods,
+                    "available_ma_weeks": available_weeks,
+                    "history_weeks": len(weekly_data),
                 }
 
         if log_queue:

@@ -1179,7 +1179,13 @@ def _run_filter(payload: Dict[str, Any], progress_callback=None) -> Dict[str, An
             results.append(result)
         if progress_callback:
             progress_callback("Filtering", index, len(tickers), f"Filtered {index}/{len(tickers)}: {ticker}")
-    results.sort(key=lambda item: item["volume_ratio"], reverse=True)
+    results.sort(
+        key=lambda item: (
+            0 if item.get("ma_data_complete", True) else 1,
+            -float(item.get("volume_ratio") or 0),
+        )
+    )
+    incomplete_ma_count = sum(1 for item in results if not item.get("ma_data_complete", True))
     scan_id = _save_scan(cache_file, provider, years, limit, query, config, tickers, results, skipped)
 
     return {
@@ -1187,6 +1193,7 @@ def _run_filter(payload: Dict[str, Any], progress_callback=None) -> Dict[str, An
         "scan_id": scan_id,
         "results": results,
         "result_count": len(results),
+        "incomplete_ma_count": incomplete_ma_count,
         "scanned_count": len(tickers),
         "skipped_no_history": skipped,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -1638,6 +1645,8 @@ INDEX_HTML = r"""<!doctype html>
     tr.label-potential_winner td:first-child { border-left: 3px solid var(--accent-2); }
     tr.label-maybe td:first-child { border-left: 3px solid var(--warn); }
     tr.label-bad td:first-child { border-left: 3px solid var(--bad); }
+    tr.incomplete-ma td { background: rgba(242, 193, 78, 0.06); }
+    tr.incomplete-ma td:nth-child(7) { color: var(--warn); }
     .results-wrap { max-height: calc(100vh - 210px); overflow: auto; border-radius: 6px; }
     .chart-controls {
       display: grid;
@@ -2007,12 +2016,12 @@ INDEX_HTML = r"""<!doctype html>
             <input id="maxCap" type="number" step="1" value="0">
           </div>
         </div>
-        <label>Moving averages weeks</label>
+        <label>Moving averages weeks (0 off)</label>
         <div class="grid-4">
           <input id="maShort" type="number" value="90">
           <input id="maIntermediate" type="number" value="180">
           <input id="maMedium" type="number" value="360">
-          <input id="maLong" type="number" value="700">
+          <input id="maLong" type="number" value="700" title="Set to 0 to turn off the 700-week moving average">
         </div>
         <div class="grid-2">
           <div>
@@ -2111,11 +2120,12 @@ INDEX_HTML = r"""<!doctype html>
                 <th style="width:105px">Market Cap</th>
                 <th style="width:110px">Avg Volume</th>
                 <th style="width:95px">Volume Ratio</th>
+                <th style="width:150px">MA Data</th>
                 <th style="width:260px">Label</th>
               </tr>
             </thead>
             <tbody id="resultsBody">
-              <tr><td colspan="7" style="text-align:left;color:var(--muted)">No results loaded.</td></tr>
+              <tr><td colspan="8" style="text-align:left;color:var(--muted)">No results loaded.</td></tr>
             </tbody>
           </table>
         </div>
@@ -2640,7 +2650,9 @@ INDEX_HTML = r"""<!doctype html>
           renderResults(payload.job.results || [], currentScanId);
           $("metricMatches").textContent = fmt.format((payload.job.results || []).length);
           const scanText = currentScanId ? `scan ${currentScanId}, ` : "";
-          $("resultMeta").textContent = `${scanText}${(payload.job.results || []).length} matches from ${summary.scanned_count || 0} scanned at ${summary.generated_at || ""}`;
+          const youngerCount = summary.incomplete_ma_count || 0;
+          const youngerText = youngerCount ? `, ${youngerCount} younger-history matches listed underneath` : "";
+          $("resultMeta").textContent = `${scanText}${(payload.job.results || []).length} matches${youngerText} from ${summary.scanned_count || 0} scanned at ${summary.generated_at || ""}`;
         }
       } catch (error) {
         $("filterStatus").textContent = error.message;
@@ -2743,6 +2755,13 @@ INDEX_HTML = r"""<!doctype html>
       ).join("")}</div>`;
     }
 
+    function maDataText(row) {
+      if (row.ma_data_complete !== false) return "Full";
+      const missing = Array.isArray(row.missing_ma_periods) ? row.missing_ma_periods : [];
+      if (!missing.length) return "Younger";
+      return `Younger: missing ${missing.map((item) => `${item.period}w`).join(", ")}`;
+    }
+
     function applyRowLabel(ticker, label) {
       const row = document.querySelector(`tr[data-ticker="${ticker}"]`);
       if (!row) return;
@@ -2792,18 +2811,20 @@ INDEX_HTML = r"""<!doctype html>
     function renderResults(results, scanId = null) {
       const body = $("resultsBody");
       if (!results.length) {
-        body.innerHTML = `<tr><td colspan="7" style="text-align:left;color:var(--muted)">No matches.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="8" style="text-align:left;color:var(--muted)">No matches.</td></tr>`;
         return;
       }
       body.innerHTML = results.map((row) => {
         const rowScanId = row.scan_id || scanId || "";
-        return `<tr data-ticker="${row.ticker}" data-scan-id="${rowScanId}" class="${row.label ? `label-${row.label}` : ""}">
+        const rowClasses = [row.label ? `label-${row.label}` : "", row.ma_data_complete === false ? "incomplete-ma" : ""].filter(Boolean).join(" ");
+        return `<tr data-ticker="${row.ticker}" data-scan-id="${rowScanId}" class="${rowClasses}">
           <td><a class="ticker chart-link" href="#" data-ticker="${row.ticker}">${row.ticker}</a></td>
           <td>${row.date}</td>
           <td>${Number(row.close_price).toFixed(2)}</td>
           <td>${marketCap(row.market_cap)}</td>
           <td>${fmt.format(Math.round(row.avg_volume || 0))}</td>
           <td>${Number(row.volume_ratio).toFixed(2)}x</td>
+          <td>${maDataText(row)}</td>
           <td>${labelButtons(row)}</td>
         </tr>`;
       }).join("");
