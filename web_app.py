@@ -1181,11 +1181,15 @@ def _run_filter(payload: Dict[str, Any], progress_callback=None) -> Dict[str, An
             progress_callback("Filtering", index, len(tickers), f"Filtered {index}/{len(tickers)}: {ticker}")
     results.sort(
         key=lambda item: (
-            0 if item.get("ma_data_complete", True) else 1,
+            int(item.get("ma_history_sort") or (0 if item.get("ma_data_complete", True) else 99)),
             -float(item.get("volume_ratio") or 0),
         )
     )
     incomplete_ma_count = sum(1 for item in results if not item.get("ma_data_complete", True))
+    ma_tier_counts: Dict[str, int] = {}
+    for item in results:
+        tier = str(item.get("ma_history_label") or ("Full" if item.get("ma_data_complete", True) else "Younger"))
+        ma_tier_counts[tier] = ma_tier_counts.get(tier, 0) + 1
     scan_id = _save_scan(cache_file, provider, years, limit, query, config, tickers, results, skipped)
 
     return {
@@ -1194,6 +1198,7 @@ def _run_filter(payload: Dict[str, Any], progress_callback=None) -> Dict[str, An
         "results": results,
         "result_count": len(results),
         "incomplete_ma_count": incomplete_ma_count,
+        "ma_tier_counts": ma_tier_counts,
         "scanned_count": len(tickers),
         "skipped_no_history": skipped,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -2651,7 +2656,11 @@ INDEX_HTML = r"""<!doctype html>
           $("metricMatches").textContent = fmt.format((payload.job.results || []).length);
           const scanText = currentScanId ? `scan ${currentScanId}, ` : "";
           const youngerCount = summary.incomplete_ma_count || 0;
-          const youngerText = youngerCount ? `, ${youngerCount} younger-history matches listed underneath` : "";
+          const tierCounts = summary.ma_tier_counts || {};
+          const youngerParts = Object.entries(tierCounts)
+            .filter(([label]) => label !== "Full")
+            .map(([label, count]) => `${count} ${label.toLowerCase()}`);
+          const youngerText = youngerCount ? `, younger groups: ${youngerParts.join(", ")}` : "";
           $("resultMeta").textContent = `${scanText}${(payload.job.results || []).length} matches${youngerText} from ${summary.scanned_count || 0} scanned at ${summary.generated_at || ""}`;
         }
       } catch (error) {
@@ -2757,6 +2766,10 @@ INDEX_HTML = r"""<!doctype html>
 
     function maDataText(row) {
       if (row.ma_data_complete !== false) return "Full";
+      if (row.ma_history_label) {
+        const weeks = Number(row.available_ma_weeks);
+        return Number.isFinite(weeks) ? `${row.ma_history_label} (${weeks}w)` : row.ma_history_label;
+      }
       const missing = Array.isArray(row.missing_ma_periods) ? row.missing_ma_periods : [];
       if (!missing.length) return "Younger";
       return `Younger: missing ${missing.map((item) => `${item.period}w`).join(", ")}`;

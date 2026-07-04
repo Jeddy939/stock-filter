@@ -15,6 +15,27 @@ _WEEKLY_AGGREGATIONS = {
 }
 
 
+def _ma_history_tier(ma_periods: Dict[str, int], missing_ma_periods: list) -> Dict:
+    if not missing_ma_periods:
+        return {
+            "ma_data_complete": True,
+            "ma_history_tier": "full",
+            "ma_history_sort": 0,
+            "ma_history_label": "Full",
+        }
+
+    missing_periods = sorted({int(item["period"]) for item in missing_ma_periods})
+    bucket_period = missing_periods[0]
+    active_periods_desc = sorted({int(period) for period in ma_periods.values()}, reverse=True)
+    sort_index = active_periods_desc.index(bucket_period) + 1 if bucket_period in active_periods_desc else 99
+    return {
+        "ma_data_complete": False,
+        "ma_history_tier": f"missing_{bucket_period}",
+        "ma_history_sort": sort_index,
+        "ma_history_label": f"Too young for {bucket_period}w",
+    }
+
+
 def _history_index_to_datetime(index_values) -> pd.DatetimeIndex:
     """Parse split-orient JSON indexes without the overhead of read_json."""
 
@@ -208,6 +229,7 @@ def analyze_stock_from_local_data(
                             )
                         continue
 
+                ma_history = _ma_history_tier(ma_periods, missing_ma_periods)
                 return {
                     "ticker": ticker,
                     "date": target_week_start_date.strftime("%Y-%m-%d"),
@@ -217,7 +239,7 @@ def analyze_stock_from_local_data(
                     "volume_ratio": current_week_volume / preceding_avg_volume
                     if preceding_avg_volume > 0
                     else float("inf"),
-                    "ma_data_complete": not missing_ma_periods,
+                    **ma_history,
                     "missing_ma_periods": missing_ma_periods,
                     "available_ma_weeks": available_weeks,
                     "history_weeks": len(weekly_data),
