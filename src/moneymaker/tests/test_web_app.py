@@ -5,6 +5,11 @@ import pytest
 import web_app
 
 
+@pytest.fixture(autouse=True)
+def isolated_shared_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("MONEYMAKER_SHARED_SETTINGS", str(tmp_path / "shared_settings.json"))
+
+
 def _seed_labelled_scan(cache_file):
     with web_app._connect_write(str(cache_file)) as conn:
         web_app._ensure_scan_schema(conn)
@@ -157,3 +162,24 @@ def test_saved_picks_payload_keeps_confirmation_list_visible_when_filtered(tmp_p
     assert payload["picks"] == []
     assert len(payload["needs_confirmation"]) == 1
     assert payload["needs_confirmation"][0]["ticker"] == "AAA"
+
+
+def test_apply_saved_ratings_to_results_marks_existing_pick(tmp_path):
+    cache_file = tmp_path / "stock_cache.sqlite"
+    scan_id = _seed_labelled_scan(cache_file)
+    web_app._label_scan_result(
+        {
+            "cache_file": str(cache_file),
+            "scan_id": scan_id,
+            "ticker": "AAA",
+            "label": "potential_winner",
+        }
+    )
+    results = [{"ticker": "AAA"}, {"ticker": "BBB"}]
+
+    web_app._apply_saved_ratings_to_results(str(cache_file), results)
+
+    assert results[0]["label"] == "potential_winner"
+    assert results[0]["label_display"] == "Potential Winner"
+    assert results[0]["saved_pick"]["source"]
+    assert results[1]["label"] is None

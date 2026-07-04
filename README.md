@@ -281,9 +281,9 @@ market, category, and ticker filters above the table to narrow the list.
 ### Shared picks between computers/users
 
 Shared picks use one central Google Sheet. Each computer keeps a local copy in
-SQLite. Nothing is sent automatically when the app opens or when a pick is
-marked; use the one sync batch file when you want to send and receive shared
-picks.
+SQLite. Once a shared Sheet is linked, the app syncs when it opens and after a
+pick is marked. The same saved ratings are applied to new filter results, so a
+stock that was already rated appears with its category button highlighted.
 
 In Google Cloud, enable both APIs for the same OAuth app:
 
@@ -319,10 +319,10 @@ Second computer:
 3. Paste the real shared Google Sheet link.
 ```
 
-After the Sheet is linked, future runs of `SEND_PICKS_TO_GOOGLE_SHEETS.bat`
-use the saved setting and immediately send/receive picks. Do not paste the
-local Moneymaker browser URL, and do not paste anything from the Google secret
-JSON.
+After the Sheet is linked, future app starts sync automatically. You can also
+run `SEND_PICKS_TO_GOOGLE_SHEETS.bat` any time to force a send/receive sync.
+Do not paste the local Moneymaker browser URL, and do not paste anything from
+the Google secret JSON.
 
 If the Google app is still in Testing mode, every Google account that syncs the
 shared list must also be added as a Google Cloud test user.

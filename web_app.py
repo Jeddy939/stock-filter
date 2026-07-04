@@ -1409,6 +1409,59 @@ def _local_tracked_picks(
     return picks
 
 
+def _tracked_pick_map(cache_file: str, tickers: Iterable[str], market: str = "all") -> Dict[str, Dict[str, Any]]:
+    wanted = {str(ticker or "").strip().upper() for ticker in tickers if str(ticker or "").strip()}
+    if not wanted:
+        return {}
+    with _connect_write(cache_file) as conn:
+        _ensure_scan_schema(conn)
+        market = _infer_market(cache_file, market)
+        clauses = [f"ticker IN ({','.join('?' for _ in wanted)})"]
+        params: List[Any] = sorted(wanted)
+        if market != "all":
+            clauses.append("market = ?")
+            params.append(market)
+        rows = conn.execute(
+            f"""
+            SELECT
+                market,
+                ticker,
+                label,
+                note,
+                added_at_utc,
+                updated_at_utc,
+                source,
+                scan_id,
+                signal_date,
+                close_price,
+                market_cap,
+                sector,
+                industry
+            FROM tracked_picks
+            WHERE {" AND ".join(clauses)}
+            """,
+            params,
+        ).fetchall()
+    return {row["ticker"]: dict(row) for row in rows}
+
+
+def _apply_saved_ratings_to_results(cache_file: str, results: Sequence[Dict[str, Any]]) -> None:
+    picks = _tracked_pick_map(cache_file, (row.get("ticker") for row in results), market="all")
+    for row in results:
+        pick = picks.get(str(row.get("ticker") or "").strip().upper())
+        if not pick:
+            row.setdefault("label", None)
+            continue
+        row["label"] = pick.get("label")
+        row["label_display"] = _label_display(pick.get("label"))
+        row["saved_pick"] = {
+            "market": pick.get("market"),
+            "source": pick.get("source"),
+            "added_at_utc": pick.get("added_at_utc"),
+            "updated_at_utc": pick.get("updated_at_utc"),
+        }
+
+
 def _saved_picks_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
     cache_file = params.get("cache_file", [DEFAULT_CACHE_FILE])[0] or DEFAULT_CACHE_FILE
     market = _infer_market(cache_file, params.get("market", ["all"])[0])
@@ -1485,6 +1538,11 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
             )
             conn.commit()
             sync_error = None
+            if _load_shared_settings().get("sheet_id"):
+                try:
+                    _sync_shared_picks(cache_file)
+                except Exception as exc:
+                    sync_error = str(exc)
             return {
                 "ok": True,
                 "scan_id": scan_id,
@@ -1521,6 +1579,11 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
         )
         conn.commit()
     sync_error = None
+    if _load_shared_settings().get("sheet_id"):
+        try:
+            _sync_shared_picks(cache_file)
+        except Exception as exc:
+            sync_error = str(exc)
     return {
         "ok": True,
         "scan_id": scan_id,
@@ -2075,6 +2138,7 @@ def _run_filter(payload: Dict[str, Any], progress_callback=None) -> Dict[str, An
         tier = str(item.get("ma_history_label") or ("Full" if item.get("ma_data_complete", True) else "Younger"))
         ma_tier_counts[tier] = ma_tier_counts.get(tier, 0) + 1
     scan_id = _save_scan(cache_file, provider, years, limit, query, config, tickers, results, skipped)
+    _apply_saved_ratings_to_results(cache_file, results)
 
     return {
         "ok": True,
@@ -3396,7 +3460,7 @@ INDEX_HTML = r"""<!doctype html>
         $("topStatus").className = "status-line bad";
       }).finally(() => {
         loadChart();
-        loadSavedPicks(false);
+        loadSavedPicks(true);
       });
     }
 
