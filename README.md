@@ -133,6 +133,20 @@ events with:
 SYNC_PENDING_SHEETS_RATINGS.bat
 ```
 
+To send ratings that were made on another computer before Sheets was set up,
+copy these two files to that computer's MoneyMaker folder and double-click the
+BAT file:
+
+```text
+SEND_EXISTING_RATINGS_TO_SHEETS.bat
+send_existing_ratings_to_sheets.py
+```
+
+It scans old scan labels in `stock_cache.sqlite` and `stock_cache_us.sqlite`,
+newer central ratings in `ratings\central_stock_ratings.sqlite`, and the
+central JSON/JSONL backup files. It sends all found ratings to the configured
+Google Sheet and writes an audit file into `exports`.
+
 Ratings are also appended to the local analysis database:
 
 ```text
