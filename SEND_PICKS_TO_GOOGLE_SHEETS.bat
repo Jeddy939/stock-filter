@@ -72,21 +72,38 @@ if "%GOOGLE_SECRET_FOUND%"=="" (
 )
 
 echo.
-echo This sends your saved picks to a shared Google Sheet.
-echo The Google secret is the JSON file already in this folder.
+echo This is the one shared-picks sync tool.
+echo The Google secret stays as the JSON file in this folder.
 echo Do not paste anything from the secret JSON into this window.
 echo.
 set /p "USER_NAME=Your display name for shared picks, or press Enter to leave blank: "
 echo.
 
 if exist "moneymaker_shared_google.json" (
-    echo Using the saved shared Google Sheet setting.
-    echo Syncing picks...
+    echo Using the saved shared Google Sheet setting from moneymaker_shared_google.json.
+    echo Sending and receiving saved picks now...
     %PYTHON_CMD% sync_picks_to_google_sheets.py --cache-file "%CACHE_FILE%" --user-name "%USER_NAME%"
 ) else (
-    echo No shared Google Sheet is configured yet.
-    echo Creating a new shared Google Sheet, then syncing picks...
-    %PYTHON_CMD% sync_picks_to_google_sheets.py --cache-file "%CACHE_FILE%" --create --user-name "%USER_NAME%"
+    echo No shared Google Sheet is linked on this computer yet.
+    echo.
+    echo If you already have the shared Sheet, paste its Google Sheet link or ID.
+    echo If this is the FIRST computer and no shared Sheet exists yet, type CREATE.
+    echo.
+    set /p "SHEET_INPUT=Google Sheet link/ID or CREATE: "
+    echo.
+    if /I "%SHEET_INPUT%"=="CREATE" (
+        echo Creating the shared Google Sheet and syncing picks...
+        %PYTHON_CMD% sync_picks_to_google_sheets.py --cache-file "%CACHE_FILE%" --create --user-name "%USER_NAME%"
+    ) else (
+        if "%SHEET_INPUT%"=="" (
+            echo No Sheet link or ID entered.
+            echo Run this again and paste the real shared Google Sheet link, or type CREATE on the first computer only.
+            pause
+            exit /b 1
+        )
+        echo Linking to the shared Google Sheet and syncing picks...
+        %PYTHON_CMD% sync_picks_to_google_sheets.py --cache-file "%CACHE_FILE%" --sheet "%SHEET_INPUT%" --user-name "%USER_NAME%"
+    )
 )
 
 if errorlevel 1 (

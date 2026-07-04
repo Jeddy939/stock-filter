@@ -281,8 +281,9 @@ market, category, and ticker filters above the table to narrow the list.
 ### Shared picks between computers/users
 
 Shared picks use one central Google Sheet. Each computer keeps a local copy in
-SQLite and syncs it to the shared Sheet when the app opens, when **Sync** is
-clicked, or when a pick is marked.
+SQLite. Nothing is sent automatically when the app opens or when a pick is
+marked; use the one sync batch file when you want to send and receive shared
+picks.
 
 In Google Cloud, enable both APIs for the same OAuth app:
 
@@ -294,26 +295,34 @@ Google Sheets API
 The first run after this change may ask for Google approval again because the
 app now needs Sheets access as well as Docs access.
 
-To create a shared list from the app:
-
-```text
-1. Start Moneymaker.
-2. In Saved Picks, enter your name.
-3. Click Create.
-4. Share the created Google Sheet with the other Google account.
-5. On the other computer, paste the same Google Sheet link or ID into Shared Sheet and click Save.
-```
-
-You can also sync saved picks from a batch file:
+Use this one file for setup and syncing:
 
 ```text
 SEND_PICKS_TO_GOOGLE_SHEETS.bat
 ```
 
-When that batch file asks for a URL or ID, paste the **Google Sheet** link or
-ID. Do not paste the local Moneymaker browser URL. If you press Enter without
-pasting a Sheet, the batch file creates a new shared Google Sheet and syncs the
-saved picks into it.
+First computer:
+
+```text
+1. Run SEND_PICKS_TO_GOOGLE_SHEETS.bat.
+2. Enter your display name.
+3. Type CREATE when asked for the Sheet.
+4. Copy the Google Sheet link printed by the batch file.
+5. Share that Sheet with the other Google account as Editor.
+```
+
+Second computer:
+
+```text
+1. Run SEND_PICKS_TO_GOOGLE_SHEETS.bat.
+2. Enter the other user's display name.
+3. Paste the real shared Google Sheet link.
+```
+
+After the Sheet is linked, future runs of `SEND_PICKS_TO_GOOGLE_SHEETS.bat`
+use the saved setting and immediately send/receive picks. Do not paste the
+local Moneymaker browser URL, and do not paste anything from the Google secret
+JSON.
 
 If the Google app is still in Testing mode, every Google account that syncs the
 shared list must also be added as a Google Cloud test user.

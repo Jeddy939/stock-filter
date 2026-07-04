@@ -29,6 +29,34 @@ def _looks_like_secret(value: str) -> bool:
     return isinstance(data, dict) and ("installed" in data or "web" in data)
 
 
+def _invalid_sheet_input_message(value: str) -> str:
+    text = (value or "").strip()
+    lowered = text.lower()
+    if not text:
+        return ""
+    if _looks_like_secret(text):
+        return (
+            "That looks like a Google OAuth secret, not a Google Sheet link/ID.\n"
+            "Leave the secret as the JSON file in this folder. Do not paste it here."
+        )
+    if "localhost" in lowered or "127.0.0.1" in lowered:
+        return (
+            "That is the local Moneymaker app URL, not a Google Sheet link.\n"
+            "Paste a Google Sheets link that starts with https://docs.google.com/spreadsheets/."
+        )
+    if text == "1AbCxyz123":
+        return (
+            "That is the fake example Sheet ID from the instructions, not your real Sheet.\n"
+            "Open the shared Sheet and copy the real link from the browser address bar."
+        )
+    if lowered.startswith("http") and "docs.google.com/spreadsheets/" not in lowered:
+        return (
+            "That URL is not a Google Sheet link.\n"
+            "Paste a Google Sheets link that starts with https://docs.google.com/spreadsheets/."
+        )
+    return ""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sync saved Moneymaker picks to Google Sheets.")
     parser.add_argument(
@@ -42,10 +70,9 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        if args.sheet and _looks_like_secret(args.sheet):
-            print("That looks like a Google OAuth secret, not a Google Sheet link/ID.")
-            print("Leave the secret as the JSON file in this folder. Do not paste it here.")
-            print("Run the batch file again and let it create the shared Google Sheet.")
+        invalid_message = _invalid_sheet_input_message(args.sheet or "")
+        if invalid_message:
+            print(invalid_message)
             return 1
         if args.create:
             created = web_app._create_shared_picks_sheet({"user_name": args.user_name})

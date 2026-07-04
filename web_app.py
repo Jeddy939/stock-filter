@@ -1485,10 +1485,6 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
             )
             conn.commit()
             sync_error = None
-            try:
-                _delete_shared_pick(cache_file, market, ticker)
-            except Exception as exc:
-                sync_error = str(exc)
             return {
                 "ok": True,
                 "scan_id": scan_id,
@@ -1525,11 +1521,6 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
         )
         conn.commit()
     sync_error = None
-    if _load_shared_settings().get("sheet_id"):
-        try:
-            _sync_shared_picks(cache_file)
-        except Exception as exc:
-            sync_error = str(exc)
     return {
         "ok": True,
         "scan_id": scan_id,
@@ -3059,11 +3050,11 @@ INDEX_HTML = r"""<!doctype html>
         <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
           <h2 style="margin:0">Saved Picks</h2>
           <div class="chart-header-actions">
-            <button id="syncPicks" type="button">Sync</button>
+            <button class="advanced-hidden" id="syncPicks" type="button">Sync</button>
             <span class="status-line" id="pickStatus">Loading picks...</span>
           </div>
         </div>
-        <div class="shared-controls">
+        <div class="shared-controls advanced-hidden">
           <div>
             <label for="sharedUserName">Name</label>
             <input id="sharedUserName" placeholder="Jesse">
@@ -3405,7 +3396,7 @@ INDEX_HTML = r"""<!doctype html>
         $("topStatus").className = "status-line bad";
       }).finally(() => {
         loadChart();
-        loadSavedPicks(true);
+        loadSavedPicks(false);
       });
     }
 
@@ -3863,7 +3854,8 @@ INDEX_HTML = r"""<!doctype html>
         });
         $("sharedSheetId").value = payload.sheet_id || "";
         $("sharedUserName").value = payload.user_name || "";
-        await loadSavedPicks(true);
+        $("pickStatus").textContent = "Shared Sheet saved. Click Sync to send or pull picks.";
+        await loadSavedPicks(false);
       } catch (error) {
         $("pickStatus").textContent = error.message;
         $("pickStatus").className = "status-line bad";
@@ -3883,7 +3875,8 @@ INDEX_HTML = r"""<!doctype html>
         });
         $("sharedSheetId").value = payload.sheet_id || "";
         if (payload.sheet_url) window.open(payload.sheet_url, "_blank", "noopener");
-        await loadSavedPicks(true);
+        $("pickStatus").textContent = "Shared Sheet created. Click Sync to send picks.";
+        await loadSavedPicks(false);
       } catch (error) {
         $("pickStatus").textContent = error.message;
         $("pickStatus").className = "status-line bad";
