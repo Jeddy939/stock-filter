@@ -2729,6 +2729,23 @@ INDEX_HTML = r"""<!doctype html>
       overflow: auto;
       border-radius: 6px;
     }
+    .pick-table-wrap table {
+      min-width: 1280px;
+    }
+    .sort-header {
+      width: 100%;
+      min-height: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      text-align: right;
+      font: inherit;
+      font-weight: inherit;
+    }
+    .sort-header:hover {
+      color: var(--text);
+    }
     .rating-badge {
       display: inline-flex;
       align-items: center;
@@ -3205,8 +3222,10 @@ INDEX_HTML = r"""<!doctype html>
             <thead>
               <tr>
                 <th style="width:90px">Ticker</th>
-                <th style="width:160px">Category</th>
+                <th style="width:170px"><button class="sort-header" id="pickCategorySort" type="button" title="Sort saved picks by category">Category</button></th>
                 <th style="width:70px">Market</th>
+                <th style="width:155px">Sector</th>
+                <th style="width:210px">Industry</th>
                 <th style="width:145px">Added</th>
                 <th style="width:145px">Updated</th>
                 <th style="width:90px">By</th>
@@ -3216,7 +3235,7 @@ INDEX_HTML = r"""<!doctype html>
               </tr>
             </thead>
             <tbody id="savedPicksBody">
-              <tr><td colspan="9" style="text-align:left;color:var(--muted)">No saved picks loaded.</td></tr>
+              <tr><td colspan="11" style="text-align:left;color:var(--muted)">No saved picks loaded.</td></tr>
             </tbody>
           </table>
         </div>
@@ -3329,6 +3348,10 @@ INDEX_HTML = r"""<!doctype html>
     let lastChartTicker = "";
     let lastMovingAverages = {};
     let currentScanId = null;
+    let lastSavedPicks = [];
+    let lastNeedsConfirmation = [];
+    let pickCategorySortDirection = 0;
+    const pickCategoryOrder = ["winner", "potential_winner", "needs_confirmation", "maybe", "bad"];
     const maColors = {
       "30": "#f2c14e",
       "90": "#8dd7ff",
@@ -4004,14 +4027,41 @@ INDEX_HTML = r"""<!doctype html>
       });
     }
 
-    function renderSavedPicks(picks, needsConfirmation) {
+    function categoryRank(label) {
+      const index = pickCategoryOrder.indexOf(label || "");
+      return index === -1 ? pickCategoryOrder.length : index;
+    }
+
+    function sortedSavedPicks(picks) {
+      const copy = [...picks];
+      if (!pickCategorySortDirection) return copy;
+      return copy.sort((a, b) => {
+        const category = (categoryRank(a.label) - categoryRank(b.label)) * pickCategorySortDirection;
+        if (category) return category;
+        return String(b.updated_at_utc || "").localeCompare(String(a.updated_at_utc || ""))
+          || String(a.ticker || "").localeCompare(String(b.ticker || ""));
+      });
+    }
+
+    function updatePickCategorySortLabel() {
+      const button = $("pickCategorySort");
+      if (!button) return;
+      button.textContent = pickCategorySortDirection < 0 ? "Category v" : pickCategorySortDirection > 0 ? "Category ^" : "Category";
+    }
+
+    function renderSavedPicks(picks, needsConfirmation, remember = true) {
+      if (remember) {
+        lastSavedPicks = picks || [];
+        lastNeedsConfirmation = needsConfirmation || [];
+      }
+      updatePickCategorySortLabel();
       renderConfirmationList(needsConfirmation || []);
       const body = $("savedPicksBody");
       if (!picks.length) {
-        body.innerHTML = `<tr><td colspan="9" style="text-align:left;color:var(--muted)">No saved picks.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="11" style="text-align:left;color:var(--muted)">No saved picks.</td></tr>`;
         return;
       }
-      body.innerHTML = picks.map((pick) => {
+      body.innerHTML = sortedSavedPicks(picks).map((pick) => {
         const label = pick.label || "";
         const closeText = pick.close_price === null || pick.close_price === undefined || pick.close_price === ""
           ? ""
@@ -4023,6 +4073,8 @@ INDEX_HTML = r"""<!doctype html>
           <td><a class="ticker chart-link" href="#" data-ticker="${escapeHtml(pick.ticker)}">${escapeHtml(pick.ticker)}</a></td>
           <td><span class="rating-badge label-${escapeHtml(label)}">${escapeHtml(labelText(label))}</span></td>
           <td>${escapeHtml(String(pick.market || "").toUpperCase())}</td>
+          <td>${escapeHtml(pick.sector || "")}</td>
+          <td>${escapeHtml(pick.industry || "")}</td>
           <td>${escapeHtml(shortDateTime(pick.added_at_utc))}</td>
           <td>${escapeHtml(shortDateTime(pick.updated_at_utc))}</td>
           <td>${escapeHtml(pick.source || "")}</td>
@@ -4220,6 +4272,10 @@ INDEX_HTML = r"""<!doctype html>
     $("exportGoogleDocs").addEventListener("click", exportLabelsToGoogleDocs);
     $("syncPicks").addEventListener("click", () => loadSavedPicks(true));
     $("refreshPicks").addEventListener("click", () => loadSavedPicks(false));
+    $("pickCategorySort").addEventListener("click", () => {
+      pickCategorySortDirection = pickCategorySortDirection > 0 ? -1 : 1;
+      renderSavedPicks(lastSavedPicks, lastNeedsConfirmation, false);
+    });
     $("saveSharedConfig").addEventListener("click", saveSharedConfig);
     $("createSharedSheet").addEventListener("click", createSharedSheet);
     $("pickMarketFilter").addEventListener("change", () => loadSavedPicks(false));
