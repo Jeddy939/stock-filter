@@ -33,6 +33,7 @@ DEFAULT_INFO_PAUSE_SECONDS = 0.0
 DEFAULT_RATE_LIMIT_PAUSE_SECONDS = 180.0
 DEFAULT_RATE_LIMIT_RETRIES = 8
 DEFAULT_STOP_ON_RATE_LIMIT = False
+DEFAULT_CACHE_WRITE_BATCH_SIZE = 50000
 
 _HEADER_TOKENS = {"SYMBOL", "CODE", "ASX CODE", "TICKER"}
 _ASX_FILENAME_TOKENS = ("asx", "all_ords", "all ords", "ordinaries")
@@ -135,17 +136,57 @@ def _init_cache(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+_HISTORY_UPSERT_SQL = """
+    INSERT INTO price_history
+        (provider, ticker, date, open, high, low, close, volume, fetched_at_utc)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(provider, ticker, date) DO UPDATE SET
+        open = excluded.open,
+        high = excluded.high,
+        low = excluded.low,
+        close = excluded.close,
+        volume = excluded.volume,
+        fetched_at_utc = excluded.fetched_at_utc
+    """
+
+
 def _store_history_cache(
     conn: sqlite3.Connection,
     provider: str,
     histories: Dict[str, pd.DataFrame],
+    progress_callback: ProgressCallback = None,
+    batch_size: int = DEFAULT_CACHE_WRITE_BATCH_SIZE,
 ) -> int:
     """Upsert historical OHLCV rows into the cache."""
 
     fetched_at = datetime.now(timezone.utc).isoformat()
     rows = []
+    rows_written = 0
+    processed_tickers = 0
+    total_tickers = len(histories)
+    batch_size = max(1, int(batch_size or DEFAULT_CACHE_WRITE_BATCH_SIZE))
+
+    def flush_rows() -> None:
+        nonlocal rows_written
+        if not rows:
+            return
+        conn.executemany(_HISTORY_UPSERT_SQL, rows)
+        conn.commit()
+        rows_written += len(rows)
+        rows.clear()
+
+    if total_tickers:
+        _emit_progress(
+            progress_callback,
+            "History cache",
+            0,
+            total_tickers,
+            f"Writing downloaded history for {total_tickers} tickers to SQLite.",
+        )
+
     for ticker, frame in histories.items():
         if frame is None or frame.empty:
+            processed_tickers += 1
             continue
         history = frame.copy()
         history.index = pd.to_datetime(history.index)
@@ -169,27 +210,32 @@ def _store_history_cache(
                     fetched_at,
                 )
             )
+            if len(rows) >= batch_size:
+                flush_rows()
 
-    if not rows:
-        return 0
+        processed_tickers += 1
+        if processed_tickers == total_tickers or processed_tickers % 25 == 0:
+            _emit_progress(
+                progress_callback,
+                "History cache",
+                processed_tickers,
+                total_tickers,
+                (
+                    f"Wrote {rows_written + len(rows):,} history rows "
+                    f"from {processed_tickers}/{total_tickers} tickers."
+                ),
+            )
 
-    conn.executemany(
-        """
-        INSERT INTO price_history
-            (provider, ticker, date, open, high, low, close, volume, fetched_at_utc)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(provider, ticker, date) DO UPDATE SET
-            open = excluded.open,
-            high = excluded.high,
-            low = excluded.low,
-            close = excluded.close,
-            volume = excluded.volume,
-            fetched_at_utc = excluded.fetched_at_utc
-        """,
-        rows,
-    )
-    conn.commit()
-    return len(rows)
+    flush_rows()
+    if total_tickers:
+        _emit_progress(
+            progress_callback,
+            "History cache",
+            total_tickers,
+            total_tickers,
+            f"Finished writing {rows_written:,} history rows to SQLite.",
+        )
+    return rows_written
 
 
 def _nullable_float(value) -> Optional[float]:
@@ -206,6 +252,7 @@ def _load_cached_histories(
     tickers: Sequence[str],
     start: datetime,
     end: datetime,
+    progress_callback: ProgressCallback = None,
 ) -> Dict[str, pd.DataFrame]:
     """Load cached histories for tickers within the requested date range."""
 
@@ -213,7 +260,17 @@ def _load_cached_histories(
     end_key = _date_string(end)
     cached: Dict[str, pd.DataFrame] = {}
 
-    for ticker in tickers:
+    total_tickers = len(tickers)
+    if total_tickers:
+        _emit_progress(
+            progress_callback,
+            "Cache export",
+            0,
+            total_tickers,
+            f"Loading cached history for {total_tickers} tickers.",
+        )
+
+    for index, ticker in enumerate(tickers, 1):
         rows = conn.execute(
             """
             SELECT date, open, high, low, close, volume
@@ -223,15 +280,76 @@ def _load_cached_histories(
             """,
             (provider, ticker, start_key, end_key),
         ).fetchall()
-        if not rows:
-            continue
-        frame = pd.DataFrame(
-            rows,
-            columns=["Date", "Open", "High", "Low", "Close", "Volume"],
+        if rows:
+            frame = pd.DataFrame(
+                rows,
+                columns=["Date", "Open", "High", "Low", "Close", "Volume"],
+            )
+            frame["Date"] = pd.to_datetime(frame["Date"])
+            frame = frame.set_index("Date")
+            cached[ticker] = frame[_OHLCV_COLUMNS]
+        if index == total_tickers or index % 25 == 0:
+            _emit_progress(
+                progress_callback,
+                "Cache export",
+                index,
+                total_tickers,
+                f"Loaded {len(cached)}/{total_tickers} histories from cache.",
+            )
+
+    return cached
+
+
+def _cached_history_tickers(
+    conn: sqlite3.Connection,
+    provider: str,
+    tickers: Sequence[str],
+    start: datetime,
+    end: datetime,
+    progress_callback: ProgressCallback = None,
+) -> Set[str]:
+    """Return tickers that have at least one cached history row in range."""
+
+    if not tickers:
+        return set()
+
+    start_key = _date_string(start)
+    end_key = _date_string(end)
+    cached: Set[str] = set()
+    ticker_chunks = list(_chunked(list(tickers), 500))
+    total_chunks = len(ticker_chunks)
+    _emit_progress(
+        progress_callback,
+        "Cache export",
+        0,
+        len(tickers),
+        f"Checking cached history availability for {len(tickers)} tickers.",
+    )
+
+    for chunk_index, chunk in enumerate(ticker_chunks, 1):
+        placeholders = ",".join("?" for _ in chunk)
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT ticker
+            FROM price_history
+            WHERE provider = ?
+              AND date >= ?
+              AND date <= ?
+              AND ticker IN ({placeholders})
+            """,
+            (provider, start_key, end_key, *chunk),
+        ).fetchall()
+        cached.update(row[0] for row in rows)
+        _emit_progress(
+            progress_callback,
+            "Cache export",
+            min(chunk_index * 500, len(tickers)),
+            len(tickers),
+            (
+                f"Found cached history for {len(cached)}/{len(tickers)} tickers "
+                f"({chunk_index}/{total_chunks})."
+            ),
         )
-        frame["Date"] = pd.to_datetime(frame["Date"])
-        frame = frame.set_index("Date")
-        cached[ticker] = frame[_OHLCV_COLUMNS]
 
     return cached
 
@@ -824,6 +942,7 @@ def _download_chunk_sequential(
                     start=start.strftime("%Y-%m-%d"),
                     end=end.strftime("%Y-%m-%d"),
                     interval="1d",
+                    auto_adjust=False,
                     progress=False,
                 )
             except Exception as exc:  # pragma: no cover - network error path
@@ -904,6 +1023,7 @@ def _download_historical_data(
                     end=end.strftime("%Y-%m-%d"),
                     interval="1d",
                     group_by="ticker",
+                    auto_adjust=False,
                     threads=workers,
                     progress=False,
                 )
@@ -1066,6 +1186,7 @@ def _fetch_historical_data_with_cache(
     rate_limit_pause_seconds: float = DEFAULT_RATE_LIMIT_PAUSE_SECONDS,
     max_rate_limit_retries: int = DEFAULT_RATE_LIMIT_RETRIES,
     stop_on_rate_limit: bool = DEFAULT_STOP_ON_RATE_LIMIT,
+    load_history_frames: bool = True,
 ) -> Tuple[Dict[str, pd.DataFrame], Set[str], Dict[str, object]]:
     """Fetch only missing/stale history ranges and return cache-backed histories."""
 
@@ -1090,6 +1211,7 @@ def _fetch_historical_data_with_cache(
             "history_cache_hit_count": 0,
             "history_rows_written": 0,
             "stopped_on_rate_limit": stopped_on_rate_limit,
+            "cached_history_tickers": sorted(hist_data.keys()),
         }
 
     rows_written = 0
@@ -1136,21 +1258,26 @@ def _fetch_historical_data_with_cache(
                 stop_on_rate_limit,
             )
             downloaded_tickers.update(group_tickers)
-            rows_written += _store_history_cache(conn, provider, group_histories)
+            rows_written += _store_history_cache(conn, provider, group_histories, progress_callback)
             if group_stopped_on_rate_limit:
                 stopped_on_rate_limit = True
                 break
 
-        cached_histories = _load_cached_histories(conn, provider, tickers, start, end)
+        if load_history_frames:
+            cached_histories = _load_cached_histories(conn, provider, tickers, start, end, progress_callback)
+            cached_history_tickers = set(cached_histories)
+        else:
+            cached_histories = {}
+            cached_history_tickers = _cached_history_tickers(conn, provider, tickers, start, end, progress_callback)
         _emit_progress(
             progress_callback,
             "Cache export",
-            len(cached_histories),
+            len(cached_history_tickers),
             len(tickers),
-            f"Loaded {len(cached_histories)}/{len(tickers)} histories from cache for export.",
+            f"Found usable cached history for {len(cached_history_tickers)}/{len(tickers)} tickers.",
         )
 
-    missing = {ticker for ticker in tickers if ticker not in cached_histories}
+    missing = {ticker for ticker in tickers if ticker not in cached_history_tickers}
     return cached_histories, missing, {
         "cache_enabled": True,
         "cache_file": str(Path(cache_file)),
@@ -1158,6 +1285,7 @@ def _fetch_historical_data_with_cache(
         "history_cache_hit_count": cache_hit_count,
         "history_rows_written": rows_written,
         "stopped_on_rate_limit": stopped_on_rate_limit,
+        "cached_history_tickers": sorted(cached_history_tickers),
     }
 
 
@@ -1337,6 +1465,7 @@ def fetch_stock_data(
         rate_limit_pause_seconds,
         max_rate_limit_retries,
         stop_on_rate_limit,
+        load_history_frames=export_json,
     )
     stopped_on_rate_limit = bool(history_cache_metadata.get("stopped_on_rate_limit"))
     if missing_hist_tickers:
@@ -1366,23 +1495,33 @@ def fetch_stock_data(
         ticker for ticker, info in all_info_data.items() if ticker in tickers and info.get("marketCap") is None
     )
 
-    combine_message = (
-        "Counting usable cached histories."
-        if not export_json
-        else "Combining history and company info."
-    )
+    cached_history_tickers = set(history_cache_metadata.get("cached_history_tickers", []))
+    if not cached_history_tickers:
+        cached_history_tickers = set(hist_data)
+    combine_message = "Counting usable cached histories." if not export_json else "Combining history and company info."
     _emit_progress(progress_callback, "Combining", 0, total_tickers, combine_message)
     for processed_count, ticker in enumerate(tqdm(tickers, desc="Processing Tickers"), 1):
         info = all_info_data.get(ticker)
-        hist_single = hist_data.get(ticker)
-        if hist_single is None or hist_single.empty:
+        if export_json:
+            hist_single = hist_data.get(ticker)
+            if hist_single is None or hist_single.empty:
+                tickers_no_hist += 1
+                _emit_progress(
+                    progress_callback,
+                    "Combining",
+                    processed_count,
+                    total_tickers,
+                    f"Skipped {processed_count}/{total_tickers}: {ticker} has no history.",
+                )
+                continue
+        elif ticker not in cached_history_tickers:
             tickers_no_hist += 1
             _emit_progress(
                 progress_callback,
                 "Combining",
                 processed_count,
                 total_tickers,
-                f"Skipped {processed_count}/{total_tickers}: {ticker} has no history.",
+                f"Skipped {processed_count}/{total_tickers}: {ticker} has no cached history.",
             )
             continue
         if export_json:
@@ -1401,9 +1540,9 @@ def fetch_stock_data(
         )
 
     print("\n--- Fetch Complete ---")
-    successful_fetches = len(hist_data) if not export_json else len(all_stock_data)
-    successful_histories = sorted(hist_data.keys())
-    missing_histories = sorted(set(tickers) - set(hist_data.keys()))
+    successful_fetches = len(cached_history_tickers) if not export_json else len(all_stock_data)
+    successful_histories = sorted(cached_history_tickers if not export_json else hist_data.keys())
+    missing_histories = sorted(set(tickers) - set(successful_histories))
     cleaned_ticker_file = None
     if prune_missing_tickers and missing_histories and not stopped_on_rate_limit:
         cleaned_ticker_file = _write_cleaned_ticker_file(

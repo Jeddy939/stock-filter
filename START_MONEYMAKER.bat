@@ -38,7 +38,7 @@ echo Central ratings database:
 echo %MONEYMAKER_CENTRAL_RATINGS_DB%
 echo.
 
-%PYTHON_CMD% -c "import pandas, yfinance, curl_cffi, tqdm" >nul 2>nul
+%PYTHON_CMD% -c "import pandas, yfinance, curl_cffi, tqdm, googleapiclient, google_auth_oauthlib" >nul 2>nul
 if errorlevel 1 (
     echo Installing required Python packages...
     %PYTHON_CMD% -m pip install -r requirements.txt

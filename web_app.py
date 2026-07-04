@@ -44,7 +44,38 @@ DEFAULT_CENTRAL_RATINGS_JSON_FILE = "central_stock_ratings.json"
 DEFAULT_CENTRAL_RATINGS_JSONL_FILE = "central_stock_ratings.jsonl"
 DEFAULT_SHEETS_PENDING_FILE = "ratings/google_sheets_pending_ratings.jsonl"
 FILTER_HISTORY_CHUNK_SIZE = 250
-VALID_LABELS = {"winner", "potential_winner", "maybe", "bad"}
+LABEL_ORDER = ["winner", "potential_winner", "needs_confirmation", "maybe", "bad"]
+VALID_LABELS = set(LABEL_ORDER)
+LABEL_DISPLAY = {
+    "winner": "Winner",
+    "potential_winner": "Potential Winner",
+    "needs_confirmation": "Needs Confirmation",
+    "maybe": "Maybe",
+    "bad": "Bad",
+}
+GOOGLE_SCOPES = [
+    "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/spreadsheets",
+]
+GOOGLE_CLIENT_SECRET_FILE = "google_client_secret.json"
+GOOGLE_TOKEN_FILE = "google_docs_token.json"
+SHARED_SETTINGS_FILE = "moneymaker_shared_google.json"
+SHARED_SHEET_TAB = "Picks"
+SHARED_SHEET_HEADERS = [
+    "market",
+    "ticker",
+    "label",
+    "note",
+    "added_at_utc",
+    "updated_at_utc",
+    "source",
+    "scan_id",
+    "signal_date",
+    "close_price",
+    "market_cap",
+    "sector",
+    "industry",
+]
 MARKET_DEFAULTS = {
     "asx": {
         "label": "ASX",
@@ -470,11 +501,29 @@ def _ensure_scan_schema(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             scan_id INTEGER NOT NULL,
             ticker TEXT NOT NULL,
-            label TEXT NOT NULL CHECK(label IN ('winner', 'potential_winner', 'maybe', 'bad')),
+            label TEXT NOT NULL CHECK(label IN ('winner', 'potential_winner', 'needs_confirmation', 'maybe', 'bad')),
             note TEXT,
             labeled_at_utc TEXT NOT NULL,
             FOREIGN KEY (scan_id) REFERENCES scan_runs(id) ON DELETE CASCADE,
             UNIQUE(scan_id, ticker)
+        );
+
+        CREATE TABLE IF NOT EXISTS tracked_picks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            market TEXT NOT NULL DEFAULT 'asx',
+            ticker TEXT NOT NULL,
+            label TEXT NOT NULL CHECK(label IN ('winner', 'potential_winner', 'needs_confirmation', 'maybe', 'bad')),
+            note TEXT,
+            added_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL,
+            source TEXT,
+            scan_id INTEGER,
+            signal_date TEXT,
+            close_price REAL,
+            market_cap REAL,
+            sector TEXT,
+            industry TEXT,
+            UNIQUE(market, ticker)
         );
 
         CREATE INDEX IF NOT EXISTS idx_scan_results_scan_rank
@@ -483,19 +532,24 @@ def _ensure_scan_schema(conn: sqlite3.Connection) -> None:
             ON scan_results(ticker);
         CREATE INDEX IF NOT EXISTS idx_scan_labels_label
             ON scan_labels(label);
+        CREATE INDEX IF NOT EXISTS idx_tracked_picks_label
+            ON tracked_picks(label);
+        CREATE INDEX IF NOT EXISTS idx_tracked_picks_updated
+            ON tracked_picks(updated_at_utc);
         """
     )
     label_table = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'scan_labels'"
     ).fetchone()
-    if label_table and "potential_winner" not in (label_table["sql"] or ""):
+    label_sql = label_table["sql"] or "" if label_table else ""
+    if label_table and any(label not in label_sql for label in LABEL_ORDER):
         conn.executescript(
             """
             CREATE TABLE scan_labels_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scan_id INTEGER NOT NULL,
                 ticker TEXT NOT NULL,
-                label TEXT NOT NULL CHECK(label IN ('winner', 'potential_winner', 'maybe', 'bad')),
+                label TEXT NOT NULL CHECK(label IN ('winner', 'potential_winner', 'needs_confirmation', 'maybe', 'bad')),
                 note TEXT,
                 labeled_at_utc TEXT NOT NULL,
                 FOREIGN KEY (scan_id) REFERENCES scan_runs(id) ON DELETE CASCADE,
@@ -504,7 +558,7 @@ def _ensure_scan_schema(conn: sqlite3.Connection) -> None:
             INSERT INTO scan_labels_new (id, scan_id, ticker, label, note, labeled_at_utc)
             SELECT id, scan_id, ticker, label, note, labeled_at_utc
             FROM scan_labels
-            WHERE label IN ('winner', 'maybe', 'bad');
+            WHERE label IN ('winner', 'potential_winner', 'needs_confirmation', 'maybe', 'bad');
             DROP TABLE scan_labels;
             ALTER TABLE scan_labels_new RENAME TO scan_labels;
             CREATE INDEX IF NOT EXISTS idx_scan_labels_label
@@ -531,6 +585,7 @@ def _ensure_scan_schema(conn: sqlite3.Connection) -> None:
             sr.result_json,
             s.created_at_utc AS scan_created_at_utc,
             s.provider,
+            s.cache_file AS scan_cache_file,
             s.config_json
         FROM scan_results sr
         JOIN scan_runs s ON s.id = sr.scan_id
@@ -539,6 +594,65 @@ def _ensure_scan_schema(conn: sqlite3.Connection) -> None:
            AND sl.ticker = sr.ticker
         """
     )
+    tracked_count = int(conn.execute("SELECT COUNT(*) FROM tracked_picks").fetchone()[0] or 0)
+    if tracked_count == 0:
+        rows = conn.execute(
+            """
+            SELECT
+                scan_id,
+                ticker,
+                label,
+                note,
+                labeled_at_utc,
+                signal_date,
+                close_price,
+                market_cap,
+                sector,
+                industry,
+                scan_cache_file
+            FROM labelled_scan_results
+            WHERE label IS NOT NULL
+            ORDER BY labeled_at_utc ASC, scan_id ASC
+            """
+        ).fetchall()
+        for row in rows:
+            scan_cache = str(row["scan_cache_file"] or "").lower()
+            market = "us" if "stock_cache_us" in scan_cache or "us_" in scan_cache else "asx"
+            conn.execute(
+                """
+                INSERT INTO tracked_picks (
+                    market, ticker, label, note, added_at_utc, updated_at_utc, source,
+                    scan_id, signal_date, close_price, market_cap, sector, industry
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(market, ticker) DO UPDATE SET
+                    label = excluded.label,
+                    note = excluded.note,
+                    updated_at_utc = excluded.updated_at_utc,
+                    source = excluded.source,
+                    scan_id = excluded.scan_id,
+                    signal_date = excluded.signal_date,
+                    close_price = excluded.close_price,
+                    market_cap = excluded.market_cap,
+                    sector = excluded.sector,
+                    industry = excluded.industry
+                """,
+                (
+                    market,
+                    row["ticker"],
+                    row["label"],
+                    row["note"],
+                    row["labeled_at_utc"],
+                    row["labeled_at_utc"],
+                    "local",
+                    row["scan_id"],
+                    row["signal_date"],
+                    row["close_price"],
+                    row["market_cap"],
+                    row["sector"],
+                    row["industry"],
+                ),
+            )
     conn.commit()
 
 
@@ -574,6 +688,73 @@ def _float_or_none(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def _normalise_label(label: Any) -> str:
+    return str(label or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _label_display(label: Any) -> str:
+    return LABEL_DISPLAY.get(_normalise_label(label), str(label or ""))
+
+
+def _infer_market(cache_file: str = DEFAULT_CACHE_FILE, explicit: Any = None) -> str:
+    market = str(explicit or "").strip().lower()
+    if market in MARKET_DEFAULTS or market == "all":
+        return market
+    path_name = str(cache_file or "").lower()
+    return "us" if "stock_cache_us" in path_name or path_name.endswith("_us.sqlite") else "asx"
+
+
+def _shared_settings_path() -> Path:
+    configured = os.environ.get("MONEYMAKER_SHARED_SETTINGS", "").strip()
+    return Path(configured).expanduser() if configured else ROOT / SHARED_SETTINGS_FILE
+
+
+def _extract_sheet_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    marker = "/spreadsheets/d/"
+    if marker in text:
+        text = text.split(marker, 1)[1].split("/", 1)[0]
+    if "?" in text:
+        text = text.split("?", 1)[0]
+    return text.strip()
+
+
+def _load_shared_settings() -> Dict[str, Any]:
+    path = _shared_settings_path()
+    if not path.exists():
+        return {"sheet_id": "", "user_name": ""}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"sheet_id": "", "user_name": ""}
+    return {
+        "sheet_id": _extract_sheet_id(data.get("sheet_id") or data.get("sheet_url")),
+        "user_name": str(data.get("user_name") or "").strip(),
+    }
+
+
+def _save_shared_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
+    current = _load_shared_settings()
+    sheet_id = _extract_sheet_id(payload.get("sheet_id") or payload.get("sheet_url") or current.get("sheet_id"))
+    user_name = str(payload.get("user_name") if "user_name" in payload else current.get("user_name") or "").strip()
+    data = {"sheet_id": sheet_id, "user_name": user_name}
+    _shared_settings_path().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return data
+
+
+def _shared_config_payload() -> Dict[str, Any]:
+    settings = _load_shared_settings()
+    return {
+        "ok": True,
+        "configured": bool(settings.get("sheet_id")),
+        "sheet_id": settings.get("sheet_id") or "",
+        "user_name": settings.get("user_name") or "",
+        "settings_file": str(_shared_settings_path()),
+    }
 
 
 def _cache_status(cache_file: str = DEFAULT_CACHE_FILE) -> Dict[str, Any]:
@@ -1044,11 +1225,229 @@ def _save_scan(
     return scan_id
 
 
+def _pick_row_from_scan(
+    conn: sqlite3.Connection,
+    cache_file: str,
+    scan_id: int,
+    ticker: str,
+    label: str,
+    note: Optional[str],
+    updated_at: str,
+) -> Dict[str, Any]:
+    row = conn.execute(
+        """
+        SELECT
+            sr.signal_date,
+            sr.close_price,
+            sr.market_cap,
+            sr.sector,
+            sr.industry,
+            s.cache_file AS scan_cache_file
+        FROM scan_results sr
+        JOIN scan_runs s ON s.id = sr.scan_id
+        WHERE sr.scan_id = ? AND sr.ticker = ?
+        """,
+        (scan_id, ticker),
+    ).fetchone()
+    if not row:
+        raise ValueError(f"{ticker} is not in scan {scan_id}")
+
+    market = _infer_market(row["scan_cache_file"] or cache_file)
+    existing = conn.execute(
+        "SELECT added_at_utc FROM tracked_picks WHERE market = ? AND ticker = ?",
+        (market, ticker),
+    ).fetchone()
+    settings = _load_shared_settings()
+    return {
+        "market": market,
+        "ticker": ticker,
+        "label": label,
+        "note": note,
+        "added_at_utc": existing["added_at_utc"] if existing else updated_at,
+        "updated_at_utc": updated_at,
+        "source": settings.get("user_name") or "local",
+        "scan_id": scan_id,
+        "signal_date": row["signal_date"],
+        "close_price": row["close_price"],
+        "market_cap": row["market_cap"],
+        "sector": row["sector"],
+        "industry": row["industry"],
+    }
+
+
+def _upsert_tracked_pick(conn: sqlite3.Connection, pick: Dict[str, Any]) -> Dict[str, Any]:
+    label = _normalise_label(pick.get("label"))
+    if label not in VALID_LABELS:
+        raise ValueError(f"Unknown pick category: {label}")
+    market = _infer_market("", pick.get("market"))
+    ticker = str(pick.get("ticker") or "").strip().upper()
+    if not ticker:
+        raise ValueError("ticker is required")
+
+    updated_at = str(pick.get("updated_at_utc") or datetime.utcnow().isoformat(timespec="seconds"))
+    added_at = str(pick.get("added_at_utc") or updated_at)
+    existing = conn.execute(
+        "SELECT added_at_utc, updated_at_utc FROM tracked_picks WHERE market = ? AND ticker = ?",
+        (market, ticker),
+    ).fetchone()
+    if existing and str(existing["updated_at_utc"] or "") > updated_at:
+        return dict(existing)
+    if existing and existing["added_at_utc"]:
+        added_at = existing["added_at_utc"]
+
+    stored = {
+        "market": market,
+        "ticker": ticker,
+        "label": label,
+        "note": str(pick.get("note") or "").strip() or None,
+        "added_at_utc": added_at,
+        "updated_at_utc": updated_at,
+        "source": str(pick.get("source") or "").strip() or None,
+        "scan_id": int(pick["scan_id"]) if pick.get("scan_id") not in (None, "") else None,
+        "signal_date": str(pick.get("signal_date") or "").strip() or None,
+        "close_price": _float_or_none(pick.get("close_price")),
+        "market_cap": _float_or_none(pick.get("market_cap")),
+        "sector": str(pick.get("sector") or "").strip() or None,
+        "industry": str(pick.get("industry") or "").strip() or None,
+    }
+    conn.execute(
+        """
+        INSERT INTO tracked_picks (
+            market, ticker, label, note, added_at_utc, updated_at_utc, source,
+            scan_id, signal_date, close_price, market_cap, sector, industry
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(market, ticker) DO UPDATE SET
+            label = excluded.label,
+            note = excluded.note,
+            updated_at_utc = excluded.updated_at_utc,
+            source = excluded.source,
+            scan_id = excluded.scan_id,
+            signal_date = excluded.signal_date,
+            close_price = excluded.close_price,
+            market_cap = excluded.market_cap,
+            sector = excluded.sector,
+            industry = excluded.industry
+        """,
+        (
+            stored["market"],
+            stored["ticker"],
+            stored["label"],
+            stored["note"],
+            stored["added_at_utc"],
+            stored["updated_at_utc"],
+            stored["source"],
+            stored["scan_id"],
+            stored["signal_date"],
+            stored["close_price"],
+            stored["market_cap"],
+            stored["sector"],
+            stored["industry"],
+        ),
+    )
+    return stored
+
+
+def _local_tracked_picks(
+    cache_file: str,
+    market: str = "all",
+    label: str = "all",
+    query: str = "",
+) -> List[Dict[str, Any]]:
+    with _connect_write(cache_file) as conn:
+        _ensure_scan_schema(conn)
+        clauses: List[str] = []
+        params: List[Any] = []
+        market = _infer_market(cache_file, market)
+        if market != "all":
+            clauses.append("market = ?")
+            params.append(market)
+        label = _normalise_label(label)
+        if label and label != "all":
+            clauses.append("label = ?")
+            params.append(label)
+        query = str(query or "").strip().upper()
+        if query:
+            clauses.append("ticker LIKE ?")
+            params.append(f"%{query}%")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = conn.execute(
+            f"""
+            SELECT
+                market,
+                ticker,
+                label,
+                note,
+                added_at_utc,
+                updated_at_utc,
+                source,
+                scan_id,
+                signal_date,
+                close_price,
+                market_cap,
+                sector,
+                industry
+            FROM tracked_picks
+            {where}
+            ORDER BY
+                CASE label
+                    WHEN 'needs_confirmation' THEN 0
+                    WHEN 'winner' THEN 1
+                    WHEN 'potential_winner' THEN 2
+                    WHEN 'maybe' THEN 3
+                    WHEN 'bad' THEN 4
+                    ELSE 5
+                END,
+                updated_at_utc DESC,
+                ticker ASC
+            """,
+            params,
+        ).fetchall()
+    picks = [dict(row) for row in rows]
+    for pick in picks:
+        pick["label_display"] = _label_display(pick.get("label"))
+    return picks
+
+
+def _saved_picks_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
+    cache_file = params.get("cache_file", [DEFAULT_CACHE_FILE])[0] or DEFAULT_CACHE_FILE
+    market = _infer_market(cache_file, params.get("market", ["all"])[0])
+    label = params.get("label", ["all"])[0] or "all"
+    query = params.get("query", [""])[0]
+    sync_requested = str(params.get("sync", ["0"])[0]).lower() in ("1", "true", "yes")
+    sync: Dict[str, Any] = {"configured": bool(_load_shared_settings().get("sheet_id")), "ran": False}
+    if sync_requested:
+        try:
+            sync = _sync_shared_picks(cache_file)
+        except Exception as exc:
+            sync = {
+                "configured": bool(_load_shared_settings().get("sheet_id")),
+                "ran": False,
+                "error": str(exc),
+            }
+
+    picks = _local_tracked_picks(cache_file, market=market, label=label, query=query)
+    needs_confirmation = _local_tracked_picks(
+        cache_file,
+        market=market,
+        label="needs_confirmation",
+        query=query,
+    )
+    return {
+        "ok": True,
+        "picks": picks,
+        "needs_confirmation": needs_confirmation,
+        "count": len(picks),
+        "sync": sync,
+        "config": _shared_config_payload(),
+    }
+
+
 def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
     cache_file = payload.get("cache_file") or DEFAULT_CACHE_FILE
     scan_id = int(payload.get("scan_id") or 0)
     ticker = str(payload.get("ticker") or "").strip().upper()
-    label = str(payload.get("label") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    label = _normalise_label(payload.get("label"))
     note = str(payload.get("note") or "").strip() or None
     if scan_id <= 0:
         raise ValueError("scan_id is required")
@@ -1057,16 +1456,23 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     with _connect_write(cache_file) as conn:
         _ensure_scan_schema(conn)
-        exists = conn.execute(
-            "SELECT 1 FROM scan_results WHERE scan_id = ? AND ticker = ?",
+        scan_row = conn.execute(
+            """
+            SELECT s.cache_file AS scan_cache_file
+            FROM scan_results sr
+            JOIN scan_runs s ON s.id = sr.scan_id
+            WHERE sr.scan_id = ? AND sr.ticker = ?
+            """,
             (scan_id, ticker),
         ).fetchone()
-        if not exists:
+        if not scan_row:
             raise ValueError(f"{ticker} is not in scan {scan_id}")
+        market = _infer_market(scan_row["scan_cache_file"] or cache_file, payload.get("market"))
 
         labeled_at = datetime.utcnow().isoformat(timespec="seconds")
         if label in ("", "clear", "none", "unlabelled", "unlabeled"):
             conn.execute("DELETE FROM scan_labels WHERE scan_id = ? AND ticker = ?", (scan_id, ticker))
+            conn.execute("DELETE FROM tracked_picks WHERE market = ? AND ticker = ?", (market, ticker))
             event = _record_central_rating_event(
                 conn,
                 cache_file,
@@ -1078,6 +1484,11 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "clear",
             )
             conn.commit()
+            sync_error = None
+            try:
+                _delete_shared_pick(cache_file, market, ticker)
+            except Exception as exc:
+                sync_error = str(exc)
             return {
                 "ok": True,
                 "scan_id": scan_id,
@@ -1085,9 +1496,10 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "label": None,
                 "central_ratings_file": str(_central_ratings_path()),
                 "google_sheets": (event or {}).get("google_sheets", {"configured": False}),
+                "sync_error": sync_error,
             }
         if label not in VALID_LABELS:
-            raise ValueError("label must be winner, potential_winner, maybe, bad, or clear")
+            raise ValueError("label must be winner, potential_winner, needs_confirmation, maybe, bad, or clear")
 
         conn.execute(
             """
@@ -1100,6 +1512,7 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
             """,
             (scan_id, ticker, label, note, labeled_at),
         )
+        pick = _upsert_tracked_pick(conn, _pick_row_from_scan(conn, cache_file, scan_id, ticker, label, note, labeled_at))
         event = _record_central_rating_event(
             conn,
             cache_file,
@@ -1111,12 +1524,21 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
             "label",
         )
         conn.commit()
+    sync_error = None
+    if _load_shared_settings().get("sheet_id"):
+        try:
+            _sync_shared_picks(cache_file)
+        except Exception as exc:
+            sync_error = str(exc)
     return {
         "ok": True,
         "scan_id": scan_id,
         "ticker": ticker,
         "label": label,
+        "label_display": _label_display(label),
         "note": note,
+        "pick": pick,
+        "sync_error": sync_error,
         "central_ratings_file": str(_central_ratings_path()),
         "google_sheets": (event or {}).get("google_sheets", {"configured": False}),
     }
@@ -1140,6 +1562,7 @@ def _scan_summary(params: Dict[str, List[str]]) -> Dict[str, Any]:
                     s.query,
                     SUM(CASE WHEN sl.label = 'winner' THEN 1 ELSE 0 END) AS winners,
                     SUM(CASE WHEN sl.label = 'potential_winner' THEN 1 ELSE 0 END) AS potential_winners,
+                    SUM(CASE WHEN sl.label = 'needs_confirmation' THEN 1 ELSE 0 END) AS needs_confirmations,
                     SUM(CASE WHEN sl.label = 'maybe' THEN 1 ELSE 0 END) AS maybes,
                     SUM(CASE WHEN sl.label = 'bad' THEN 1 ELSE 0 END) AS bads
                 FROM scan_runs s
@@ -1169,6 +1592,430 @@ def _scan_labels(params: Dict[str, List[str]]) -> Dict[str, Any]:
             )
         }
     return {"ok": True, "scan_id": scan_id, "labels": labels}
+
+
+def _google_secret_path() -> Path:
+    configured = os.environ.get("MONEYMAKER_GOOGLE_CLIENT_SECRET", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    preferred = ROOT / GOOGLE_CLIENT_SECRET_FILE
+    if preferred.exists():
+        return preferred
+    downloaded = sorted(ROOT.glob("client_secret_*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    return downloaded[0] if downloaded else preferred
+
+
+def _google_token_path() -> Path:
+    configured = os.environ.get("MONEYMAKER_GOOGLE_TOKEN", "").strip()
+    return Path(configured).expanduser() if configured else ROOT / GOOGLE_TOKEN_FILE
+
+
+def _google_docs_credentials():
+    try:
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+    except ImportError as exc:
+        raise RuntimeError(
+            "Google export and shared picks need google-auth-oauthlib installed. "
+            "Run: python -m pip install -r requirements.txt"
+        ) from exc
+
+    token_path = _google_token_path()
+    secret_path = _google_secret_path()
+    credentials = None
+    if token_path.exists():
+        try:
+            token_data = json.loads(token_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            token_data = {}
+        granted = token_data.get("scopes") or token_data.get("scope") or []
+        if isinstance(granted, str):
+            granted = granted.split()
+        if set(GOOGLE_SCOPES).issubset(set(granted)):
+            credentials = Credentials.from_authorized_user_file(str(token_path), GOOGLE_SCOPES)
+    if credentials and credentials.valid:
+        return credentials
+    if credentials and credentials.expired and credentials.refresh_token:
+        credentials.refresh(Request())
+    else:
+        if not secret_path.exists():
+            raise RuntimeError(
+                f"Google Docs export needs OAuth credentials at {secret_path}. "
+                "Create a Google Cloud OAuth desktop client, download its JSON, "
+                f"and save it as {GOOGLE_CLIENT_SECRET_FILE} in this folder."
+            )
+        flow = InstalledAppFlow.from_client_secrets_file(str(secret_path), GOOGLE_SCOPES)
+        credentials = flow.run_local_server(port=0)
+    token_path.write_text(credentials.to_json(), encoding="utf-8")
+    return credentials
+
+
+def _sheets_service():
+    try:
+        from googleapiclient.discovery import build
+    except ImportError as exc:
+        raise RuntimeError(
+            "Shared picks need google-api-python-client installed. "
+            "Run: python -m pip install -r requirements.txt"
+        ) from exc
+    return build("sheets", "v4", credentials=_google_docs_credentials())
+
+
+def _sheet_row_to_pick(row: Sequence[Any]) -> Optional[Dict[str, Any]]:
+    values = [str(value).strip() for value in row]
+    values.extend([""] * max(0, len(SHARED_SHEET_HEADERS) - len(values)))
+    pick = dict(zip(SHARED_SHEET_HEADERS, values))
+    pick["label"] = _normalise_label(pick.get("label"))
+    pick["market"] = _infer_market("", pick.get("market"))
+    pick["ticker"] = str(pick.get("ticker") or "").strip().upper()
+    if not pick["ticker"] or pick["label"] not in VALID_LABELS:
+        return None
+    return pick
+
+
+def _pick_to_sheet_row(pick: Dict[str, Any]) -> List[str]:
+    data = {
+        "market": _infer_market("", pick.get("market")),
+        "ticker": str(pick.get("ticker") or "").strip().upper(),
+        "label": _normalise_label(pick.get("label")),
+        "note": str(pick.get("note") or ""),
+        "added_at_utc": str(pick.get("added_at_utc") or ""),
+        "updated_at_utc": str(pick.get("updated_at_utc") or ""),
+        "source": str(pick.get("source") or ""),
+        "scan_id": "" if pick.get("scan_id") in (None, "") else str(pick.get("scan_id")),
+        "signal_date": str(pick.get("signal_date") or ""),
+        "close_price": "" if pick.get("close_price") in (None, "") else str(pick.get("close_price")),
+        "market_cap": "" if pick.get("market_cap") in (None, "") else str(pick.get("market_cap")),
+        "sector": str(pick.get("sector") or ""),
+        "industry": str(pick.get("industry") or ""),
+    }
+    return [data[header] for header in SHARED_SHEET_HEADERS]
+
+
+def _pick_key(pick: Dict[str, Any]) -> str:
+    return f"{_infer_market('', pick.get('market'))}|{str(pick.get('ticker') or '').strip().upper()}"
+
+
+def _ensure_shared_sheet(service: Any, spreadsheet_id: str) -> None:
+    spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    sheets = spreadsheet.get("sheets", [])
+    sheet_titles = [sheet.get("properties", {}).get("title") for sheet in sheets]
+    if SHARED_SHEET_TAB not in sheet_titles:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [{"addSheet": {"properties": {"title": SHARED_SHEET_TAB}}}]},
+        ).execute()
+    header_range = f"{SHARED_SHEET_TAB}!A1:{chr(ord('A') + len(SHARED_SHEET_HEADERS) - 1)}1"
+    header_values = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=header_range,
+    ).execute().get("values", [])
+    if not header_values or header_values[0] != SHARED_SHEET_HEADERS:
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"{SHARED_SHEET_TAB}!A1",
+            valueInputOption="RAW",
+            body={"values": [SHARED_SHEET_HEADERS]},
+        ).execute()
+
+
+def _read_shared_sheet_picks(service: Any, spreadsheet_id: str) -> List[Dict[str, Any]]:
+    _ensure_shared_sheet(service, spreadsheet_id)
+    values = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"{SHARED_SHEET_TAB}!A2:M",
+    ).execute().get("values", [])
+    picks = []
+    for row in values:
+        pick = _sheet_row_to_pick(row)
+        if pick:
+            picks.append(pick)
+    return picks
+
+
+def _write_shared_sheet_picks(service: Any, spreadsheet_id: str, picks: Sequence[Dict[str, Any]]) -> None:
+    ordered = sorted(
+        picks,
+        key=lambda pick: (
+            LABEL_ORDER.index(_normalise_label(pick.get("label"))) if _normalise_label(pick.get("label")) in LABEL_ORDER else 99,
+            str(pick.get("updated_at_utc") or ""),
+            str(pick.get("ticker") or ""),
+        ),
+    )
+    rows = [SHARED_SHEET_HEADERS] + [_pick_to_sheet_row(pick) for pick in ordered]
+    service.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id,
+        range=f"{SHARED_SHEET_TAB}!A:M",
+        body={},
+    ).execute()
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"{SHARED_SHEET_TAB}!A1",
+        valueInputOption="RAW",
+        body={"values": rows},
+    ).execute()
+
+
+def _merge_pick_maps(*pick_sets: Sequence[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    merged: Dict[str, Dict[str, Any]] = {}
+    for picks in pick_sets:
+        for pick in picks:
+            key = _pick_key(pick)
+            if not key.strip("|"):
+                continue
+            existing = merged.get(key)
+            if not existing or str(pick.get("updated_at_utc") or "") >= str(existing.get("updated_at_utc") or ""):
+                merged[key] = dict(pick)
+    return merged
+
+
+def _sync_shared_picks(cache_file: str = DEFAULT_CACHE_FILE) -> Dict[str, Any]:
+    settings = _load_shared_settings()
+    spreadsheet_id = settings.get("sheet_id") or ""
+    if not spreadsheet_id:
+        return {"configured": False, "ran": False, "message": "No shared Google Sheet configured."}
+
+    service = _sheets_service()
+    with _connect_write(cache_file) as conn:
+        _ensure_scan_schema(conn)
+        local_rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT
+                    market,
+                    ticker,
+                    label,
+                    note,
+                    added_at_utc,
+                    updated_at_utc,
+                    source,
+                    scan_id,
+                    signal_date,
+                    close_price,
+                    market_cap,
+                    sector,
+                    industry
+                FROM tracked_picks
+                """
+            )
+        ]
+    remote_rows = _read_shared_sheet_picks(service, spreadsheet_id)
+    merged = _merge_pick_maps(remote_rows, local_rows)
+    merged_rows = list(merged.values())
+    _write_shared_sheet_picks(service, spreadsheet_id, merged_rows)
+
+    with _connect_write(cache_file) as conn:
+        _ensure_scan_schema(conn)
+        for pick in merged_rows:
+            _upsert_tracked_pick(conn, pick)
+        conn.commit()
+
+    return {
+        "configured": True,
+        "ran": True,
+        "local_count": len(local_rows),
+        "remote_count": len(remote_rows),
+        "shared_count": len(merged_rows),
+        "spreadsheet_id": spreadsheet_id,
+    }
+
+
+def _delete_shared_pick(cache_file: str, market: str, ticker: str) -> Dict[str, Any]:
+    settings = _load_shared_settings()
+    spreadsheet_id = settings.get("sheet_id") or ""
+    if not spreadsheet_id:
+        return {"configured": False, "ran": False}
+    service = _sheets_service()
+    remote_rows = _read_shared_sheet_picks(service, spreadsheet_id)
+    key = f"{_infer_market('', market)}|{str(ticker or '').strip().upper()}"
+    kept = [pick for pick in remote_rows if _pick_key(pick) != key]
+    _write_shared_sheet_picks(service, spreadsheet_id, kept)
+    return {
+        "configured": True,
+        "ran": True,
+        "removed": len(remote_rows) - len(kept),
+        "spreadsheet_id": spreadsheet_id,
+    }
+
+
+def _create_shared_picks_sheet(payload: Dict[str, Any]) -> Dict[str, Any]:
+    title = str(payload.get("title") or "Moneymaker Shared Picks").strip()
+    service = _sheets_service()
+    spreadsheet = service.spreadsheets().create(
+        body={
+            "properties": {"title": title},
+            "sheets": [{"properties": {"title": SHARED_SHEET_TAB}}],
+        }
+    ).execute()
+    spreadsheet_id = spreadsheet["spreadsheetId"]
+    settings = _save_shared_settings(
+        {
+            "sheet_id": spreadsheet_id,
+            "user_name": payload.get("user_name") or _load_shared_settings().get("user_name"),
+        }
+    )
+    _ensure_shared_sheet(service, spreadsheet_id)
+    return {
+        "ok": True,
+        "configured": True,
+        "sheet_id": spreadsheet_id,
+        "sheet_url": f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit",
+        "settings": settings,
+    }
+
+
+def _format_doc_value(value: Any, suffix: str = "") -> str:
+    if value is None or value == "":
+        return "N/A"
+    if isinstance(value, numbers.Real):
+        if not math.isfinite(float(value)):
+            return "N/A"
+        if suffix:
+            return f"{float(value):.2f}{suffix}"
+        return f"{float(value):,.2f}"
+    return str(value)
+
+
+def _labelled_selection_rows(cache_file: str, scan_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    with _connect_write(cache_file) as conn:
+        _ensure_scan_schema(conn)
+        clauses = ["label IS NOT NULL"]
+        params: List[Any] = []
+        if scan_id:
+            clauses.append("scan_id = ?")
+            params.append(scan_id)
+        rows = conn.execute(
+            f"""
+            SELECT
+                scan_id,
+                rank,
+                ticker,
+                signal_date,
+                close_price,
+                market_cap,
+                avg_volume,
+                volume_ratio,
+                sector,
+                industry,
+                label,
+                note,
+                labeled_at_utc,
+                scan_created_at_utc,
+                provider
+            FROM labelled_scan_results
+            WHERE {" AND ".join(clauses)}
+            ORDER BY labeled_at_utc DESC, scan_id DESC, rank ASC
+            """,
+            params,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _selection_report_text(rows: Sequence[Dict[str, Any]], cache_file: str, scan_id: Optional[int]) -> str:
+    exported_at = datetime.utcnow().isoformat(timespec="seconds")
+    lines = [
+        "Moneymaker labelled selections",
+        f"Exported at UTC: {exported_at}",
+        f"Cache file: {_cache_path(cache_file)}",
+        f"Scan: {scan_id if scan_id else 'All scans'}",
+        f"Selections: {len(rows)}",
+        "",
+    ]
+    if not rows:
+        lines.append("No labelled selections were found.")
+        return "\n".join(lines)
+
+    for label in LABEL_ORDER:
+        label_rows = [row for row in rows if row.get("label") == label]
+        if not label_rows:
+            continue
+        lines.append(_label_display(label))
+        lines.append("-" * len(lines[-1]))
+        for row in label_rows:
+            sector_bits = [row.get("sector"), row.get("industry")]
+            sector = " / ".join(str(bit) for bit in sector_bits if bit) or "N/A"
+            market_cap = row.get("market_cap")
+            market_cap_text = (
+                f"{float(market_cap) / 1_000_000:,.1f}M"
+                if isinstance(market_cap, numbers.Real) and math.isfinite(float(market_cap))
+                else "N/A"
+            )
+            lines.extend(
+                [
+                    f"{row.get('ticker')} (scan {row.get('scan_id')})",
+                    f"  Selected UTC: {_format_doc_value(row.get('labeled_at_utc'))}",
+                    f"  Signal date: {_format_doc_value(row.get('signal_date'))}",
+                    f"  Close: {_format_doc_value(row.get('close_price'))}",
+                    f"  Volume ratio: {_format_doc_value(row.get('volume_ratio'), 'x')}",
+                    f"  Avg volume: {_format_doc_value(row.get('avg_volume'))}",
+                    f"  Market cap: {market_cap_text}",
+                    f"  Sector: {sector}",
+                ]
+            )
+            if row.get("note"):
+                lines.append(f"  Note: {row['note']}")
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _create_google_doc(title: str, content: str) -> Dict[str, str]:
+    try:
+        from googleapiclient.discovery import build
+    except ImportError as exc:
+        raise RuntimeError(
+            "Google Docs export needs google-api-python-client installed. "
+            "Run: python -m pip install -r requirements.txt"
+        ) from exc
+
+    credentials = _google_docs_credentials()
+    service = build("docs", "v1", credentials=credentials)
+    document = service.documents().create(body={"title": title}).execute()
+    document_id = document["documentId"]
+    if content:
+        service.documents().batchUpdate(
+            documentId=document_id,
+            body={
+                "requests": [
+                    {
+                        "insertText": {
+                            "location": {"index": 1},
+                            "text": content,
+                        }
+                    }
+                ]
+            },
+        ).execute()
+    return {
+        "document_id": document_id,
+        "url": f"https://docs.google.com/document/d/{document_id}/edit",
+    }
+
+
+def _export_labels_to_google_docs(payload: Dict[str, Any]) -> Dict[str, Any]:
+    cache_file = payload.get("cache_file") or DEFAULT_CACHE_FILE
+    scan_id = int(payload.get("scan_id") or 0) or None
+    rows = _labelled_selection_rows(cache_file, scan_id)
+    if not rows:
+        scope = f"scan {scan_id}" if scan_id else "the selected cache"
+        raise ValueError(f"No labelled selections found for {scope}.")
+
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        title = (
+            f"Moneymaker selections - scan {scan_id}"
+            if scan_id
+            else f"Moneymaker selections - {datetime.now().strftime('%Y-%m-%d %H.%M')}"
+        )
+    report_text = _selection_report_text(rows, cache_file, scan_id)
+    created = _create_google_doc(title, report_text)
+    return {
+        "ok": True,
+        "title": title,
+        "selection_count": len(rows),
+        **created,
+    }
 
 
 def _run_filter(payload: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
@@ -1463,6 +2310,10 @@ class AppHandler(BaseHTTPRequestHandler):
                 _json_response(self, _scan_summary(parse_qs(parsed.query)))
             elif parsed.path == "/api/labels":
                 _json_response(self, _scan_labels(parse_qs(parsed.query)))
+            elif parsed.path == "/api/picks":
+                _json_response(self, _saved_picks_payload(parse_qs(parsed.query)))
+            elif parsed.path == "/api/shared/config":
+                _json_response(self, _shared_config_payload())
             elif parsed.path == "/api/job":
                 _json_response(self, {"ok": True, "job": _job_snapshot()})
             elif parsed.path == "/api/filter/job":
@@ -1488,6 +2339,14 @@ class AppHandler(BaseHTTPRequestHandler):
                 _json_response(self, _run_filter(payload))
             elif self.path == "/api/label":
                 _json_response(self, _label_scan_result(payload))
+            elif self.path == "/api/google-docs/export":
+                _json_response(self, _export_labels_to_google_docs(payload))
+            elif self.path == "/api/shared/config":
+                _json_response(self, {"ok": True, **_save_shared_settings(payload)})
+            elif self.path == "/api/shared/create":
+                _json_response(self, _create_shared_picks_sheet(payload))
+            elif self.path == "/api/shared/sync":
+                _json_response(self, {"ok": True, "sync": _sync_shared_picks(payload.get("cache_file") or DEFAULT_CACHE_FILE)})
             else:
                 _json_response(self, {"ok": False, "error": "Not found"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -1513,6 +2372,11 @@ INDEX_HTML = r"""<!doctype html>
       --accent-2: #6ab8d8;
       --warn: #e0b45b;
       --bad: #df7770;
+      --label-winner: #55c47a;
+      --label-potential: #64b8ff;
+      --label-confirm: #f08c4a;
+      --label-maybe: #d8c85c;
+      --label-bad: #df7770;
       --shadow: rgba(0, 0, 0, .25);
     }
     * { box-sizing: border-box; }
@@ -1625,6 +2489,9 @@ INDEX_HTML = r"""<!doctype html>
       opacity: .55;
       cursor: default;
     }
+    .advanced-hidden {
+      display: none;
+    }
     .status-line {
       color: var(--muted);
       font-size: 12px;
@@ -1669,6 +2536,7 @@ INDEX_HTML = r"""<!doctype html>
       gap: 5px;
       justify-content: flex-end;
       align-items: center;
+      flex-wrap: wrap;
     }
     .label-btn {
       min-height: 28px;
@@ -1677,27 +2545,117 @@ INDEX_HTML = r"""<!doctype html>
       border-radius: 5px;
     }
     .label-btn.active[data-label="winner"] {
-      background: #246d42;
-      border-color: #49b973;
+      background: rgba(85, 196, 122, .24);
+      border-color: var(--label-winner);
+      color: #dff8e7;
     }
     .label-btn.active[data-label="potential_winner"] {
-      background: #285f6d;
-      border-color: #58b8ce;
+      background: rgba(100, 184, 255, .22);
+      border-color: var(--label-potential);
+      color: #e3f3ff;
+    }
+    .label-btn.active[data-label="needs_confirmation"] {
+      background: rgba(240, 140, 74, .26);
+      border-color: var(--label-confirm);
+      color: #ffe9dc;
     }
     .label-btn.active[data-label="maybe"] {
-      background: #6d5422;
-      border-color: #d1a94e;
+      background: rgba(216, 200, 92, .22);
+      border-color: var(--label-maybe);
+      color: #fff8d2;
     }
     .label-btn.active[data-label="bad"] {
-      background: #73342f;
-      border-color: #d87268;
+      background: rgba(223, 119, 112, .24);
+      border-color: var(--label-bad);
+      color: #ffe1df;
     }
     tr.label-winner td:first-child { border-left: 3px solid var(--accent); }
     tr.label-potential_winner td:first-child { border-left: 3px solid var(--accent-2); }
+    tr.label-needs_confirmation td:first-child { border-left: 3px solid var(--label-confirm); }
     tr.label-maybe td:first-child { border-left: 3px solid var(--warn); }
     tr.label-bad td:first-child { border-left: 3px solid var(--bad); }
     tr.incomplete-ma td { background: rgba(242, 193, 78, 0.06); }
     tr.incomplete-ma td:nth-child(7) { color: var(--warn); }
+    .pick-controls {
+      display: grid;
+      grid-template-columns: minmax(130px, 150px) minmax(150px, 190px) minmax(160px, 1fr) auto;
+      gap: 8px;
+      align-items: end;
+      margin-bottom: 10px;
+    }
+    .shared-controls {
+      display: grid;
+      grid-template-columns: minmax(130px, 170px) minmax(220px, 1fr) auto auto;
+      gap: 8px;
+      align-items: end;
+      margin-bottom: 10px;
+    }
+    .confirmation-strip {
+      border: 1px solid rgba(240, 140, 74, .5);
+      background: rgba(240, 140, 74, .08);
+      border-radius: 6px;
+      padding: 10px;
+      margin: 0 0 10px;
+    }
+    .confirmation-strip h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: #ffe2ce;
+    }
+    .confirm-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      min-height: 31px;
+    }
+    .confirm-empty {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 31px;
+    }
+    .pick-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 31px;
+      padding: 5px 9px;
+      border: 1px solid rgba(240, 140, 74, .58);
+      border-radius: 999px;
+      background: rgba(240, 140, 74, .14);
+      color: #fff0e7;
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .pick-chip span {
+      color: #ffd5bc;
+      font-weight: 500;
+    }
+    .pick-table-wrap {
+      max-height: 320px;
+      overflow: auto;
+      border-radius: 6px;
+    }
+    .rating-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .rating-badge.label-winner { color: var(--label-winner); background: rgba(85, 196, 122, .12); }
+    .rating-badge.label-potential_winner { color: var(--label-potential); background: rgba(100, 184, 255, .12); }
+    .rating-badge.label-needs_confirmation { color: var(--label-confirm); background: rgba(240, 140, 74, .14); }
+    .rating-badge.label-maybe { color: var(--label-maybe); background: rgba(216, 200, 92, .12); }
+    .rating-badge.label-bad { color: var(--label-bad); background: rgba(223, 119, 112, .13); }
+    .pick-row.label-winner td:first-child { border-left: 3px solid var(--label-winner); }
+    .pick-row.label-potential_winner td:first-child { border-left: 3px solid var(--label-potential); }
+    .pick-row.label-needs_confirmation td:first-child { border-left: 3px solid var(--label-confirm); }
+    .pick-row.label-maybe td:first-child { border-left: 3px solid var(--label-maybe); }
+    .pick-row.label-bad td:first-child { border-left: 3px solid var(--label-bad); }
     .results-wrap { max-height: calc(100vh - 210px); overflow: auto; border-radius: 6px; }
     .chart-controls {
       display: grid;
@@ -1914,6 +2872,8 @@ INDEX_HTML = r"""<!doctype html>
       aside { border-right: 0; border-bottom: 1px solid var(--line); }
       .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .chart-controls { grid-template-columns: 1fr 1fr; }
+      .pick-controls { grid-template-columns: 1fr 1fr; }
+      .shared-controls { grid-template-columns: 1fr 1fr; }
     }
     @media (max-width: 520px) {
       header {
@@ -1928,6 +2888,8 @@ INDEX_HTML = r"""<!doctype html>
         grid-template-columns: 1fr;
       }
       .chart-controls { grid-template-columns: 1fr; }
+      .pick-controls { grid-template-columns: 1fr; }
+      .shared-controls { grid-template-columns: 1fr; }
       .chart-box { height: 330px; }
       main {
         min-height: calc(100vh - 82px);
@@ -1949,8 +2911,8 @@ INDEX_HTML = r"""<!doctype html>
           <option value="asx">ASX</option>
           <option value="us">US</option>
         </select>
-        <label for="cacheFile">SQLite file</label>
-        <input id="cacheFile" value="stock_cache.sqlite">
+        <label class="advanced-hidden" for="cacheFile">SQLite file</label>
+        <input class="advanced-hidden" id="cacheFile" value="stock_cache.sqlite">
         <div class="actions">
           <button id="refreshStatus">Refresh</button>
           <span class="pill" id="cachePill">No cache</span>
@@ -1967,7 +2929,7 @@ INDEX_HTML = r"""<!doctype html>
         <select id="tickerFileSelect"></select>
         <label for="tickerFile">Ticker file</label>
         <input id="tickerFile" value="asx_yfinance_valid_stocks_2026-05-11.txt">
-        <div class="grid-2">
+        <div class="advanced-hidden">
           <div>
             <label for="provider">Provider</label>
             <select id="provider"><option>yfinance</option><option>stooq</option></select>
@@ -1977,21 +2939,17 @@ INDEX_HTML = r"""<!doctype html>
             <input id="fetchLimit" type="number" min="1" value="100" disabled>
           </div>
         </div>
-        <label class="inline-check">
+        <label class="inline-check advanced-hidden">
           <input id="useFetchLimit" type="checkbox">
           Limit fetch to first N tickers
         </label>
-        <div class="grid-2">
-          <div>
-            <label for="years">Years</label>
-            <input id="years" type="number" min="1" value="15">
-          </div>
+        <label for="years">Years</label>
+        <input id="years" type="number" min="1" value="15">
+        <div class="advanced-hidden">
           <div>
             <label for="workers">Workers</label>
             <input id="workers" type="number" min="1" value="1">
           </div>
-        </div>
-        <div class="grid-2">
           <div>
             <label for="infoRefresh">Info refresh days</label>
             <input id="infoRefresh" type="number" min="0" value="7">
@@ -2000,8 +2958,6 @@ INDEX_HTML = r"""<!doctype html>
             <label for="historyRefresh">History overlap days</label>
             <input id="historyRefresh" type="number" min="0" value="5">
           </div>
-        </div>
-        <div class="grid-2">
           <div>
             <label for="historyChunkSize">History batch size</label>
             <input id="historyChunkSize" type="number" min="1" value="50">
@@ -2010,8 +2966,6 @@ INDEX_HTML = r"""<!doctype html>
             <label for="historyPause">Batch pause sec</label>
             <input id="historyPause" type="number" min="0" step="1" value="5">
           </div>
-        </div>
-        <div class="grid-2">
           <div>
             <label for="infoPause">Info pause sec</label>
             <input id="infoPause" type="number" min="0" step="1" value="1">
@@ -2020,25 +2974,19 @@ INDEX_HTML = r"""<!doctype html>
             <label for="ratePause">Rate-limit pause sec</label>
             <input id="ratePause" type="number" min="0" step="10" value="900">
           </div>
-        </div>
-        <div class="grid-2">
           <div>
             <label for="rateRetries">Rate-limit retries</label>
             <input id="rateRetries" type="number" min="0" value="3">
           </div>
-          <div>
-            <label>&nbsp;</label>
-            <span class="status-line">Use workers=1 for safest full ASX runs.</span>
-          </div>
+          <label class="inline-check">
+            <input id="stopOnRateLimit" type="checkbox" checked>
+            Stop and resume later if rate-limited
+          </label>
+          <label class="inline-check">
+            <input id="pruneMissing" type="checkbox">
+            Create cleaned ticker file when symbols fail
+          </label>
         </div>
-        <label class="inline-check">
-          <input id="stopOnRateLimit" type="checkbox" checked>
-          Stop and resume later if rate-limited
-        </label>
-        <label class="inline-check">
-          <input id="pruneMissing" type="checkbox">
-          Create cleaned ticker file when symbols fail
-        </label>
         <div class="actions">
           <button class="primary" id="startFetch">Update Cache</button>
           <span class="status-line" id="fetchStatus">Idle</span>
@@ -2074,7 +3022,7 @@ INDEX_HTML = r"""<!doctype html>
           <input id="maMedium" type="number" value="360">
           <input id="maLong" type="number" value="700" title="Set to 0 to turn off the 700-week moving average">
         </div>
-        <div class="grid-2">
+        <div class="advanced-hidden">
           <div>
             <label for="query">Ticker search</label>
             <input id="query" placeholder="CBA">
@@ -2083,11 +3031,11 @@ INDEX_HTML = r"""<!doctype html>
             <label for="scanLimit">Scan limit</label>
             <input id="scanLimit" type="number" min="1" value="250" disabled>
           </div>
+          <label class="inline-check">
+            <input id="useScanLimit" type="checkbox">
+            Limit scan to first N cached tickers
+          </label>
         </div>
-        <label class="inline-check">
-          <input id="useScanLimit" type="checkbox">
-          Limit scan to first N cached tickers
-        </label>
         <div class="actions">
           <button class="secondary" id="runFilter">Run Filter</button>
           <span class="status-line" id="filterStatus">Ready</span>
@@ -2106,6 +3054,79 @@ INDEX_HTML = r"""<!doctype html>
         <div class="metric"><span>History rows</span><strong id="metricRows">0</strong></div>
         <div class="metric"><span>Latest bar</span><strong id="metricLatest">-</strong></div>
         <div class="metric"><span>Matches</span><strong id="metricMatches">0</strong></div>
+      </div>
+      <div class="panel" id="savedPicksPanel">
+        <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
+          <h2 style="margin:0">Saved Picks</h2>
+          <div class="chart-header-actions">
+            <button id="syncPicks" type="button">Sync</button>
+            <span class="status-line" id="pickStatus">Loading picks...</span>
+          </div>
+        </div>
+        <div class="shared-controls">
+          <div>
+            <label for="sharedUserName">Name</label>
+            <input id="sharedUserName" placeholder="Jesse">
+          </div>
+          <div>
+            <label for="sharedSheetId">Shared Sheet</label>
+            <input id="sharedSheetId" placeholder="Google Sheet link or ID">
+          </div>
+          <button id="saveSharedConfig" type="button">Save</button>
+          <button id="createSharedSheet" type="button">Create</button>
+        </div>
+        <div class="pick-controls">
+          <div>
+            <label for="pickMarketFilter">Market</label>
+            <select id="pickMarketFilter">
+              <option value="all">All</option>
+              <option value="asx">ASX</option>
+              <option value="us">US</option>
+            </select>
+          </div>
+          <div>
+            <label for="pickLabelFilter">Category</label>
+            <select id="pickLabelFilter">
+              <option value="all">All</option>
+              <option value="needs_confirmation">Needs Confirmation</option>
+              <option value="winner">Winner</option>
+              <option value="potential_winner">Potential Winner</option>
+              <option value="maybe">Maybe</option>
+              <option value="bad">Bad</option>
+            </select>
+          </div>
+          <div>
+            <label for="pickSearch">Ticker</label>
+            <input id="pickSearch" placeholder="Filter ticker">
+          </div>
+          <button id="refreshPicks" type="button">Refresh</button>
+        </div>
+        <div class="confirmation-strip">
+          <h3>Needs Confirmation</h3>
+          <div class="confirm-list" id="confirmationList">
+            <span class="confirm-empty">No confirmation picks.</span>
+          </div>
+        </div>
+        <div class="pick-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:90px">Ticker</th>
+                <th style="width:160px">Category</th>
+                <th style="width:70px">Market</th>
+                <th style="width:145px">Added</th>
+                <th style="width:145px">Updated</th>
+                <th style="width:90px">By</th>
+                <th style="width:95px">Signal</th>
+                <th style="width:80px">Close</th>
+                <th style="width:105px">Market Cap</th>
+              </tr>
+            </thead>
+            <tbody id="savedPicksBody">
+              <tr><td colspan="9" style="text-align:left;color:var(--muted)">No saved picks loaded.</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
       <div class="panel" id="chartPanel">
         <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
@@ -2159,7 +3180,10 @@ INDEX_HTML = r"""<!doctype html>
       <div class="panel">
         <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
           <h2 style="margin:0">Results</h2>
-          <span class="status-line" id="resultMeta">No scan yet</span>
+          <div class="chart-header-actions">
+            <button id="exportGoogleDocs" type="button">Send Labels to Google Docs</button>
+            <span class="status-line" id="resultMeta">No scan yet</span>
+          </div>
         </div>
         <div class="results-wrap">
           <table>
@@ -2172,7 +3196,7 @@ INDEX_HTML = r"""<!doctype html>
                 <th style="width:110px">Avg Volume</th>
                 <th style="width:95px">Volume Ratio</th>
                 <th style="width:150px">MA Data</th>
-                <th style="width:260px">Label</th>
+                <th style="width:330px">Label</th>
               </tr>
             </thead>
             <tbody id="resultsBody">
@@ -2235,6 +3259,13 @@ INDEX_HTML = r"""<!doctype html>
         output: "stock_data_us_web.json"
       }
     };
+    const labelOrder = [
+      ["winner", "Winner"],
+      ["potential_winner", "Potential Winner"],
+      ["needs_confirmation", "Needs Confirmation"],
+      ["maybe", "Maybe"],
+      ["bad", "Bad"]
+    ];
 
     function numberValue(id) {
       const value = $(id).value.trim();
@@ -2246,6 +3277,20 @@ INDEX_HTML = r"""<!doctype html>
       if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
       if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
       return fmt.format(Math.round(value));
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function shortDateTime(value) {
+      if (!value) return "";
+      return String(value).replace("T", " ").replace("Z", "").slice(0, 16);
     }
 
     function renderCompanyProfile(company, ticker) {
@@ -2358,7 +3403,10 @@ INDEX_HTML = r"""<!doctype html>
       refreshStatus().catch((error) => {
         $("topStatus").textContent = error.message;
         $("topStatus").className = "status-line bad";
-      }).finally(() => loadChart());
+      }).finally(() => {
+        loadChart();
+        loadSavedPicks(true);
+      });
     }
 
     async function refreshStatus() {
@@ -2790,9 +3838,146 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    async function loadSharedConfig() {
+      try {
+        const payload = await api("/api/shared/config");
+        $("sharedSheetId").value = payload.sheet_id || "";
+        $("sharedUserName").value = payload.user_name || "";
+        $("pickStatus").textContent = payload.configured ? "Shared list configured" : "Local picks only";
+      } catch (error) {
+        $("pickStatus").textContent = error.message;
+        $("pickStatus").className = "status-line bad";
+      }
+    }
+
+    async function saveSharedConfig() {
+      $("pickStatus").textContent = "Saving shared list...";
+      $("pickStatus").className = "status-line";
+      try {
+        const payload = await api("/api/shared/config", {
+          method: "POST",
+          body: JSON.stringify({
+            sheet_id: $("sharedSheetId").value.trim(),
+            user_name: $("sharedUserName").value.trim()
+          })
+        });
+        $("sharedSheetId").value = payload.sheet_id || "";
+        $("sharedUserName").value = payload.user_name || "";
+        await loadSavedPicks(true);
+      } catch (error) {
+        $("pickStatus").textContent = error.message;
+        $("pickStatus").className = "status-line bad";
+      }
+    }
+
+    async function createSharedSheet() {
+      $("createSharedSheet").disabled = true;
+      $("pickStatus").textContent = "Creating shared list...";
+      $("pickStatus").className = "status-line";
+      try {
+        const payload = await api("/api/shared/create", {
+          method: "POST",
+          body: JSON.stringify({
+            user_name: $("sharedUserName").value.trim()
+          })
+        });
+        $("sharedSheetId").value = payload.sheet_id || "";
+        if (payload.sheet_url) window.open(payload.sheet_url, "_blank", "noopener");
+        await loadSavedPicks(true);
+      } catch (error) {
+        $("pickStatus").textContent = error.message;
+        $("pickStatus").className = "status-line bad";
+      } finally {
+        $("createSharedSheet").disabled = false;
+      }
+    }
+
+    function renderConfirmationList(picks) {
+      const list = $("confirmationList");
+      if (!picks.length) {
+        list.innerHTML = `<span class="confirm-empty">No confirmation picks.</span>`;
+        return;
+      }
+      list.innerHTML = picks.map((pick) =>
+        `<a class="pick-chip" href="#" data-ticker="${escapeHtml(pick.ticker)}">${escapeHtml(pick.ticker)}<span>${escapeHtml(shortDateTime(pick.added_at_utc))}</span></a>`
+      ).join("");
+      list.querySelectorAll(".pick-chip").forEach((link) => {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          loadChart(link.dataset.ticker, true);
+        });
+      });
+    }
+
+    function renderSavedPicks(picks, needsConfirmation) {
+      renderConfirmationList(needsConfirmation || []);
+      const body = $("savedPicksBody");
+      if (!picks.length) {
+        body.innerHTML = `<tr><td colspan="9" style="text-align:left;color:var(--muted)">No saved picks.</td></tr>`;
+        return;
+      }
+      body.innerHTML = picks.map((pick) => {
+        const label = pick.label || "";
+        const closeText = pick.close_price === null || pick.close_price === undefined || pick.close_price === ""
+          ? ""
+          : Number(pick.close_price).toFixed(2);
+        const capText = pick.market_cap === null || pick.market_cap === undefined || pick.market_cap === ""
+          ? ""
+          : marketCap(Number(pick.market_cap));
+        return `<tr class="pick-row label-${escapeHtml(label)}">
+          <td><a class="ticker chart-link" href="#" data-ticker="${escapeHtml(pick.ticker)}">${escapeHtml(pick.ticker)}</a></td>
+          <td><span class="rating-badge label-${escapeHtml(label)}">${escapeHtml(labelText(label))}</span></td>
+          <td>${escapeHtml(String(pick.market || "").toUpperCase())}</td>
+          <td>${escapeHtml(shortDateTime(pick.added_at_utc))}</td>
+          <td>${escapeHtml(shortDateTime(pick.updated_at_utc))}</td>
+          <td>${escapeHtml(pick.source || "")}</td>
+          <td>${escapeHtml(pick.signal_date || "")}</td>
+          <td>${closeText}</td>
+          <td>${capText}</td>
+        </tr>`;
+      }).join("");
+      body.querySelectorAll(".chart-link").forEach((link) => {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          loadChart(link.dataset.ticker, true);
+        });
+      });
+    }
+
+    async function loadSavedPicks(sync = false) {
+      const params = new URLSearchParams({
+        cache_file: $("cacheFile").value.trim() || "stock_cache.sqlite",
+        market: $("pickMarketFilter").value,
+        label: $("pickLabelFilter").value,
+        query: $("pickSearch").value.trim(),
+        sync: sync ? "1" : "0"
+      });
+      $("pickStatus").textContent = sync ? "Syncing picks..." : "Loading picks...";
+      $("pickStatus").className = "status-line";
+      try {
+        const payload = await api(`/api/picks?${params.toString()}`);
+        const config = payload.config || {};
+        if (document.activeElement !== $("sharedSheetId")) $("sharedSheetId").value = config.sheet_id || "";
+        if (document.activeElement !== $("sharedUserName")) $("sharedUserName").value = config.user_name || "";
+        renderSavedPicks(payload.picks || [], payload.needs_confirmation || []);
+        const syncText = payload.sync && payload.sync.error
+          ? `, sync failed: ${payload.sync.error}`
+          : payload.sync && payload.sync.ran
+            ? `, shared ${payload.sync.shared_count || 0}`
+            : config.configured
+              ? ", shared ready"
+              : ", local only";
+        $("pickStatus").textContent = `${payload.count || 0} saved picks${syncText}`;
+      } catch (error) {
+        $("pickStatus").textContent = error.message;
+        $("pickStatus").className = "status-line bad";
+      }
+    }
+
     function labelText(label) {
       if (label === "winner") return "Winner";
       if (label === "potential_winner") return "Potential Winner";
+      if (label === "needs_confirmation") return "Needs Confirmation";
       if (label === "maybe") return "Maybe";
       if (label === "bad") return "Bad";
       return "";
@@ -2802,6 +3987,7 @@ INDEX_HTML = r"""<!doctype html>
       const labels = [
         ["winner", "Winner"],
         ["potential_winner", "Potential"],
+        ["needs_confirmation", "Confirm"],
         ["maybe", "Maybe"],
         ["bad", "Bad"]
       ];
@@ -2824,7 +4010,7 @@ INDEX_HTML = r"""<!doctype html>
     function applyRowLabel(ticker, label) {
       const row = document.querySelector(`tr[data-ticker="${ticker}"]`);
       if (!row) return;
-      row.classList.remove("label-winner", "label-potential_winner", "label-maybe", "label-bad");
+      row.classList.remove("label-winner", "label-potential_winner", "label-needs_confirmation", "label-maybe", "label-bad");
       if (label) row.classList.add(`label-${label}`);
       row.querySelectorAll(".label-btn").forEach((button) => {
         button.classList.toggle("active", button.dataset.label === label);
@@ -2861,9 +4047,37 @@ INDEX_HTML = r"""<!doctype html>
         $("resultMeta").textContent = response.label
           ? `${ticker} marked ${labelText(response.label)} in scan ${currentScanId}${centralMessage}`
           : `${ticker} label cleared in scan ${currentScanId}${centralMessage}`;
+        if (response.sync_error) {
+          $("pickStatus").textContent = response.sync_error;
+          $("pickStatus").className = "status-line bad";
+        }
+        loadSavedPicks(false);
       } catch (error) {
         $("resultMeta").textContent = error.message;
         $("resultMeta").className = "status-line bad";
+      }
+    }
+
+    async function exportLabelsToGoogleDocs() {
+      const confirmed = window.confirm("Create a Google Doc with all labelled selections from this cache?");
+      if (!confirmed) return;
+      $("exportGoogleDocs").disabled = true;
+      $("resultMeta").textContent = "Sending labels to Google Docs...";
+      $("resultMeta").className = "status-line";
+      try {
+        const response = await api("/api/google-docs/export", {
+          method: "POST",
+          body: JSON.stringify({
+            cache_file: $("cacheFile").value.trim() || "stock_cache.sqlite"
+          })
+        });
+        $("resultMeta").textContent = `Created Google Doc with ${response.selection_count} selections.`;
+        if (response.url) window.open(response.url, "_blank", "noopener");
+      } catch (error) {
+        $("resultMeta").textContent = error.message;
+        $("resultMeta").className = "status-line bad";
+      } finally {
+        $("exportGoogleDocs").disabled = false;
       }
     }
 
@@ -2908,6 +4122,17 @@ INDEX_HTML = r"""<!doctype html>
     $("downloadUsTickers").addEventListener("click", downloadUsTickers);
     $("startFetch").addEventListener("click", startFetch);
     $("runFilter").addEventListener("click", runFilter);
+    $("exportGoogleDocs").addEventListener("click", exportLabelsToGoogleDocs);
+    $("syncPicks").addEventListener("click", () => loadSavedPicks(true));
+    $("refreshPicks").addEventListener("click", () => loadSavedPicks(false));
+    $("saveSharedConfig").addEventListener("click", saveSharedConfig);
+    $("createSharedSheet").addEventListener("click", createSharedSheet);
+    $("pickMarketFilter").addEventListener("change", () => loadSavedPicks(false));
+    $("pickLabelFilter").addEventListener("change", () => loadSavedPicks(false));
+    $("pickSearch").addEventListener("input", () => {
+      window.clearTimeout(window.pickSearchTimer);
+      window.pickSearchTimer = window.setTimeout(() => loadSavedPicks(false), 200);
+    });
     $("loadChart").addEventListener("click", () => loadChart());
     $("toggleChartFullscreen").addEventListener("click", () => toggleChartFullscreen());
     $("chartInterval").addEventListener("change", () => loadChart());
@@ -2927,6 +4152,7 @@ INDEX_HTML = r"""<!doctype html>
       }
     });
     $("closeProgress").addEventListener("click", () => $("progressModal").classList.add("hidden"));
+    loadSharedConfig();
     applyMarketDefaults();
   </script>
 </body>

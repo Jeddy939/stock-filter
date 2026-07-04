@@ -103,7 +103,7 @@ def test_fetch_stock_data_uses_provider_limit_and_metadata(tmp_path, monkeypatch
     output_file = tmp_path / "stock_data.json"
     provider_calls = []
 
-    def fake_download(tickers, start, end, workers, provider):
+    def fake_download(tickers, start, end, workers, provider, *args, **kwargs):
         provider_calls.append((list(tickers), workers, provider))
         index = pd.to_datetime(["2026-01-02", "2026-01-03"])
         frame = pd.DataFrame(
@@ -116,9 +116,9 @@ def test_fetch_stock_data_uses_provider_limit_and_metadata(tmp_path, monkeypatch
             },
             index=index,
         )
-        return {"AAA": frame}, {"BBB"}
+        return {"AAA": frame}, {"BBB"}, False
 
-    def fake_info(tickers, workers):
+    def fake_info(tickers, workers, *args, **kwargs):
         return {"AAA": {"regularMarketPrice": 1.5, "marketCap": 1000}}
 
     monkeypatch.setattr(fetcher, "download_historical_data", fake_download)
@@ -158,7 +158,7 @@ def test_fetch_stock_data_returns_false_when_every_history_is_missing(tmp_path, 
     ticker_file.write_text("AAA\nBBB\n", encoding="utf-8")
     output_file = tmp_path / "stock_data.json"
 
-    monkeypatch.setattr(fetcher, "download_historical_data", lambda *args: ({}, {"AAA", "BBB"}))
+    monkeypatch.setattr(fetcher, "download_historical_data", lambda *args: ({}, {"AAA", "BBB"}, False))
     monkeypatch.setattr(fetcher, "fetch_info_individual", lambda *args: {})
 
     success = fetcher.fetch_stock_data(
@@ -176,6 +176,79 @@ def test_fetch_stock_data_returns_false_when_every_history_is_missing(tmp_path, 
     assert payload["metadata"]["success"] is False
     assert "No historical data" in payload["metadata"]["error"]
     assert payload["metadata"]["missing_history_count"] == 2
+
+
+def test_fetch_stock_data_cache_mode_counts_cached_tickers_without_loading_frames(tmp_path, monkeypatch):
+    ticker_file = tmp_path / "tickers.txt"
+    ticker_file.write_text("AAA\nBBB\n", encoding="utf-8")
+    cache_file = tmp_path / "stock_cache.sqlite"
+    output_file = tmp_path / "stock_data.json"
+    index = pd.to_datetime(["2026-01-02", "2026-01-03"])
+    frame = pd.DataFrame(
+        {
+            "Open": [1.0, 2.0],
+            "High": [2.0, 3.0],
+            "Low": [0.5, 1.5],
+            "Close": [1.5, 2.5],
+            "Volume": [100, 200],
+        },
+        index=index,
+    )
+
+    def fake_download(*args, **kwargs):
+        return {"AAA": frame}, {"BBB"}, False
+
+    def fail_if_full_history_load(*args, **kwargs):
+        raise AssertionError("web cache update should not reload full history frames")
+
+    monkeypatch.setattr(fetcher, "download_historical_data", fake_download)
+    monkeypatch.setattr(fetcher, "fetch_info_individual", lambda *args, **kwargs: {})
+    monkeypatch.setattr(fetcher, "_load_cached_histories", fail_if_full_history_load)
+
+    success = fetcher.fetch_stock_data(
+        str(ticker_file),
+        str(output_file),
+        years=1,
+        workers=1,
+        cache_file=str(cache_file),
+        export_json=False,
+    )
+
+    assert success is True
+    assert not output_file.exists()
+
+
+def test_yfinance_history_download_sets_auto_adjust_false(monkeypatch):
+    calls = []
+    index = pd.to_datetime(["2026-01-02"])
+    frame = pd.DataFrame(
+        {
+            "Open": [1.0],
+            "High": [2.0],
+            "Low": [0.5],
+            "Close": [1.5],
+            "Volume": [100],
+        },
+        index=index,
+    )
+
+    def fake_download(*args, **kwargs):
+        calls.append(kwargs)
+        return frame
+
+    monkeypatch.setattr(fetcher.yf, "download", fake_download)
+
+    histories, missing, stopped = fetcher._download_historical_data(
+        ["AAA"],
+        datetime(2026, 1, 1),
+        datetime(2026, 1, 31),
+        workers=1,
+    )
+
+    assert list(histories) == ["AAA"]
+    assert missing == set()
+    assert stopped is False
+    assert calls[0]["auto_adjust"] is False
 
 
 def test_read_stooq_history_rejects_api_key_instruction_response(monkeypatch):
