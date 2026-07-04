@@ -3221,17 +3221,17 @@ INDEX_HTML = r"""<!doctype html>
           <table>
             <thead>
               <tr>
-                <th style="width:90px">Ticker</th>
-                <th style="width:170px"><button class="sort-header" id="pickCategorySort" type="button" title="Sort saved picks by category">Category</button></th>
-                <th style="width:70px">Market</th>
-                <th style="width:155px">Sector</th>
-                <th style="width:210px">Industry</th>
-                <th style="width:145px">Added</th>
-                <th style="width:145px">Updated</th>
-                <th style="width:90px">By</th>
-                <th style="width:95px">Signal</th>
-                <th style="width:80px">Close</th>
-                <th style="width:105px">Market Cap</th>
+                <th style="width:90px"><button class="sort-header pick-sort" type="button" data-sort="ticker" title="Sort saved picks by ticker">Ticker</button></th>
+                <th style="width:170px"><button class="sort-header pick-sort" type="button" data-sort="label" title="Sort saved picks by category">Category</button></th>
+                <th style="width:70px"><button class="sort-header pick-sort" type="button" data-sort="market" title="Sort saved picks by market">Market</button></th>
+                <th style="width:155px"><button class="sort-header pick-sort" type="button" data-sort="sector" title="Sort saved picks by sector">Sector</button></th>
+                <th style="width:210px"><button class="sort-header pick-sort" type="button" data-sort="industry" title="Sort saved picks by industry">Industry</button></th>
+                <th style="width:145px"><button class="sort-header pick-sort" type="button" data-sort="added_at_utc" title="Sort saved picks by added date">Added</button></th>
+                <th style="width:145px"><button class="sort-header pick-sort" type="button" data-sort="updated_at_utc" title="Sort saved picks by updated date">Updated</button></th>
+                <th style="width:90px"><button class="sort-header pick-sort" type="button" data-sort="source" title="Sort saved picks by name">By</button></th>
+                <th style="width:95px"><button class="sort-header pick-sort" type="button" data-sort="signal_date" title="Sort saved picks by signal date">Signal</button></th>
+                <th style="width:80px"><button class="sort-header pick-sort" type="button" data-sort="close_price" title="Sort saved picks by close price">Close</button></th>
+                <th style="width:105px"><button class="sort-header pick-sort" type="button" data-sort="market_cap" title="Sort saved picks by market cap">Market Cap</button></th>
               </tr>
             </thead>
             <tbody id="savedPicksBody">
@@ -3350,7 +3350,8 @@ INDEX_HTML = r"""<!doctype html>
     let currentScanId = null;
     let lastSavedPicks = [];
     let lastNeedsConfirmation = [];
-    let pickCategorySortDirection = 0;
+    let pickSortKey = "updated_at_utc";
+    let pickSortDirection = -1;
     const pickCategoryOrder = ["winner", "potential_winner", "needs_confirmation", "maybe", "bad"];
     const maColors = {
       "30": "#f2c14e",
@@ -4032,21 +4033,43 @@ INDEX_HTML = r"""<!doctype html>
       return index === -1 ? pickCategoryOrder.length : index;
     }
 
+    function pickSortValue(pick, key) {
+      if (key === "label") return categoryRank(pick.label);
+      if (key === "close_price" || key === "market_cap") {
+        const value = Number(pick[key]);
+        return Number.isFinite(value) ? value : null;
+      }
+      return String(pick[key] || "").toLowerCase();
+    }
+
+    function comparePickValue(a, b) {
+      if (a === null && b === null) return 0;
+      if (a === null) return 1;
+      if (b === null) return -1;
+      if (typeof a === "number" && typeof b === "number") return a - b;
+      return String(a).localeCompare(String(b));
+    }
+
     function sortedSavedPicks(picks) {
       const copy = [...picks];
-      if (!pickCategorySortDirection) return copy;
       return copy.sort((a, b) => {
-        const category = (categoryRank(a.label) - categoryRank(b.label)) * pickCategorySortDirection;
-        if (category) return category;
+        const primary = comparePickValue(pickSortValue(a, pickSortKey), pickSortValue(b, pickSortKey)) * pickSortDirection;
+        if (primary) return primary;
         return String(b.updated_at_utc || "").localeCompare(String(a.updated_at_utc || ""))
           || String(a.ticker || "").localeCompare(String(b.ticker || ""));
       });
     }
 
-    function updatePickCategorySortLabel() {
-      const button = $("pickCategorySort");
-      if (!button) return;
-      button.textContent = pickCategorySortDirection < 0 ? "Category v" : pickCategorySortDirection > 0 ? "Category ^" : "Category";
+    function updatePickSortLabels() {
+      document.querySelectorAll(".pick-sort").forEach((button) => {
+        const label = button.dataset.baseLabel || button.textContent.replace(/[ v^]+$/, "");
+        button.dataset.baseLabel = label;
+        if (button.dataset.sort !== pickSortKey) {
+          button.textContent = label;
+          return;
+        }
+        button.textContent = `${label} ${pickSortDirection > 0 ? "^" : "v"}`;
+      });
     }
 
     function renderSavedPicks(picks, needsConfirmation, remember = true) {
@@ -4054,7 +4077,7 @@ INDEX_HTML = r"""<!doctype html>
         lastSavedPicks = picks || [];
         lastNeedsConfirmation = needsConfirmation || [];
       }
-      updatePickCategorySortLabel();
+      updatePickSortLabels();
       renderConfirmationList(needsConfirmation || []);
       const body = $("savedPicksBody");
       if (!picks.length) {
@@ -4272,9 +4295,17 @@ INDEX_HTML = r"""<!doctype html>
     $("exportGoogleDocs").addEventListener("click", exportLabelsToGoogleDocs);
     $("syncPicks").addEventListener("click", () => loadSavedPicks(true));
     $("refreshPicks").addEventListener("click", () => loadSavedPicks(false));
-    $("pickCategorySort").addEventListener("click", () => {
-      pickCategorySortDirection = pickCategorySortDirection > 0 ? -1 : 1;
-      renderSavedPicks(lastSavedPicks, lastNeedsConfirmation, false);
+    document.querySelectorAll(".pick-sort").forEach((button) => {
+      button.addEventListener("click", () => {
+        const nextKey = button.dataset.sort;
+        if (pickSortKey === nextKey) {
+          pickSortDirection *= -1;
+        } else {
+          pickSortKey = nextKey;
+          pickSortDirection = ["added_at_utc", "updated_at_utc", "signal_date", "close_price", "market_cap"].includes(nextKey) ? -1 : 1;
+        }
+        renderSavedPicks(lastSavedPicks, lastNeedsConfirmation, false);
+      });
     });
     $("saveSharedConfig").addEventListener("click", saveSharedConfig);
     $("createSharedSheet").addEventListener("click", createSharedSheet);
