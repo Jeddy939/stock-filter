@@ -711,6 +711,15 @@ def _shared_settings_path() -> Path:
     return Path(configured).expanduser() if configured else ROOT / SHARED_SETTINGS_FILE
 
 
+def _shared_picks_cache_file(cache_file: str = DEFAULT_CACHE_FILE) -> str:
+    configured = os.environ.get("MONEYMAKER_SHARED_PICKS_CACHE", "").strip()
+    if configured:
+        return configured
+    if cache_file and Path(str(cache_file)).is_absolute():
+        return str(cache_file)
+    return DEFAULT_CACHE_FILE
+
+
 def _extract_sheet_id(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -1445,8 +1454,25 @@ def _tracked_pick_map(cache_file: str, tickers: Iterable[str], market: str = "al
     return {row["ticker"]: dict(row) for row in rows}
 
 
+def _merge_pick_by_updated_at(
+    merged: Dict[str, Dict[str, Any]],
+    picks: Dict[str, Dict[str, Any]],
+) -> None:
+    for ticker, pick in picks.items():
+        existing = merged.get(ticker)
+        if not existing or str(pick.get("updated_at_utc") or "") >= str(existing.get("updated_at_utc") or ""):
+            merged[ticker] = pick
+
+
 def _apply_saved_ratings_to_results(cache_file: str, results: Sequence[Dict[str, Any]]) -> None:
-    picks = _tracked_pick_map(cache_file, (row.get("ticker") for row in results), market="all")
+    tickers = [row.get("ticker") for row in results]
+    picks: Dict[str, Dict[str, Any]] = {}
+    for picks_cache in dict.fromkeys([_shared_picks_cache_file(cache_file), cache_file]):
+        if not picks_cache:
+            continue
+        if not _cache_path(picks_cache).exists():
+            continue
+        _merge_pick_by_updated_at(picks, _tracked_pick_map(picks_cache, tickers, market="all"))
     for row in results:
         pick = picks.get(str(row.get("ticker") or "").strip().upper())
         if not pick:
@@ -1464,6 +1490,7 @@ def _apply_saved_ratings_to_results(cache_file: str, results: Sequence[Dict[str,
 
 def _saved_picks_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
     cache_file = params.get("cache_file", [DEFAULT_CACHE_FILE])[0] or DEFAULT_CACHE_FILE
+    picks_cache_file = _shared_picks_cache_file(cache_file)
     market = _infer_market(cache_file, params.get("market", ["all"])[0])
     label = params.get("label", ["all"])[0] or "all"
     query = params.get("query", [""])[0]
@@ -1471,7 +1498,7 @@ def _saved_picks_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
     sync: Dict[str, Any] = {"configured": bool(_load_shared_settings().get("sheet_id")), "ran": False}
     if sync_requested:
         try:
-            sync = _sync_shared_picks(cache_file)
+            sync = _sync_shared_picks(picks_cache_file)
         except Exception as exc:
             sync = {
                 "configured": bool(_load_shared_settings().get("sheet_id")),
@@ -1479,9 +1506,9 @@ def _saved_picks_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
                 "error": str(exc),
             }
 
-    picks = _local_tracked_picks(cache_file, market=market, label=label, query=query)
+    picks = _local_tracked_picks(picks_cache_file, market=market, label=label, query=query)
     needs_confirmation = _local_tracked_picks(
-        cache_file,
+        picks_cache_file,
         market=market,
         label="needs_confirmation",
         query=query,
@@ -1498,6 +1525,7 @@ def _saved_picks_payload(params: Dict[str, List[str]]) -> Dict[str, Any]:
 
 def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
     cache_file = payload.get("cache_file") or DEFAULT_CACHE_FILE
+    picks_cache_file = _shared_picks_cache_file(cache_file)
     scan_id = int(payload.get("scan_id") or 0)
     ticker = str(payload.get("ticker") or "").strip().upper()
     label = _normalise_label(payload.get("label"))
@@ -1537,10 +1565,15 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "clear",
             )
             conn.commit()
+            if picks_cache_file != cache_file:
+                with _connect_write(picks_cache_file) as picks_conn:
+                    _ensure_scan_schema(picks_conn)
+                    picks_conn.execute("DELETE FROM tracked_picks WHERE market = ? AND ticker = ?", (market, ticker))
+                    picks_conn.commit()
             sync_error = None
             if _load_shared_settings().get("sheet_id"):
                 try:
-                    _sync_shared_picks(cache_file)
+                    _delete_shared_pick(picks_cache_file, market, ticker)
                 except Exception as exc:
                     sync_error = str(exc)
             return {
@@ -1578,10 +1611,15 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
             "label",
         )
         conn.commit()
+    if picks_cache_file != cache_file:
+        with _connect_write(picks_cache_file) as picks_conn:
+            _ensure_scan_schema(picks_conn)
+            _upsert_tracked_pick(picks_conn, pick)
+            picks_conn.commit()
     sync_error = None
     if _load_shared_settings().get("sheet_id"):
         try:
-            _sync_shared_picks(cache_file)
+            _sync_shared_picks(picks_cache_file)
         except Exception as exc:
             sync_error = str(exc)
     return {
