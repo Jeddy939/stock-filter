@@ -3276,11 +3276,11 @@ INDEX_HTML = r"""<!doctype html>
           <button id="loadChart">Load Chart</button>
         </div>
         <div class="ma-controls" aria-label="Moving average overlays">
-          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="30"><span class="ma-dot" style="background:#f2c14e"></span>MA 30</label>
-          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="90"><span class="ma-dot" style="background:#8dd7ff"></span>MA 90</label>
-          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="180"><span class="ma-dot" style="background:#b58cff"></span>MA 180</label>
-          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="360"><span class="ma-dot" style="background:#ff9f7a"></span>MA 360</label>
-          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="700"><span class="ma-dot" style="background:#d9e672"></span>MA 700</label>
+          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="30" checked><span class="ma-dot" style="background:#f2c14e"></span>MA 30</label>
+          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="90" checked><span class="ma-dot" style="background:#8dd7ff"></span>MA 90</label>
+          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="180" checked><span class="ma-dot" style="background:#b58cff"></span>MA 180</label>
+          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="360" checked><span class="ma-dot" style="background:#ff9f7a"></span>MA 360</label>
+          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="700" checked><span class="ma-dot" style="background:#d9e672"></span>MA 700</label>
         </div>
         <div class="company-profile empty" id="companyProfile">
           <p>Load a cached ticker to show the company description.</p>
