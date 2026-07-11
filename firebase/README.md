@@ -58,6 +58,8 @@ gcloud services enable run.googleapis.com artifactregistry.googleapis.com `
   secretmanager.googleapis.com cloudscheduler.googleapis.com
 gcloud artifacts repositories create moneymaker `
   --repository-format=docker --location=australia-southeast1
+gcloud storage buckets create gs://moneymaker-aedf7-cache `
+  --location=australia-southeast1
 gcloud builds submit --tag `
   australia-southeast1-docker.pkg.dev/moneymaker-aedf7/moneymaker/moneymaker:latest .
 ```
@@ -69,13 +71,15 @@ service and two long-running jobs:
 $image = "australia-southeast1-docker.pkg.dev/moneymaker-aedf7/moneymaker/moneymaker:latest"
 gcloud run deploy moneymaker-api --image $image --region australia-southeast1 `
   --allow-unauthenticated --max 1 `
-  --set-env-vars MONEYMAKER_REQUIRE_AUTH=true,GOOGLE_CLOUD_PROJECT=moneymaker-aedf7 `
+  --set-env-vars "MONEYMAKER_REQUIRE_AUTH=true,MONEYMAKER_CLOUD_MODE=true,GOOGLE_CLOUD_PROJECT=moneymaker-aedf7,MONEYMAKER_CACHE_BUCKET=moneymaker-aedf7-cache" `
   --set-secrets MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest
 gcloud run jobs deploy moneymaker-fetch --image $image --region australia-southeast1 `
-  --command python --args -m,firebase.worker --set-env-vars MONEYMAKER_JOB_TYPE=fetch `
+  --command python --args -m,firebase.worker `
+  --set-env-vars MONEYMAKER_JOB_TYPE=fetch,MONEYMAKER_CACHE_BUCKET=moneymaker-aedf7-cache `
   --set-secrets MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest
 gcloud run jobs deploy moneymaker-filter --image $image --region australia-southeast1 `
-  --command python --args -m,firebase.worker --set-env-vars MONEYMAKER_JOB_TYPE=filter `
+  --command python --args -m,firebase.worker `
+  --set-env-vars MONEYMAKER_JOB_TYPE=filter,MONEYMAKER_CACHE_BUCKET=moneymaker-aedf7-cache `
   --set-secrets MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest
 firebase deploy --only hosting
 ```
