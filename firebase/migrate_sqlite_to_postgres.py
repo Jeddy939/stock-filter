@@ -85,6 +85,7 @@ def import_cache(
     dry_run: bool,
     price_since: str | None = None,
     full_tickers: set[str] | None = None,
+    resume: bool = False,
 ) -> dict[str, int]:
     counts = {"companies": 0, "prices": 0, "scans": 0, "results": 0, "labels": 0}
     source = sqlite_connection(cache_path)
@@ -109,19 +110,52 @@ def import_cache(
                 db.commit()
             counts["companies"] += len(batch)
 
+        resume_tickers: set[str] | None = None
+        if resume and not dry_run:
+            existing_counts = {
+                row[0]: row[1]
+                for row in db.execute(
+                    "SELECT ticker, COUNT(*) FROM price_history WHERE market = %s GROUP BY ticker",
+                    (market,),
+                )
+            }
+            source_counts = {
+                row[0]: row[1]
+                for row in source.execute("SELECT ticker, COUNT(*) FROM price_history GROUP BY ticker")
+            }
+            resume_tickers = {
+                ticker
+                for ticker, count in source_counts.items()
+                if existing_counts.get(ticker, 0) < count
+            }
+
         price_query = """
             SELECT provider, ticker, date, open, high, low, close, volume,
                    fetched_at_utc
             FROM price_history
         """
         price_params: list[str] = []
+        filters: list[str] = []
         if price_since:
-            price_query += " WHERE date >= ?"
+            filters.append("date >= ?")
             price_params.append(price_since)
-            if full_tickers:
-                placeholders = ", ".join("?" for _ in full_tickers)
-                price_query += f" OR ticker IN ({placeholders})"
-                price_params.extend(sorted(full_tickers))
+        if full_tickers:
+            placeholders = ", ".join("?" for _ in full_tickers)
+            filters.append(f"ticker IN ({placeholders})")
+            price_params.extend(sorted(full_tickers))
+        if resume_tickers is not None:
+            if not resume_tickers:
+                price_query += " WHERE 1 = 0"
+            else:
+                placeholders = ", ".join("?" for _ in resume_tickers)
+                resume_filter = f"ticker IN ({placeholders})"
+                price_params.extend(sorted(resume_tickers))
+                if filters:
+                    price_query += " WHERE (" + " OR ".join(filters) + ") AND " + resume_filter
+                else:
+                    price_query += " WHERE " + resume_filter
+        elif filters:
+            price_query += " WHERE " + " OR ".join(filters)
         price_query += " ORDER BY ticker, date"
         price_rows = (
             (
@@ -343,6 +377,11 @@ def main() -> None:
         action="store_true",
         help="Also import all available history for tickers not already present online.",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Only import source tickers whose online row count is incomplete.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if not args.database_url and not args.dry_run:
@@ -374,6 +413,7 @@ def main() -> None:
             False,
             price_since=args.price_since,
             full_tickers=full_tickers,
+            resume=args.resume,
         )
         rating_count = 0
         if args.ratings_db and args.ratings_db.exists():
