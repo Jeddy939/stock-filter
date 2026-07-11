@@ -1507,14 +1507,14 @@ INDEX_HTML = r"""<!doctype html>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #111614;
-      --panel: #18211e;
-      --panel-2: #202b27;
-      --line: #314039;
-      --text: #edf4ef;
-      --muted: #9fb0a8;
-      --accent: #55c47a;
-      --accent-2: #6ab8d8;
+      --bg: #0d1014;
+      --panel: #15191f;
+      --panel-2: #1d232b;
+      --line: #303844;
+      --text: #f1f4f7;
+      --muted: #9ca8b5;
+      --accent: #45bd82;
+      --accent-2: #68aee8;
       --warn: #e0b45b;
       --bad: #df7770;
       --shadow: rgba(0, 0, 0, .25);
@@ -1533,7 +1533,7 @@ INDEX_HTML = r"""<!doctype html>
       gap: 16px;
       padding: 14px 20px;
       border-bottom: 1px solid var(--line);
-      background: #151c19;
+      background: #12161b;
       position: sticky;
       top: 0;
       z-index: 2;
@@ -1551,7 +1551,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     aside {
       border-right: 1px solid var(--line);
-      background: #131a17;
+      background: #11151a;
       padding: 16px;
       overflow: auto;
     }
@@ -1569,7 +1569,7 @@ INDEX_HTML = r"""<!doctype html>
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 6px;
-      box-shadow: 0 6px 18px var(--shadow);
+      box-shadow: 0 3px 12px var(--shadow);
     }
     .metric { padding: 12px; min-height: 78px; }
     .metric span { color: var(--muted); display: block; font-size: 12px; }
@@ -1579,7 +1579,7 @@ INDEX_HTML = r"""<!doctype html>
       margin: 0 0 12px;
       font-size: 14px;
       font-weight: 650;
-      color: #dbe8e0;
+      color: #e6ebf0;
     }
     label {
       display: block;
@@ -1589,7 +1589,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     input, select {
       width: 100%;
-      background: #0f1513;
+      background: #0e1217;
       color: var(--text);
       border: 1px solid var(--line);
       border-radius: 5px;
@@ -1623,7 +1623,7 @@ INDEX_HTML = r"""<!doctype html>
       cursor: pointer;
     }
     button.primary { background: #237046; border-color: #35925e; }
-    button.secondary { background: #1d3f4d; border-color: #2d6981; }
+    button.secondary { background: #205c48; border-color: #348a69; }
     button:disabled { opacity: .55; cursor: default; }
     input:disabled {
       opacity: .55;
@@ -1640,7 +1640,7 @@ INDEX_HTML = r"""<!doctype html>
       width: 100%;
       border-collapse: collapse;
       table-layout: fixed;
-      background: #121917;
+      background: #11161b;
       border: 1px solid var(--line);
       border-radius: 6px;
       overflow: hidden;
@@ -1657,7 +1657,7 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--muted);
       font-size: 12px;
       font-weight: 600;
-      background: #19211e;
+      background: #1a2027;
       position: sticky;
       top: 0;
       z-index: 1;
@@ -1884,7 +1884,7 @@ INDEX_HTML = r"""<!doctype html>
     .progress-fill {
       width: 0%;
       height: 100%;
-      background: linear-gradient(90deg, #48b36c, #69c9dd);
+      background: var(--accent);
       transition: width .2s ease;
     }
     .progress-grid {
@@ -1913,6 +1913,34 @@ INDEX_HTML = r"""<!doctype html>
     .ok { color: var(--accent); }
     .warn { color: var(--warn); }
     .bad { color: var(--bad); }
+    .market-switch {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .market-switch select { min-height: 42px; font-weight: 650; }
+    .online-source {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    .online-source::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 3px rgba(69, 189, 130, .14);
+    }
+    body.cloud-mode .local-data-controls { display: none; }
+    body.cloud-mode .online-source { display: flex; }
+    body.cloud-mode main { grid-template-columns: minmax(270px, 320px) minmax(0, 1fr); }
+    body.cloud-mode aside { padding: 12px; }
+    body.cloud-mode .panel { margin-bottom: 10px; }
     @media (max-width: 940px) {
       main { grid-template-columns: 1fr; }
       aside { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -1943,7 +1971,7 @@ INDEX_HTML = r"""<!doctype html>
   <header>
     <h1>Moneymaker Stock Filter</h1>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-      <span class="status-line" id="topStatus">Loading cache status...</span>
+      <span class="status-line" id="topStatus">Connecting to market data...</span>
       <input id="authEmail" type="email" placeholder="Email" autocomplete="username" style="width:180px">
       <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password" style="width:140px">
       <button id="authSignIn" type="button">Sign in</button>
@@ -1953,22 +1981,16 @@ INDEX_HTML = r"""<!doctype html>
   </header>
   <main>
     <aside>
-      <div class="panel">
+      <div class="panel local-data-controls">
         <h2>Cache</h2>
-        <label for="marketSelect">Market</label>
-        <select id="marketSelect">
-          <option value="asx">ASX</option>
-          <option value="us">US</option>
-        </select>
         <label for="cacheFile">SQLite file</label>
         <input id="cacheFile" value="stock_cache.sqlite">
         <div class="actions">
-          <button id="refreshStatus">Refresh</button>
           <span class="pill" id="cachePill">No cache</span>
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel local-data-controls">
         <h2>Fetch</h2>
         <div class="actions" style="margin-top:0">
           <button id="downloadUsTickers" type="button">Download US Tickers</button>
@@ -2057,7 +2079,16 @@ INDEX_HTML = r"""<!doctype html>
       </div>
 
       <div class="panel">
-        <h2>Filter</h2>
+        <h2>Market Screen</h2>
+        <label for="marketSelect">Market</label>
+        <div class="market-switch">
+          <select id="marketSelect">
+            <option value="asx">ASX market</option>
+            <option value="us">US market</option>
+          </select>
+          <button id="refreshStatus" type="button">Refresh data</button>
+        </div>
+        <div class="online-source">Screening the automatically updated online database</div>
         <div class="grid-2">
           <div>
             <label for="volumeMultiplier">Volume multiplier</label>
@@ -2097,7 +2128,7 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <label class="inline-check">
           <input id="useScanLimit" type="checkbox">
-          Limit scan to first N cached tickers
+          Limit scan to first N tickers
         </label>
         <div class="actions">
           <button class="secondary" id="runFilter">Run Filter</button>
@@ -2105,7 +2136,7 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel local-data-controls">
         <h2>Fetch Log</h2>
         <pre class="log" id="fetchLog"></pre>
       </div>
@@ -2113,7 +2144,7 @@ INDEX_HTML = r"""<!doctype html>
 
     <section class="workspace">
       <div class="metrics">
-        <div class="metric"><span>Cached tickers</span><strong id="metricTickers">0</strong></div>
+        <div class="metric"><span>Covered stocks</span><strong id="metricTickers">0</strong></div>
         <div class="metric"><span>History rows</span><strong id="metricRows">0</strong></div>
         <div class="metric"><span>Latest bar</span><strong id="metricLatest">-</strong></div>
         <div class="metric"><span>Matches</span><strong id="metricMatches">0</strong></div>
@@ -2122,7 +2153,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
           <h2 style="margin:0">Chart</h2>
           <div class="chart-header-actions">
-            <span class="status-line" id="chartStatus">Select a cached ticker</span>
+            <span class="status-line" id="chartStatus">Select a ticker</span>
             <button id="toggleChartFullscreen" type="button" aria-pressed="false">Fullscreen</button>
           </div>
         </div>
@@ -2402,6 +2433,19 @@ INDEX_HTML = r"""<!doctype html>
       return payload;
     }
 
+    async function initializeAppMode() {
+      try {
+        const payload = await api("/api/config");
+        if (payload.cloud) {
+          document.body.classList.add("cloud-mode");
+          document.title = "Moneymaker Markets";
+          document.querySelector("h1").textContent = "Moneymaker Markets";
+        }
+      } catch (error) {
+        console.warn("Could not determine application mode", error);
+      }
+    }
+
     function currentMarketDefaults() {
       return marketDefaults[$("marketSelect").value] || marketDefaults.asx;
     }
@@ -2433,8 +2477,8 @@ INDEX_HTML = r"""<!doctype html>
       $("cachePill").textContent = s.exists ? `${s.size_mb} MB` : "No cache";
       $("cachePill").className = `pill ${s.exists ? "ok" : "warn"}`;
       $("topStatus").textContent = s.exists
-        ? `${s.ticker_count} tickers, ${s.history_rows} rows, latest ${s.latest_date || "-"}`
-        : "Cache not found";
+        ? `${fmt.format(s.ticker_count || 0)} stocks online, ${fmt.format(s.history_rows || 0)} price rows, latest ${s.latest_date || "-"}`
+        : "No online market data found";
       if (s.tickers && s.tickers.length && !$("chartTicker").value.trim()) {
         $("chartTicker").value = s.tickers[0];
       }
@@ -3042,7 +3086,7 @@ INDEX_HTML = r"""<!doctype html>
       }
     });
     $("closeProgress").addEventListener("click", () => $("progressModal").classList.add("hidden"));
-    applyMarketDefaults();
+    initializeAppMode().finally(() => applyMarketDefaults());
   </script>
 </body>
 </html>

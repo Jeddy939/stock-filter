@@ -28,7 +28,7 @@ if str(SRC) not in sys.path:
 
 from moneymaker import fetcher
 from firebase.migrate_sqlite_to_postgres import import_cache
-from web_app import _run_filter
+from cloud_backend.postgres_screener import run_postgres_filter
 
 
 def job_id() -> str:
@@ -148,37 +148,29 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
 
 def run_filter(data: dict[str, Any]) -> dict[str, Any]:
     market = str(data.get("market") or "asx").lower()
-    cache = checkpoint_path(market)
-    update_job(status="running", stage="Downloading cache", detail=f"Downloading {market.upper()} cloud cache.")
-    if not download_checkpoint(market, cache):
-        raise RuntimeError(
-            f"No cloud cache checkpoint exists for {market.upper()}. "
-            "Run a cache update first so the screen has data to scan."
-        )
     params = dict(data)
-    params["cache_file"] = str(cache)
+    params["market"] = market
+    last_update = 0.0
 
     def progress(stage: str, current: int, total: int | None, message: str) -> None:
+        nonlocal last_update
+        now = time.monotonic()
+        if now - last_update < 1.0 and total is not None and current < total:
+            return
+        last_update = now
         percent = round((current / total) * 100, 2) if total else 0
         update_job(
             status="running", stage=stage, current_count=current, total_count=total,
             percent=percent, detail=message,
         )
 
-    update_job(status="running", stage="Opening cache", detail=f"Opening {market.upper()} cache for screening.")
-    result = _run_filter(params, progress_callback=progress)
-    update_job(status="running", stage="Saving scan", detail="Saving screen results and checkpoint.")
-    import sqlite3
-    with sqlite3.connect(str(cache)) as checkpoint:
-        checkpoint.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
         ensure_schema(conn)
-        counts = import_cache(conn, cache, market, 2_000, False)
-    upload_checkpoint(market, cache)
+        result = run_postgres_filter(conn, params, progress)
     return {
         "filter": {key: value for key, value in result.items() if key != "results"},
         "results": result.get("results", []),
-        "import": counts,
+        "source": {"database": "postgresql", "market": market},
     }
 
 
