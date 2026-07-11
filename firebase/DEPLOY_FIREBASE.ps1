@@ -2,6 +2,7 @@ param(
     [switch]$ProvisionSql,
     [switch]$BuildOnly,
     [switch]$DeployOnly,
+    [switch]$ApplySchema,
     [switch]$MigrateCaches,
     [switch]$CreateDatabaseSecret
 )
@@ -61,6 +62,14 @@ if (-not $DeployOnly -or $BuildOnly) {
 if ($BuildOnly) {
     Write-Host "Build complete: $Image" -ForegroundColor Green
     exit 0
+}
+
+if ($ApplySchema) {
+    if (-not $env:MONEYMAKER_DATABASE_URL) {
+        throw "Set MONEYMAKER_DATABASE_URL to the local/public PostgreSQL URL before applying the schema. Use Secret Manager version 2, not the Cloud Run socket URL."
+    }
+    Write-Host "Applying PostgreSQL schema and multi-user tables..." -ForegroundColor Cyan
+    python firebase\apply_schema.py
 }
 
 $secret = (& gcloud secrets describe moneymaker-database-url --format="value(name)" 2>$null).Trim()
