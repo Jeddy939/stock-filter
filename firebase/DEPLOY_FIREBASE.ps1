@@ -27,12 +27,21 @@ function Invoke-Gcloud([string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "gcloud command failed: $Gcloud $($Arguments -join ' ')" }
 }
 
+function Test-Gcloud([string[]]$Arguments) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    & $Gcloud @Arguments 2>&1 | Out-Null
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $previous
+    return $code
+}
+
 Require-Command "gcloud"
 Require-Command "firebase"
 
 Invoke-Gcloud @("config", "set", "project", $Project)
 
-$billing = (& $Gcloud beta billing projects describe $Project --format="value(billingAccountName)" 2>$null).Trim()
+$billing = (& $Gcloud billing projects describe $Project --format="value(billingAccountName)" 2>$null).Trim()
 if ([string]::IsNullOrWhiteSpace($billing)) {
     throw "Billing is not enabled for $Project. Enable billing before provisioning Cloud SQL or Cloud Run."
 }
@@ -45,12 +54,10 @@ if ($ProvisionSql) {
 
 if (-not $DeployOnly) {
     Invoke-Gcloud @("services", "enable", "run.googleapis.com", "artifactregistry.googleapis.com", "cloudbuild.googleapis.com", "secretmanager.googleapis.com", "cloudscheduler.googleapis.com", "storage.googleapis.com")
-    & $Gcloud artifacts repositories describe moneymaker --location $Region 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    if ((Test-Gcloud @("artifacts", "repositories", "describe", "moneymaker", "--location", $Region)) -ne 0) {
         Invoke-Gcloud @("artifacts", "repositories", "create", "moneymaker", "--repository-format=docker", "--location=$Region")
     }
-    & $Gcloud storage buckets describe "gs://$Bucket" 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    if ((Test-Gcloud @("storage", "buckets", "describe", "gs://$Bucket")) -ne 0) {
         Invoke-Gcloud @("storage", "buckets", "create", "gs://$Bucket", "--location=$Region")
     }
 }
@@ -77,7 +84,10 @@ if ($ApplySchema) {
     python firebase\apply_schema.py
 }
 
-$secret = (& $Gcloud secrets describe moneymaker-database-url --format="value(name)" 2>$null).Trim()
+$previous = $ErrorActionPreference
+$ErrorActionPreference = "SilentlyContinue"
+$secret = (& $Gcloud secrets describe moneymaker-database-url --format="value(name)" 2>&1).Trim()
+$ErrorActionPreference = $previous
 if ([string]::IsNullOrWhiteSpace($secret)) {
     if ($CreateDatabaseSecret) {
         $databaseUrl = Read-Host "Paste the PostgreSQL connection URL (input is sent directly to Secret Manager)"
@@ -97,8 +107,8 @@ Write-Host "Deploying API service..." -ForegroundColor Cyan
 Invoke-Gcloud @("run", "deploy", "moneymaker-api", "--image", $Image, "--region", $Region, "--allow-unauthenticated", "--max", "1", "--set-env-vars", $envVars, "--set-secrets", "MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest")
 
 Write-Host "Deploying Cloud Run Jobs..." -ForegroundColor Cyan
-Invoke-Gcloud @("run", "jobs", "deploy", "moneymaker-fetch", "--image", $Image, "--region", $Region, "--command", "python", "--args", "-m,firebase.worker", "--set-env-vars", "MONEYMAKER_JOB_TYPE=fetch,MONEYMAKER_CACHE_BUCKET=$Bucket,GOOGLE_CLOUD_PROJECT=$Project", "--set-secrets", "MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest")
-Invoke-Gcloud @("run", "jobs", "deploy", "moneymaker-filter", "--image", $Image, "--region", $Region, "--command", "python", "--args", "-m,firebase.worker", "--set-env-vars", "MONEYMAKER_JOB_TYPE=filter,MONEYMAKER_CACHE_BUCKET=$Bucket,GOOGLE_CLOUD_PROJECT=$Project", "--set-secrets", "MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest")
+Invoke-Gcloud @("run", "jobs", "deploy", "moneymaker-fetch", "--image", $Image, "--region", $Region, "--command", "python", "--args=-m,firebase.worker", "--set-env-vars", "MONEYMAKER_JOB_TYPE=fetch,MONEYMAKER_CACHE_BUCKET=$Bucket,GOOGLE_CLOUD_PROJECT=$Project", "--set-secrets", "MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest")
+Invoke-Gcloud @("run", "jobs", "deploy", "moneymaker-filter", "--image", $Image, "--region", $Region, "--command", "python", "--args=-m,firebase.worker", "--set-env-vars", "MONEYMAKER_JOB_TYPE=filter,MONEYMAKER_CACHE_BUCKET=$Bucket,GOOGLE_CLOUD_PROJECT=$Project", "--set-secrets", "MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest")
 
 if ($MigrateCaches) {
     if (-not $env:MONEYMAKER_DATABASE_URL) {

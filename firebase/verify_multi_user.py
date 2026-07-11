@@ -15,7 +15,7 @@ import urllib.parse
 import urllib.request
 
 
-API = os.environ.get("MONEYMAKER_API_URL", "https://moneymaker-api-u2hhhgjdmq-ts.a.run.app").rstrip("/")
+API = os.environ.get("MONEYMAKER_API_URL", "https://moneymaker-api-137012961005.australia-southeast1.run.app").rstrip("/")
 KEY = os.environ.get("FIREBASE_API_KEY", "").strip()
 
 
@@ -53,13 +53,17 @@ def labels(token: str, scan_id: int) -> dict[str, dict]:
 def main() -> int:
     token_a = anonymous_token()
     token_b = anonymous_token()
-    filtered = request_json(f"{API}/api/filter", method="POST", token=token_a, payload={})
-    summary = filtered.get("summary") or {}
-    scan_id = int(summary.get("scan_id") or 0)
-    rows = filtered.get("results") or []
-    if not scan_id or not rows:
-        raise RuntimeError("No completed filter result with a ticker is available for isolation testing")
-    ticker = str(rows[0]["ticker"])
+    scan_id = int(os.environ.get("MONEYMAKER_SCAN_ID") or 0)
+    ticker = str(os.environ.get("MONEYMAKER_TEST_TICKER") or "").strip().upper()
+    if not scan_id or not ticker:
+        filtered = request_json(f"{API}/api/filter", method="POST", token=token_a, payload={})
+        summary = filtered.get("summary") or {}
+        scan_id = int(summary.get("scan_id") or 0)
+        rows = filtered.get("results") or []
+        if rows:
+            ticker = str(rows[0]["ticker"])
+    if not scan_id or not ticker:
+        raise RuntimeError("Set MONEYMAKER_SCAN_ID and MONEYMAKER_TEST_TICKER, or provide a completed filter result with a ticker")
 
     request_json(
         f"{API}/api/label", method="POST", token=token_a,

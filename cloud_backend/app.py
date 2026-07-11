@@ -472,7 +472,7 @@ async def label(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
                 scan["market"], scan_id, ticker, label_value, payload.get("note"),
                 result["rank"], result["signal_date"], result["close_price"],
                 result["market_cap"], result["avg_volume"], result["volume_ratio"],
-                result["sector"], result["industry"], result["result_json"],
+                result["sector"], result["industry"], Jsonb(result["result_json"]),
                 f"https://finance.yahoo.com/quote/{ticker}",
                 user["uid"], user.get("email"),
             ),
