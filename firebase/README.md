@@ -18,6 +18,10 @@ gcloud config set project moneymaker-aedf7
 The project must be on the Blaze plan before Cloud Run or SQL Connect can be
 used. Configure a budget alert before deploying.
 
+The Firebase Web app is already registered for this project. Its public
+configuration is injected by `DEPLOY_FIREBASE.ps1`; it is safe for browser
+code, but database credentials must remain in Secret Manager.
+
 ## Database migration
 
 Create the SQL Connect PostgreSQL database, apply
@@ -58,6 +62,29 @@ The intended deployment sequence is:
 3. Deploy the fetch, screening, and analysis Cloud Run Jobs.
 4. Deploy Firebase Hosting with `firebase deploy --only hosting`.
 5. Add Cloud Scheduler jobs for incremental price updates and outcome refreshes.
+
+The checked-in PowerShell wrapper performs the repeatable setup and deployment
+steps. Run it from the repository root after installing `gcloud` and logging in:
+
+```powershell
+firebase login
+gcloud auth login
+.\firebase\DEPLOY_FIREBASE.ps1 -BuildOnly
+```
+
+After SQL Connect has created the database and the Secret Manager database URL
+has been added, deploy the services and Hosting with:
+
+```powershell
+.\firebase\DEPLOY_FIREBASE.ps1 -DeployOnly
+```
+
+To import the existing local caches, set `MONEYMAKER_DATABASE_URL` only in the
+current PowerShell session and run:
+
+```powershell
+.\firebase\DEPLOY_FIREBASE.ps1 -DeployOnly -MigrateCaches
+```
 
 The first deployment can be performed with Cloud Build, so Docker does not
 need to be installed locally:

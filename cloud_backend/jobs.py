@@ -24,7 +24,6 @@ def dispatch(job_type: str, payload: dict[str, Any], job_id: str | None = None) 
     override = run_v2.RunJobRequest.Overrides(
         container_overrides=[
             run_v2.RunJobRequest.Overrides.ContainerOverride(
-                name="worker",
                 env=[
                     run_v2.EnvVar(name="MONEYMAKER_JOB_ID", value=job_id),
                     run_v2.EnvVar(name="MONEYMAKER_JOB_TYPE", value=job_type),
