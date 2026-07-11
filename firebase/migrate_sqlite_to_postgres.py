@@ -198,8 +198,24 @@ def import_cache(
                             "(market, provider, ticker, price_date, open_price, high_price, "
                             "low_price, close_price, volume, fetched_at_utc) FROM STDIN"
                         ) as copy:
-                            for row in batch:
-                                copy.write_row(row)
+                            def copy_field(value: Any) -> str:
+                                if value is None:
+                                    return r"\N"
+                                return (
+                                    str(value)
+                                    .replace("\\", "\\\\")
+                                    .replace("\t", "\\t")
+                                    .replace("\n", "\\n")
+                                    .replace("\r", "\\r")
+                                )
+
+                            copy.write(
+                                "\n".join(
+                                    "\t".join(copy_field(value) for value in row)
+                                    for row in batch
+                                )
+                                + "\n"
+                            )
                         cur.execute(
                             """
                             INSERT INTO price_history
