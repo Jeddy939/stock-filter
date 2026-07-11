@@ -69,6 +69,14 @@ def parse_market(ticker: str, fallback: str) -> str:
     return "asx" if ticker.upper().endswith(".AX") else fallback
 
 
+def sqlite_has_table(source: sqlite3.Connection, table: str) -> bool:
+    row = source.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
 def import_cache(
     db: psycopg.Connection,
     cache_path: Path,
@@ -153,7 +161,8 @@ def import_cache(
             counts["prices"] += len(batch)
 
         scan_map: dict[int, int] = {}
-        for row in source.execute("SELECT * FROM scan_runs ORDER BY id"):
+        scan_runs_available = sqlite_has_table(source, "scan_runs")
+        for row in source.execute("SELECT * FROM scan_runs ORDER BY id") if scan_runs_available else ():
             if dry_run:
                 scan_map[row["id"]] = row["id"]
                 counts["scans"] += 1
@@ -192,7 +201,11 @@ def import_cache(
             db.commit()
             counts["scans"] += 1
 
-        result_rows = source.execute("SELECT * FROM scan_results ORDER BY id")
+        result_rows = (
+            source.execute("SELECT * FROM scan_results ORDER BY id")
+            if sqlite_has_table(source, "scan_results")
+            else ()
+        )
         for batch_rows in chunks(result_rows, chunk_size):
             values = []
             for row in batch_rows:
@@ -233,7 +246,11 @@ def import_cache(
                 db.commit()
             counts["results"] += len(values)
 
-        label_rows = source.execute("SELECT * FROM scan_labels ORDER BY id")
+        label_rows = (
+            source.execute("SELECT * FROM scan_labels ORDER BY id")
+            if sqlite_has_table(source, "scan_labels")
+            else ()
+        )
         for batch_rows in chunks(label_rows, chunk_size):
             values = []
             for row in batch_rows:
@@ -317,6 +334,15 @@ def main() -> None:
     parser.add_argument("--cache", required=True, type=Path)
     parser.add_argument("--ratings-db", type=Path)
     parser.add_argument("--chunk-size", type=int, default=CHUNK_SIZE)
+    parser.add_argument(
+        "--price-since",
+        help="Only import price rows on or after this ISO date, plus new tickers when --full-tickers is used.",
+    )
+    parser.add_argument(
+        "--full-tickers",
+        action="store_true",
+        help="Also import all available history for tickers not already present online.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if not args.database_url and not args.dry_run:
@@ -331,8 +357,24 @@ def main() -> None:
             print(f"Would import ratings: {args.ratings_db}")
         return
 
+    full_tickers: set[str] | None = None
+    if args.full_tickers:
+        with sqlite_connection(args.cache) as source:
+            full_tickers = {
+                row[0]
+                for row in source.execute("SELECT DISTINCT ticker FROM price_history")
+            }
+
     with psycopg.connect(args.database_url) as db:
-        cache_counts = import_cache(db, args.cache, args.market, args.chunk_size, False)
+        cache_counts = import_cache(
+            db,
+            args.cache,
+            args.market,
+            args.chunk_size,
+            False,
+            price_since=args.price_since,
+            full_tickers=full_tickers,
+        )
         rating_count = 0
         if args.ratings_db and args.ratings_db.exists():
             rating_count = import_ratings(db, args.ratings_db, args.chunk_size, False)

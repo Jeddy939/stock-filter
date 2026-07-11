@@ -11,7 +11,7 @@ $Project = "moneymaker-aedf7"
 $Region = "australia-southeast1"
 $Image = "$Region-docker.pkg.dev/$Project/moneymaker/moneymaker:latest"
 $Bucket = "$Project-cache"
-$ApiKey = "AIzaSyDZozE6cWxDJehk3SC5MkFr56HMmsmalSs"
+$ApiKey = "AIzaSyA4tXcCkEv26i83WlM8k_dv-EubkjRCFRM"
 $AppId = "1:137012961005:web:4e50719b24c3bb382c76e4"
 
 function Require-Command([string]$Name) {

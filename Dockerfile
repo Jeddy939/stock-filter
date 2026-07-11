@@ -6,13 +6,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+COPY requirements.txt requirements.txt
 COPY requirements-cloud.txt requirements-cloud.txt
 RUN pip install --no-cache-dir -r requirements-cloud.txt
 
 COPY src src
 COPY web_app.py web_app.py
 COPY data_fetcher.py data_fetcher.py
-COPY "default filter settings.json" "default filter settings.json"
+COPY ["default filter settings.json", "default filter settings.json"]
 COPY cloud_backend cloud_backend
 COPY firebase firebase
 COPY *tickers*.txt .
