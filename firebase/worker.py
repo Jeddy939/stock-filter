@@ -29,6 +29,7 @@ if str(SRC) not in sys.path:
 from moneymaker import fetcher
 from firebase.migrate_sqlite_to_postgres import import_cache
 from cloud_backend.postgres_screener import run_postgres_filter
+from cloud_backend.weekly_cache import sync_weekly_history
 
 
 def job_id() -> str:
@@ -87,6 +88,7 @@ def upload_checkpoint(market: str, path: Path) -> None:
 
 def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
     market = str(data.get("market") or "asx").lower()
+    provider = fetcher.normalize_provider(data.get("provider") or fetcher.DEFAULT_PROVIDER)
     cache = checkpoint_path(market)
     download_checkpoint(market, cache)
     ticker_file = str(data.get("ticker_file") or (
@@ -142,6 +144,16 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
             price_since=price_since,
             full_tickers=full_tickers,
         )
+        incremental_tickers = set(requested_tickers) - full_tickers
+        weekly_rows = sync_weekly_history(conn, market, provider, full_tickers)
+        weekly_rows += sync_weekly_history(
+            conn,
+            market,
+            provider,
+            incremental_tickers,
+            start_date=(date.today() - timedelta(days=overlap_days + 7)),
+        )
+        counts["weekly_prices"] = weekly_rows
     upload_checkpoint(market, cache)
     return counts
 

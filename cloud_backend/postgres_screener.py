@@ -102,11 +102,11 @@ def run_postgres_filter(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT ticker, price_date, open_price, high_price, low_price, close_price, volume
-                FROM price_history
+                SELECT ticker, week_date, open_price, high_price, low_price, close_price, volume
+                FROM weekly_price_history
                 WHERE market = %s AND provider = %s AND ticker = ANY(%s)
-                  AND price_date >= %s AND price_date <= %s
-                ORDER BY ticker, price_date
+                  AND week_date >= %s AND week_date <= %s + 7
+                ORDER BY ticker, week_date
                 """,
                 (market, provider, chunk, start, end),
             )

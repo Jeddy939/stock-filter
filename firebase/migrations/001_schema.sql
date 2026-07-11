@@ -26,6 +26,25 @@ CREATE TABLE IF NOT EXISTS price_history (
 CREATE INDEX IF NOT EXISTS idx_price_history_lookup
     ON price_history (market, provider, ticker, price_date DESC);
 
+-- Derived weekly candles used by the screener. Daily price_history remains the
+-- authoritative source for charting and can rebuild this table at any time.
+CREATE TABLE IF NOT EXISTS weekly_price_history (
+    market TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    week_date DATE NOT NULL,
+    open_price DOUBLE PRECISION,
+    high_price DOUBLE PRECISION,
+    low_price DOUBLE PRECISION,
+    close_price DOUBLE PRECISION,
+    volume DOUBLE PRECISION,
+    refreshed_at_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (market, provider, ticker, week_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_weekly_price_history_lookup
+    ON weekly_price_history (market, provider, ticker, week_date DESC);
+
 CREATE TABLE IF NOT EXISTS scan_runs (
     id BIGSERIAL PRIMARY KEY,
     market TEXT NOT NULL,
