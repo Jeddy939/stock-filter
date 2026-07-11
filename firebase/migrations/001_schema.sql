@@ -75,6 +75,48 @@ CREATE TABLE IF NOT EXISTS scan_labels (
     UNIQUE (scan_id, source_id, ticker)
 );
 
+-- Shared scans are readable by all authenticated users. Appraisals are private
+-- to the Firebase identity that created them.
+CREATE TABLE IF NOT EXISTS app_user_invites (
+    email TEXT PRIMARY KEY,
+    role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'member')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('pending', 'active', 'disabled')),
+    invited_at_utc TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO app_user_invites (email, role)
+VALUES
+    ('mrbowcock@gmail.com', 'owner'),
+    ('brady.bowcock@gmail.com', 'member'),
+    ('damien.sundgren@gmail.com', 'member')
+ON CONFLICT (email) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS user_profiles (
+    firebase_uid TEXT PRIMARY KEY,
+    email TEXT UNIQUE,
+    display_name TEXT,
+    role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'member')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('pending', 'active', 'disabled')),
+    created_at_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at_utc TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS user_appraisals (
+    firebase_uid TEXT NOT NULL REFERENCES user_profiles(firebase_uid) ON DELETE CASCADE,
+    scan_id BIGINT NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+    source_id BIGINT NOT NULL,
+    market TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    label TEXT CHECK (label IN ('winner', 'potential_winner', 'maybe', 'bad')),
+    note TEXT,
+    status TEXT,
+    appraised_at_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (firebase_uid, scan_id, source_id, ticker)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_appraisals_scan
+    ON user_appraisals (firebase_uid, scan_id, ticker);
+
 CREATE TABLE IF NOT EXISTS rating_events (
     id BIGSERIAL PRIMARY KEY,
     source_id BIGINT,
@@ -102,6 +144,12 @@ CREATE TABLE IF NOT EXISTS rating_events (
     yahoo_url TEXT,
     UNIQUE (source_id, event_at_utc, ticker, action)
 );
+
+ALTER TABLE rating_events ADD COLUMN IF NOT EXISTS firebase_uid TEXT;
+ALTER TABLE rating_events ADD COLUMN IF NOT EXISTS user_email TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_rating_events_user
+    ON rating_events (firebase_uid, event_at_utc DESC);
 
 CREATE INDEX IF NOT EXISTS idx_rating_events_ticker
     ON rating_events (market, ticker, event_at_utc DESC);

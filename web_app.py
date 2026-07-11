@@ -1942,7 +1942,14 @@ INDEX_HTML = r"""<!doctype html>
 <body>
   <header>
     <h1>Moneymaker Stock Filter</h1>
-    <div class="status-line" id="topStatus">Loading cache status...</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+      <span class="status-line" id="topStatus">Loading cache status...</span>
+      <input id="authEmail" type="email" placeholder="Email" autocomplete="username" style="width:180px">
+      <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password" style="width:140px">
+      <button id="authSignIn" type="button">Sign in</button>
+      <button id="authCreate" type="button">Create account</button>
+      <button id="authSignOut" type="button" hidden>Sign out</button>
+    </div>
   </header>
   <main>
     <aside>
@@ -2213,20 +2220,38 @@ INDEX_HTML = r"""<!doctype html>
     const $ = (id) => document.getElementById(id);
     const fmt = new Intl.NumberFormat();
     let authReady = Promise.resolve(null);
+    let firebaseAuth = null;
+    let firebaseAuthMethods = null;
+    let currentUserProfile = null;
     async function initializeFirebaseAuth() {
       try {
         const response = await fetch("/api/auth-config");
         if (!response.ok) return null;
         const config = await response.json();
         if (!config.enabled || !config.apiKey || !config.appId) return null;
-        const [{ initializeApp }, { getAuth, signInAnonymously, getIdToken }] = await Promise.all([
+        const [{ initializeApp }, authModule] = await Promise.all([
           import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"),
           import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js")
         ]);
         const app = initializeApp(config);
-        const auth = getAuth(app);
-        const result = await signInAnonymously(auth);
-        return () => getIdToken(result.user);
+        const auth = authModule.getAuth(app);
+        firebaseAuth = auth;
+        firebaseAuthMethods = authModule;
+        authModule.onAuthStateChanged(auth, async (user) => {
+          if (user) {
+            $("authEmail").value = user.email || "";
+            $("authSignOut").hidden = false;
+            const anonymous = Boolean(user.isAnonymous);
+            $("authSignIn").hidden = !anonymous;
+            $("authCreate").hidden = !anonymous;
+            $("authPassword").hidden = !anonymous;
+            if (currentUserProfile?.user) $("topStatus").textContent = `Signed in as ${currentUserProfile.user.email || "anonymous"}`;
+            else $("topStatus").textContent = anonymous ? "Anonymous session" : `Signed in as ${user.email || "user"}`;
+          }
+        });
+        await auth.authStateReady();
+        const result = auth.currentUser ? { user: auth.currentUser } : await authModule.signInAnonymously(auth);
+        return () => authModule.getIdToken(result.user, true);
       } catch (error) {
         console.warn("Firebase authentication is unavailable", error);
         return null;
@@ -2880,7 +2905,8 @@ INDEX_HTML = r"""<!doctype html>
             cache_file: $("cacheFile").value.trim() || "stock_cache.sqlite",
             scan_id: currentScanId,
             ticker,
-            label: nextLabel
+            label: nextLabel,
+            note: row?.dataset.note || null
           })
         });
         applyRowLabel(ticker, response.label);
@@ -2910,7 +2936,7 @@ INDEX_HTML = r"""<!doctype html>
       body.innerHTML = results.map((row) => {
         const rowScanId = row.scan_id || scanId || "";
         const rowClasses = [row.label ? `label-${row.label}` : "", row.ma_data_complete === false ? "incomplete-ma" : ""].filter(Boolean).join(" ");
-        return `<tr data-ticker="${row.ticker}" data-scan-id="${rowScanId}" class="${rowClasses}">
+        return `<tr data-ticker="${row.ticker}" data-scan-id="${rowScanId}" data-note="${String(row.personal_note || "").replaceAll('"', '&quot;') }" class="${rowClasses}">
           <td><a class="ticker chart-link" href="#" data-ticker="${row.ticker}">${row.ticker}</a></td>
           <td>${row.date}</td>
           <td>${Number(row.close_price).toFixed(2)}</td>
@@ -2918,7 +2944,7 @@ INDEX_HTML = r"""<!doctype html>
           <td>${fmt.format(Math.round(row.avg_volume || 0))}</td>
           <td>${Number(row.volume_ratio).toFixed(2)}x</td>
           <td>${maDataText(row)}</td>
-          <td>${labelButtons(row)}</td>
+          <td>${labelButtons(row)} <button class="note-btn" data-ticker="${row.ticker}" type="button" title="Edit private note">Note</button></td>
         </tr>`;
       }).join("");
       body.querySelectorAll(".chart-link").forEach((link) => {
@@ -2930,7 +2956,55 @@ INDEX_HTML = r"""<!doctype html>
       body.querySelectorAll(".label-btn").forEach((button) => {
         button.addEventListener("click", () => labelResult(button.dataset.ticker, button.dataset.label));
       });
+      body.querySelectorAll(".note-btn").forEach((button) => {
+        button.addEventListener("click", () => noteResult(button.dataset.ticker));
+      });
     }
+
+    async function noteResult(ticker) {
+      const row = document.querySelector(`tr[data-ticker="${ticker}"]`);
+      if (!row || !currentScanId) return;
+      const note = window.prompt(`Private note for ${ticker}`, row.dataset.note || "");
+      if (note === null) return;
+      const active = row.querySelector(".label-btn.active");
+      try {
+        const response = await api("/api/label", {
+          method: "POST",
+          body: JSON.stringify({
+            market: $("marketSelect").value,
+            cache_file: $("cacheFile").value.trim() || "stock_cache.sqlite",
+            scan_id: currentScanId,
+            ticker,
+            label: active ? active.dataset.label : "maybe",
+            note
+          })
+        });
+        row.dataset.note = note;
+        $("resultMeta").textContent = `${ticker} private note saved for ${response.user?.email || "this account"}`;
+      } catch (error) {
+        $("resultMeta").textContent = error.message;
+        $("resultMeta").className = "status-line bad";
+      }
+    }
+
+    $("authSignIn").addEventListener("click", async () => {
+      try {
+        await authReady;
+        await firebaseAuthMethods.signInWithEmailAndPassword(firebaseAuth, $("authEmail").value.trim(), $("authPassword").value);
+        window.location.reload();
+      } catch (error) { $("topStatus").textContent = error.message; }
+    });
+    $("authCreate").addEventListener("click", async () => {
+      try {
+        await authReady;
+        await firebaseAuthMethods.createUserWithEmailAndPassword(firebaseAuth, $("authEmail").value.trim(), $("authPassword").value);
+        window.location.reload();
+      } catch (error) { $("topStatus").textContent = error.message; }
+    });
+    $("authSignOut").addEventListener("click", async () => {
+      await firebaseAuthMethods.signOut(firebaseAuth);
+      window.location.reload();
+    });
 
     $("marketSelect").addEventListener("change", applyMarketDefaults);
     $("refreshStatus").addEventListener("click", refreshStatus);

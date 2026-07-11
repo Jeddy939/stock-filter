@@ -97,9 +97,9 @@ def auth_required() -> bool:
     return str(os.environ.get("MONEYMAKER_REQUIRE_AUTH", "true")).lower() in {"1", "true", "yes"}
 
 
-async def require_auth(request: Request) -> None:
+async def require_auth(request: Request) -> dict[str, Any]:
     if not auth_required():
-        return
+        return {"uid": "local", "email": None, "display_name": "Local user", "role": "owner"}
     authorization = request.headers.get("Authorization", "")
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Sign-in required")
@@ -109,9 +109,68 @@ async def require_auth(request: Request) -> None:
 
         if not firebase_admin._apps:
             firebase_admin.initialize_app()
-        auth.verify_id_token(authorization[7:].strip())
+        decoded = auth.verify_id_token(authorization[7:].strip())
+        uid = str(decoded.get("uid") or "").strip()
+        if not uid:
+            raise ValueError("Token has no uid")
+        email = str(decoded.get("email") or "").strip().lower() or None
+        display_name = str(decoded.get("name") or decoded.get("email") or "").strip() or None
+        with db() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT role, status FROM app_user_invites WHERE email = %s",
+                (email,),
+            )
+            invite = cur.fetchone()
+            if invite and invite["status"] == "disabled":
+                raise HTTPException(status_code=403, detail="This account is disabled")
+            role = invite["role"] if invite else "member"
+            cur.execute(
+                """
+                INSERT INTO user_profiles
+                  (firebase_uid, email, display_name, role, status, last_seen_at_utc)
+                VALUES (%s, %s, %s, %s, 'active', NOW())
+                ON CONFLICT (firebase_uid) DO UPDATE SET
+                  email = EXCLUDED.email,
+                  display_name = EXCLUDED.display_name,
+                  role = EXCLUDED.role,
+                  status = EXCLUDED.status,
+                  last_seen_at_utc = NOW()
+                RETURNING role, status
+                """,
+                (uid, email, display_name, role),
+            )
+            profile = cur.fetchone() or {"role": role, "status": "active"}
+            conn.commit()
+        return {"uid": uid, "email": email, "display_name": display_name,
+                "role": profile["role"], "status": profile["status"]}
     except Exception as exc:
+        if isinstance(exc, HTTPException):
+            raise
         raise HTTPException(status_code=401, detail="Invalid Firebase ID token") from exc
+
+
+def overlay_user_appraisals(conn: psycopg.Connection, user: dict[str, Any], scan_id: int,
+                            results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not results:
+        return results
+    tickers = [str(row.get("ticker") or "").upper() for row in results]
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT ticker, label, note, status, appraised_at_utc
+            FROM user_appraisals
+            WHERE firebase_uid = %s AND scan_id = %s AND ticker = ANY(%s)
+            """,
+            (user["uid"], scan_id, tickers),
+        )
+        appraisals = {row["ticker"]: row for row in cur.fetchall()}
+    for row in results:
+        appraisal = appraisals.get(str(row.get("ticker") or "").upper())
+        row["label"] = appraisal["label"] if appraisal else None
+        row["personal_note"] = appraisal["note"] if appraisal else None
+        row["personal_status"] = appraisal["status"] if appraisal else None
+        row["appraised_at_utc"] = appraisal["appraised_at_utc"] if appraisal else None
+    return results
 
 
 def range_days(range_key: str) -> int:
@@ -196,6 +255,12 @@ async def auth_config() -> dict[str, Any]:
         "storageBucket": os.environ.get("FIREBASE_STORAGE_BUCKET", ""),
         "appId": os.environ.get("FIREBASE_APP_ID", ""),
     }
+
+
+@app.get("/api/profile")
+async def profile(request: Request) -> dict[str, Any]:
+    user = await require_auth(request)
+    return {"ok": True, "user": user}
 
 
 @app.get("/api/ticker-files")
@@ -285,11 +350,15 @@ async def scans(request: Request, market: str = Query("asx")) -> dict[str, Any]:
 
 @app.get("/api/labels")
 async def labels(request: Request, scan_id: int = Query(...)) -> dict[str, Any]:
-    await require_auth(request)
+    user = await require_auth(request)
     with db() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT ticker, label, note, labeled_at_utc FROM scan_labels WHERE scan_id = %s ORDER BY ticker",
-            (scan_id,),
+            """
+            SELECT ticker, label, note, status, appraised_at_utc AS labeled_at_utc
+            FROM user_appraisals
+            WHERE firebase_uid = %s AND scan_id = %s ORDER BY ticker
+            """,
+            (user["uid"], scan_id),
         )
         return {"ok": True, "labels": cur.fetchall()}
 
@@ -348,7 +417,7 @@ async def filter_job(request: Request) -> dict[str, Any]:
 
 @app.post("/api/label")
 async def label(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
-    await require_auth(request)
+    user = await require_auth(request)
     scan_id = int(payload.get("scan_id") or 0)
     ticker = str(payload.get("ticker") or "").strip().upper()
     label_value = str(payload.get("label") or "").strip().lower().replace(" ", "_")
@@ -369,17 +438,22 @@ async def label(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
         if not result:
             raise HTTPException(status_code=404, detail="Ticker is not in this scan")
         if label_value is None:
-            cur.execute("DELETE FROM scan_labels WHERE scan_id = %s AND ticker = %s", (scan_id, ticker))
+            cur.execute(
+                "DELETE FROM user_appraisals WHERE firebase_uid = %s AND scan_id = %s AND source_id = %s AND ticker = %s",
+                (user["uid"], scan_id, result["source_id"], ticker),
+            )
         else:
             cur.execute(
                 """
-                INSERT INTO scan_labels (scan_id, source_id, ticker, label, note, labeled_at_utc)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (scan_id, source_id, ticker) DO UPDATE SET
+                INSERT INTO user_appraisals
+                  (firebase_uid, scan_id, source_id, market, ticker, label, note, status, appraised_at_utc)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (firebase_uid, scan_id, source_id, ticker) DO UPDATE SET
                     label = EXCLUDED.label, note = EXCLUDED.note,
-                    labeled_at_utc = EXCLUDED.labeled_at_utc
+                    status = EXCLUDED.status, appraised_at_utc = EXCLUDED.appraised_at_utc
                 """,
-                (scan_id, result["source_id"], ticker, label_value, payload.get("note"), event_at),
+                (user["uid"], scan_id, result["source_id"], scan["market"], ticker,
+                 label_value, payload.get("note"), payload.get("status"), event_at),
             )
         cur.execute(
             """
@@ -393,7 +467,7 @@ async def label(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
             (
                 event_at,
                 "clear" if label_value is None else "label",
-                str(payload.get("rated_by") or os.environ.get("MONEYMAKER_RATER_NAME") or "anonymous"),
+                str(user.get("email") or user.get("display_name") or payload.get("rated_by") or "anonymous"),
                 scan["market"], scan_id, ticker, label_value, payload.get("note"),
                 result["rank"], result["signal_date"], result["close_price"],
                 result["market_cap"], result["avg_volume"], result["volume_ratio"],
@@ -401,8 +475,13 @@ async def label(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
                 f"https://finance.yahoo.com/quote/{ticker}",
             ),
         )
+        cur.execute(
+            "UPDATE rating_events SET firebase_uid = %s, user_email = %s WHERE id = (SELECT MAX(id) FROM rating_events WHERE scan_id = %s AND ticker = %s AND event_at_utc = %s)",
+            (user["uid"], user.get("email"), scan_id, ticker, event_at),
+        )
         conn.commit()
-    return {"ok": True, "scan_id": scan_id, "ticker": ticker, "label": label_value, "online": True}
+    return {"ok": True, "scan_id": scan_id, "ticker": ticker, "label": label_value,
+            "online": True, "user": user}
 
 
 @app.post("/api/fetch")
@@ -425,8 +504,12 @@ async def start_filter(request: Request, payload: dict[str, Any]) -> dict[str, A
 
 @app.post("/api/filter")
 async def filter_results(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
-    await require_auth(request)
+    user = await require_auth(request)
     with db() as conn, conn.cursor() as cur:
         cur.execute("SELECT * FROM job_runs WHERE job_type = 'filter' ORDER BY started_at_utc DESC LIMIT 1")
         row = cur.fetchone()
-        return {"ok": True, **job_payload(dict(row) if row else None)}
+        result = job_payload(dict(row) if row else None)
+        scan_id = int(result.get("summary", {}).get("scan_id") or result.get("scan_id") or 0)
+        if scan_id and isinstance(result.get("results"), list):
+            result["results"] = overlay_user_appraisals(conn, user, scan_id, result["results"])
+        return {"ok": True, **result}
