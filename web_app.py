@@ -290,6 +290,10 @@ def _queue_google_sheets_rating_event(event: Dict[str, Any], error: str) -> None
 
 
 def _post_google_sheets_rating_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    # Cloud deployments write ratings through the authenticated backend.
+    # Keeping the old webhook disabled prevents duplicate central records.
+    if str(os.environ.get("MONEYMAKER_CLOUD_MODE", "")).strip().lower() in {"1", "true", "yes"}:
+        return {"configured": False, "sent": False, "queued": False, "disabled": "cloud_backend"}
     webhook_url = str(
         os.environ.get("MONEYMAKER_GOOGLE_SHEETS_WEBHOOK_URL")
         or os.environ.get("MONEYMAKER_GOOGLE_SHEETS_WEBHOOK")
@@ -2208,6 +2212,27 @@ INDEX_HTML = r"""<!doctype html>
   <script>
     const $ = (id) => document.getElementById(id);
     const fmt = new Intl.NumberFormat();
+    let authReady = Promise.resolve(null);
+    async function initializeFirebaseAuth() {
+      try {
+        const response = await fetch("/api/auth-config");
+        if (!response.ok) return null;
+        const config = await response.json();
+        if (!config.enabled || !config.apiKey || !config.appId) return null;
+        const [{ initializeApp }, { getAuth, signInAnonymously, getIdToken }] = await Promise.all([
+          import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"),
+          import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js")
+        ]);
+        const app = initializeApp(config);
+        const auth = getAuth(app);
+        const result = await signInAnonymously(auth);
+        return () => getIdToken(result.user);
+      } catch (error) {
+        console.warn("Firebase authentication is unavailable", error);
+        return null;
+      }
+    }
+    authReady = initializeFirebaseAuth();
     let lastCandles = [];
     let lastChartTicker = "";
     let lastMovingAverages = {};
@@ -2332,10 +2357,14 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function api(path, options = {}) {
-      const response = await fetch(path, {
-        headers: { "Content-Type": "application/json" },
-        ...options
-      });
+      const getToken = await authReady;
+      const headers = new Headers(options.headers || {});
+      headers.set("Content-Type", "application/json");
+      if (getToken) {
+        const token = await getToken();
+        if (token) headers.set("Authorization", `Bearer ${token}`);
+      }
+      const response = await fetch(path, { ...options, headers });
       const payload = await response.json();
       if (!payload.ok) throw new Error(payload.error || "Request failed");
       return payload;

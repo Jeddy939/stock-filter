@@ -1,0 +1,20 @@
+{
+  "hosting": {
+    "public": "firebase_public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "moneymaker-api",
+          "region": "australia-southeast1",
+          "pinTag": true
+        }
+      }
+    ]
+  }
+}
