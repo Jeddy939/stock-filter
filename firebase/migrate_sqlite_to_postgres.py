@@ -86,6 +86,7 @@ def import_cache(
     price_since: str | None = None,
     full_tickers: set[str] | None = None,
     resume: bool = False,
+    bulk_prices: bool = False,
 ) -> dict[str, int]:
     counts = {"companies": 0, "prices": 0, "scans": 0, "results": 0, "labels": 0}
     source = sqlite_connection(cache_path)
@@ -175,22 +176,64 @@ def import_cache(
         for batch in chunks(price_rows, chunk_size):
             if not dry_run:
                 with db.cursor() as cur:
-                    cur.executemany(
-                        """
-                        INSERT INTO price_history
-                          (market, provider, ticker, price_date, open_price,
-                           high_price, low_price, close_price, volume, fetched_at_utc)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (market, provider, ticker, price_date) DO UPDATE SET
-                          open_price = EXCLUDED.open_price,
-                          high_price = EXCLUDED.high_price,
-                          low_price = EXCLUDED.low_price,
-                          close_price = EXCLUDED.close_price,
-                          volume = EXCLUDED.volume,
-                          fetched_at_utc = EXCLUDED.fetched_at_utc
-                        """,
-                        batch,
-                    )
+                    if bulk_prices:
+                        cur.execute(
+                            """
+                            CREATE TEMP TABLE IF NOT EXISTS price_history_import (
+                                market TEXT NOT NULL,
+                                provider TEXT NOT NULL,
+                                ticker TEXT NOT NULL,
+                                price_date DATE NOT NULL,
+                                open_price DOUBLE PRECISION,
+                                high_price DOUBLE PRECISION,
+                                low_price DOUBLE PRECISION,
+                                close_price DOUBLE PRECISION,
+                                volume DOUBLE PRECISION,
+                                fetched_at_utc TIMESTAMPTZ NOT NULL
+                            ) ON COMMIT DELETE ROWS
+                            """
+                        )
+                        with cur.copy(
+                            "COPY price_history_import "
+                            "(market, provider, ticker, price_date, open_price, high_price, "
+                            "low_price, close_price, volume, fetched_at_utc) FROM STDIN"
+                        ) as copy:
+                            for row in batch:
+                                copy.write_row(row)
+                        cur.execute(
+                            """
+                            INSERT INTO price_history
+                              (market, provider, ticker, price_date, open_price,
+                               high_price, low_price, close_price, volume, fetched_at_utc)
+                            SELECT market, provider, ticker, price_date, open_price,
+                                   high_price, low_price, close_price, volume, fetched_at_utc
+                            FROM price_history_import
+                            ON CONFLICT (market, provider, ticker, price_date) DO UPDATE SET
+                              open_price = EXCLUDED.open_price,
+                              high_price = EXCLUDED.high_price,
+                              low_price = EXCLUDED.low_price,
+                              close_price = EXCLUDED.close_price,
+                              volume = EXCLUDED.volume,
+                              fetched_at_utc = EXCLUDED.fetched_at_utc
+                            """
+                        )
+                    else:
+                        cur.executemany(
+                            """
+                            INSERT INTO price_history
+                              (market, provider, ticker, price_date, open_price,
+                               high_price, low_price, close_price, volume, fetched_at_utc)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (market, provider, ticker, price_date) DO UPDATE SET
+                              open_price = EXCLUDED.open_price,
+                              high_price = EXCLUDED.high_price,
+                              low_price = EXCLUDED.low_price,
+                              close_price = EXCLUDED.close_price,
+                              volume = EXCLUDED.volume,
+                              fetched_at_utc = EXCLUDED.fetched_at_utc
+                            """,
+                            batch,
+                        )
                 db.commit()
             counts["prices"] += len(batch)
 
@@ -382,6 +425,11 @@ def main() -> None:
         action="store_true",
         help="Only import source tickers whose online row count is incomplete.",
     )
+    parser.add_argument(
+        "--bulk-prices",
+        action="store_true",
+        help="Use PostgreSQL COPY batches for price history imports.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if not args.database_url and not args.dry_run:
@@ -414,6 +462,7 @@ def main() -> None:
             price_since=args.price_since,
             full_tickers=full_tickers,
             resume=args.resume,
+            bulk_prices=args.bulk_prices,
         )
         rating_count = 0
         if args.ratings_db and args.ratings_db.exists():
