@@ -14,6 +14,7 @@ $Image = "$Region-docker.pkg.dev/$Project/moneymaker/moneymaker:latest"
 $Bucket = "$Project-cache"
 $ApiKey = "AIzaSyA4tXcCkEv26i83WlM8k_dv-EubkjRCFRM"
 $AppId = "1:137012961005:web:4e50719b24c3bb382c76e4"
+$Gcloud = if (Get-Command gcloud.cmd -ErrorAction SilentlyContinue) { "gcloud.cmd" } else { "gcloud" }
 
 function Require-Command([string]$Name) {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
@@ -22,8 +23,8 @@ function Require-Command([string]$Name) {
 }
 
 function Invoke-Gcloud([string[]]$Arguments) {
-    & gcloud @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "gcloud command failed: gcloud $($Arguments -join ' ')" }
+    & $Gcloud @Arguments
+    if ($LASTEXITCODE -ne 0) { throw "gcloud command failed: $Gcloud $($Arguments -join ' ')" }
 }
 
 Require-Command "gcloud"
@@ -31,7 +32,7 @@ Require-Command "firebase"
 
 Invoke-Gcloud @("config", "set", "project", $Project)
 
-$billing = (& gcloud beta billing projects describe $Project --format="value(billingAccountName)" 2>$null).Trim()
+$billing = (& $Gcloud beta billing projects describe $Project --format="value(billingAccountName)" 2>$null).Trim()
 if ([string]::IsNullOrWhiteSpace($billing)) {
     throw "Billing is not enabled for $Project. Enable billing before provisioning Cloud SQL or Cloud Run."
 }
@@ -44,11 +45,11 @@ if ($ProvisionSql) {
 
 if (-not $DeployOnly) {
     Invoke-Gcloud @("services", "enable", "run.googleapis.com", "artifactregistry.googleapis.com", "cloudbuild.googleapis.com", "secretmanager.googleapis.com", "cloudscheduler.googleapis.com", "storage.googleapis.com")
-    & gcloud artifacts repositories describe moneymaker --location $Region 2>$null
+    & $Gcloud artifacts repositories describe moneymaker --location $Region 2>$null
     if ($LASTEXITCODE -ne 0) {
         Invoke-Gcloud @("artifacts", "repositories", "create", "moneymaker", "--repository-format=docker", "--location=$Region")
     }
-    & gcloud storage buckets describe "gs://$Bucket" 2>$null
+    & $Gcloud storage buckets describe "gs://$Bucket" 2>$null
     if ($LASTEXITCODE -ne 0) {
         Invoke-Gcloud @("storage", "buckets", "create", "gs://$Bucket", "--location=$Region")
     }
@@ -66,18 +67,22 @@ if ($BuildOnly) {
 
 if ($ApplySchema) {
     if (-not $env:MONEYMAKER_DATABASE_URL) {
-        throw "Set MONEYMAKER_DATABASE_URL to the local/public PostgreSQL URL before applying the schema. Use Secret Manager version 2, not the Cloud Run socket URL."
+        Write-Host "Reading the local/public database URL from Secret Manager version 2..." -ForegroundColor Cyan
+        $env:MONEYMAKER_DATABASE_URL = (& $Gcloud secrets versions access 2 --secret=moneymaker-database-url --project=$Project).Trim()
+        if ([string]::IsNullOrWhiteSpace($env:MONEYMAKER_DATABASE_URL)) {
+            throw "Could not read Secret Manager version 2. Set MONEYMAKER_DATABASE_URL manually to the public PostgreSQL URL. Do not use the Cloud Run socket URL."
+        }
     }
     Write-Host "Applying PostgreSQL schema and multi-user tables..." -ForegroundColor Cyan
     python firebase\apply_schema.py
 }
 
-$secret = (& gcloud secrets describe moneymaker-database-url --format="value(name)" 2>$null).Trim()
+$secret = (& $Gcloud secrets describe moneymaker-database-url --format="value(name)" 2>$null).Trim()
 if ([string]::IsNullOrWhiteSpace($secret)) {
     if ($CreateDatabaseSecret) {
         $databaseUrl = Read-Host "Paste the PostgreSQL connection URL (input is sent directly to Secret Manager)"
         if ([string]::IsNullOrWhiteSpace($databaseUrl)) { throw "A database URL is required." }
-        $databaseUrl | & gcloud secrets create moneymaker-database-url --replication-policy=automatic --data-file=-
+        $databaseUrl | & $Gcloud secrets create moneymaker-database-url --replication-policy=automatic --data-file=-
         if ($LASTEXITCODE -ne 0) { throw "Could not create the database URL secret." }
     } else {
         Write-Host "Create the database URL secret before deploying, or rerun with -CreateDatabaseSecret:" -ForegroundColor Yellow
