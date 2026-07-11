@@ -97,6 +97,9 @@ The fetch job is allowed to run for up to four hours. It has no Cloud Run
 whole-job retry because the fetcher performs rate-limit retries itself; this
 prevents a failed long update from immediately starting a duplicate update.
 
+The filtering job uses 4 GiB of memory and a one-hour timeout because a full
+ASX or US SQLite checkpoint is much larger than the lightweight fetch batches.
+
 To import the existing local caches, set `MONEYMAKER_DATABASE_URL` only in the
 current PowerShell session and run:
 

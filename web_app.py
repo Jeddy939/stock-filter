@@ -2390,8 +2390,15 @@ INDEX_HTML = r"""<!doctype html>
         if (token) headers.set("Authorization", `Bearer ${token}`);
       }
       const response = await fetch(path, { ...options, headers });
-      const payload = await response.json();
-      if (!payload.ok) throw new Error(payload.error || "Request failed");
+      const responseText = await response.text();
+      let payload;
+      try {
+        payload = JSON.parse(responseText);
+      } catch (_) {
+        const contentType = response.headers.get("Content-Type") || "unknown content type";
+        throw new Error(`Server returned ${response.status} ${contentType}: ${responseText.slice(0, 180)}`);
+      }
+      if (!response.ok || !payload.ok) throw new Error(payload.detail || payload.error || "Request failed");
       return payload;
     }
 

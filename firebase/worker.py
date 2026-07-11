@@ -61,7 +61,7 @@ def checkpoint_path(market: str) -> Path:
     return Path("/tmp") / f"stock_cache_{market}.sqlite"
 
 
-def download_checkpoint(market: str, path: Path) -> None:
+def download_checkpoint(market: str, path: Path) -> bool:
     bucket_name = os.environ.get("MONEYMAKER_CACHE_BUCKET", "").strip()
     if not bucket_name:
         raise RuntimeError("MONEYMAKER_CACHE_BUCKET is required for resumable cloud fetches")
@@ -69,8 +69,10 @@ def download_checkpoint(market: str, path: Path) -> None:
     try:
         storage.Client().bucket(bucket_name).blob(object_name).download_to_filename(str(path))
     except Exception as exc:
-        if "404" not in str(exc) and "NotFound" not in str(exc):
-            raise
+        if "404" in str(exc) or "NotFound" in str(exc):
+            return False
+        raise
+    return path.exists()
 
 
 def upload_checkpoint(market: str, path: Path) -> None:
@@ -147,10 +149,25 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
 def run_filter(data: dict[str, Any]) -> dict[str, Any]:
     market = str(data.get("market") or "asx").lower()
     cache = checkpoint_path(market)
-    download_checkpoint(market, cache)
+    update_job(status="running", stage="Downloading cache", detail=f"Downloading {market.upper()} cloud cache.")
+    if not download_checkpoint(market, cache):
+        raise RuntimeError(
+            f"No cloud cache checkpoint exists for {market.upper()}. "
+            "Run a cache update first so the screen has data to scan."
+        )
     params = dict(data)
     params["cache_file"] = str(cache)
-    result = _run_filter(params)
+
+    def progress(stage: str, current: int, total: int | None, message: str) -> None:
+        percent = round((current / total) * 100, 2) if total else 0
+        update_job(
+            status="running", stage=stage, current_count=current, total_count=total,
+            percent=percent, detail=message,
+        )
+
+    update_job(status="running", stage="Opening cache", detail=f"Opening {market.upper()} cache for screening.")
+    result = _run_filter(params, progress_callback=progress)
+    update_job(status="running", stage="Saving scan", detail="Saving screen results and checkpoint.")
     import sqlite3
     with sqlite3.connect(str(cache)) as checkpoint:
         checkpoint.execute("PRAGMA wal_checkpoint(TRUNCATE)")
