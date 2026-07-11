@@ -79,6 +79,20 @@ has been added, deploy the services and Hosting with:
 .\firebase\DEPLOY_FIREBASE.ps1 -DeployOnly
 ```
 
+To enable automatic daily cache updates, run the deployment with scheduler
+configuration enabled. This creates two OIDC-protected schedules in Brisbane
+time: ASX at midnight and US at 12:30 AM. Each schedule uses the resumable
+fetch path, so only recent history is requested and progress is recorded in
+`job_runs`:
+
+```powershell
+.\firebase\DEPLOY_FIREBASE.ps1 -ApplySchema -ScheduleUpdates
+```
+
+The scheduler service account can call only the API endpoint needed to queue a
+fetch. It cannot read the database directly. The US job is offset by 30 minutes
+to avoid starting both large market updates at the same time.
+
 To import the existing local caches, set `MONEYMAKER_DATABASE_URL` only in the
 current PowerShell session and run:
 

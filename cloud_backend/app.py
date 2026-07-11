@@ -149,6 +149,26 @@ async def require_auth(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid Firebase ID token") from exc
 
 
+async def require_scheduler_auth(request: Request) -> None:
+    """Verify Cloud Scheduler's OIDC token for unattended daily fetches."""
+    audience = str(os.environ.get("MONEYMAKER_SCHEDULER_AUDIENCE", "")).strip()
+    expected_email = str(os.environ.get("MONEYMAKER_SCHEDULER_SERVICE_ACCOUNT", "")).strip()
+    token = request.headers.get("Authorization", "")
+    if not audience or not token.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Scheduler authentication required")
+    try:
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token
+
+        claims = id_token.verify_oauth2_token(
+            token[7:].strip(), google_requests.Request(), audience=audience
+        )
+        if expected_email and claims.get("email") != expected_email:
+            raise ValueError("Unexpected scheduler service account")
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid scheduler token") from exc
+
+
 def overlay_user_appraisals(conn: psycopg.Connection, user: dict[str, Any], scan_id: int,
                             results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not results:
@@ -489,6 +509,34 @@ async def fetch(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
         return create_job("fetch", payload)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not queue fetch job: {exc}") from exc
+
+
+@app.post("/api/scheduled-fetch")
+async def scheduled_fetch(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
+    await require_scheduler_auth(request)
+    market = current_market(str(payload.get("market") or ""))
+    scheduled_payload = {
+        "market": market,
+        "ticker_file": payload.get("ticker_file") or (
+            "us_tickers_nasdaqtrader.txt" if market == "us"
+            else "asx_yfinance_valid_stocks_2026-05-11.txt"
+        ),
+        "provider": payload.get("provider") or "yfinance",
+        "years": int(payload.get("years") or 15),
+        "workers": int(payload.get("workers") or 1),
+        "info_refresh_days": int(payload.get("info_refresh_days") or 30),
+        "history_refresh_days": int(payload.get("history_refresh_days") or 5),
+        "history_chunk_size": int(payload.get("history_chunk_size") or 50),
+        "history_pause_seconds": int(payload.get("history_pause_seconds") or 5),
+        "info_pause_seconds": int(payload.get("info_pause_seconds") or 1),
+        "rate_limit_pause_seconds": int(payload.get("rate_limit_pause_seconds") or 900),
+        "max_rate_limit_retries": int(payload.get("max_rate_limit_retries") or 3),
+        "stop_on_rate_limit": bool(payload.get("stop_on_rate_limit", True)),
+    }
+    try:
+        return create_job("fetch", scheduled_payload)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not queue scheduled fetch: {exc}") from exc
 
 
 @app.post("/api/filter/start")

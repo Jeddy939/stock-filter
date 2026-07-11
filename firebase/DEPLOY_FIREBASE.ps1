@@ -3,6 +3,7 @@ param(
     [switch]$BuildOnly,
     [switch]$DeployOnly,
     [switch]$ApplySchema,
+    [switch]$ScheduleUpdates,
     [switch]$MigrateCaches,
     [switch]$CreateDatabaseSecret
 )
@@ -102,6 +103,8 @@ if ([string]::IsNullOrWhiteSpace($secret)) {
 }
 
 $envVars = "MONEYMAKER_REQUIRE_AUTH=true,MONEYMAKER_CLOUD_MODE=true,GOOGLE_CLOUD_PROJECT=$Project,MONEYMAKER_CACHE_BUCKET=$Bucket,FIREBASE_API_KEY=$ApiKey,FIREBASE_APP_ID=$AppId,FIREBASE_AUTH_DOMAIN=$Project.firebaseapp.com,FIREBASE_STORAGE_BUCKET=$Project.firebasestorage.app"
+$ApiUrl = "https://moneymaker-api-137012961005.australia-southeast1.run.app"
+$envVars += ",MONEYMAKER_SCHEDULER_AUDIENCE=$ApiUrl,MONEYMAKER_SCHEDULER_SERVICE_ACCOUNT=moneymaker-scheduler@$Project.iam.gserviceaccount.com"
 
 Write-Host "Deploying API service..." -ForegroundColor Cyan
 Invoke-Gcloud @("run", "deploy", "moneymaker-api", "--image", $Image, "--region", $Region, "--allow-unauthenticated", "--max", "1", "--set-env-vars", $envVars, "--set-secrets", "MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest")
@@ -109,6 +112,41 @@ Invoke-Gcloud @("run", "deploy", "moneymaker-api", "--image", $Image, "--region"
 Write-Host "Deploying Cloud Run Jobs..." -ForegroundColor Cyan
 Invoke-Gcloud @("run", "jobs", "deploy", "moneymaker-fetch", "--image", $Image, "--region", $Region, "--command", "python", "--args=-m,firebase.worker", "--set-env-vars", "MONEYMAKER_JOB_TYPE=fetch,MONEYMAKER_CACHE_BUCKET=$Bucket,GOOGLE_CLOUD_PROJECT=$Project", "--set-secrets", "MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest")
 Invoke-Gcloud @("run", "jobs", "deploy", "moneymaker-filter", "--image", $Image, "--region", $Region, "--command", "python", "--args=-m,firebase.worker", "--set-env-vars", "MONEYMAKER_JOB_TYPE=filter,MONEYMAKER_CACHE_BUCKET=$Bucket,GOOGLE_CLOUD_PROJECT=$Project", "--set-secrets", "MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest")
+
+if ($ScheduleUpdates) {
+    Write-Host "Configuring daily Brisbane fetch schedules..." -ForegroundColor Cyan
+    $schedulerEmail = "moneymaker-scheduler@$Project.iam.gserviceaccount.com"
+    if ((Test-Gcloud @("iam", "service-accounts", "describe", $schedulerEmail)) -ne 0) {
+        Invoke-Gcloud @("iam", "service-accounts", "create", "moneymaker-scheduler", "--display-name=MoneyMaker daily data scheduler")
+    }
+    $projectNumber = (& $Gcloud projects describe $Project --format="value(projectNumber)").Trim()
+    $schedulerAgent = "service-$projectNumber@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+    Invoke-Gcloud @("iam", "service-accounts", "add-iam-policy-binding", $schedulerEmail,
+        "--member=serviceAccount:$schedulerAgent", "--role=roles/iam.serviceAccountUser")
+    Invoke-Gcloud @("run", "services", "add-iam-policy-binding", "moneymaker-api", "--region=$Region",
+        "--member=serviceAccount:$schedulerEmail", "--role=roles/run.invoker")
+
+    $asxBody = '{"market":"asx"}'
+    $usBody = '{"market":"us"}'
+    $asxArgs = @("scheduler", "jobs", "update", "http", "moneymaker-daily-fetch-asx", "--location=$Region",
+        "--schedule=0 0 * * *", "--time-zone=Australia/Brisbane", "--uri=$ApiUrl/api/scheduled-fetch",
+        "--http-method=POST", "--update-headers=Content-Type=application/json", "--message-body=$asxBody",
+        "--oidc-service-account-email=$schedulerEmail", "--oidc-token-audience=$ApiUrl")
+    $usArgs = @("scheduler", "jobs", "update", "http", "moneymaker-daily-fetch-us", "--location=$Region",
+        "--schedule=30 0 * * *", "--time-zone=Australia/Brisbane", "--uri=$ApiUrl/api/scheduled-fetch",
+        "--http-method=POST", "--update-headers=Content-Type=application/json", "--message-body=$usBody",
+        "--oidc-service-account-email=$schedulerEmail", "--oidc-token-audience=$ApiUrl")
+    foreach ($job in @(@($asxArgs, "moneymaker-daily-fetch-asx"), @($usArgs, "moneymaker-daily-fetch-us"))) {
+        $args = $job[0]
+        $name = $job[1]
+        if ((Test-Gcloud @("scheduler", "jobs", "describe", $name, "--location=$Region")) -eq 0) {
+            Invoke-Gcloud $args
+        } else {
+            $args[2] = "create"
+            Invoke-Gcloud $args
+        }
+    }
+}
 
 if ($MigrateCaches) {
     if (-not $env:MONEYMAKER_DATABASE_URL) {
