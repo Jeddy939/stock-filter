@@ -1,0 +1,8 @@
+# Small service-owned table used to verify the SQL Connect deployment.
+# The stock tables are maintained by the checked-in PostgreSQL migration and
+# are intentionally preserved through COMPATIBLE schema validation.
+type BackendMetadata @table(name: "backend_metadata", key: "key") {
+  key: String!
+  value: Any
+  updatedAt: Timestamp! @default(expr: "request.time")
+}

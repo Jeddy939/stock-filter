@@ -37,6 +37,15 @@ py firebase\migrate_sqlite_to_postgres.py `
   --ratings-db ratings\central_stock_ratings.sqlite
 ```
 
+The checked-in SQL Connect service definition is under `dataconnect/`. After
+billing is enabled for the Firebase project, provision its Cloud SQL instance
+with:
+
+```powershell
+npx.cmd firebase-tools@latest dataconnect:sql:setup `
+  --service moneymaker --location australia-southeast1
+```
+
 Use `--dry-run` first. The importer is chunked and resumable; it opens source
 SQLite files read-only and uses stable market/source keys for upserts.
 
