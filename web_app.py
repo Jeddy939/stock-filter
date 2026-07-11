@@ -2392,7 +2392,8 @@ INDEX_HTML = r"""<!doctype html>
 
     async function refreshStatus() {
       const cache = encodeURIComponent($("cacheFile").value.trim() || "stock_cache.sqlite");
-      const payload = await api(`/api/status?cache_file=${cache}`);
+      const market = encodeURIComponent($("marketSelect").value);
+      const payload = await api(`/api/status?market=${market}&cache_file=${cache}`);
       const s = payload.status;
       $("metricTickers").textContent = fmt.format(s.ticker_count || 0);
       $("metricRows").textContent = fmt.format(s.history_rows || 0);
@@ -2481,6 +2482,7 @@ INDEX_HTML = r"""<!doctype html>
       $("chartStatus").textContent = "Loading candles...";
       $("chartStatus").className = "status-line";
       const params = new URLSearchParams({
+        market: $("marketSelect").value,
         cache_file: $("cacheFile").value.trim() || "stock_cache.sqlite",
         provider: $("provider").value,
         ticker: selectedTicker,
@@ -2754,6 +2756,7 @@ INDEX_HTML = r"""<!doctype html>
       $("progressCount").textContent = "0";
       $("modalFetchLog").textContent = "";
       const payload = {
+        market: $("marketSelect").value,
         ticker_file: $("tickerFile").value.trim(),
         provider: $("provider").value,
         limit: activeLimit("useFetchLimit", "fetchLimit"),
@@ -2793,6 +2796,7 @@ INDEX_HTML = r"""<!doctype html>
       $("progressCount").textContent = "0";
       $("modalFetchLog").textContent = "";
       const payload = {
+        market: $("marketSelect").value,
         cache_file: $("cacheFile").value.trim(),
         provider: $("provider").value,
         years: numberValue("years"),
@@ -2872,6 +2876,7 @@ INDEX_HTML = r"""<!doctype html>
         const response = await api("/api/label", {
           method: "POST",
           body: JSON.stringify({
+            market: $("marketSelect").value,
             cache_file: $("cacheFile").value.trim() || "stock_cache.sqlite",
             scan_id: currentScanId,
             ticker,
