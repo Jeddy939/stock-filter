@@ -460,9 +460,10 @@ async def label(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
             INSERT INTO rating_events
               (event_at_utc, action, rated_by, market, scan_id, ticker, label,
                note, rank, signal_date, close_price, market_cap, avg_volume,
-               volume_ratio, sector, industry, result_json, yahoo_url)
+               volume_ratio, sector, industry, result_json, yahoo_url,
+               firebase_uid, user_email)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s)
             """,
             (
                 event_at,
@@ -473,11 +474,8 @@ async def label(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
                 result["market_cap"], result["avg_volume"], result["volume_ratio"],
                 result["sector"], result["industry"], result["result_json"],
                 f"https://finance.yahoo.com/quote/{ticker}",
+                user["uid"], user.get("email"),
             ),
-        )
-        cur.execute(
-            "UPDATE rating_events SET firebase_uid = %s, user_email = %s WHERE id = (SELECT MAX(id) FROM rating_events WHERE scan_id = %s AND ticker = %s AND event_at_utc = %s)",
-            (user["uid"], user.get("email"), scan_id, ticker, event_at),
         )
         conn.commit()
     return {"ok": True, "scan_id": scan_id, "ticker": ticker, "label": label_value,
