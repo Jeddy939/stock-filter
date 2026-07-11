@@ -2772,15 +2772,16 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function updateFilterJob(job) {
-      $("filterStatus").textContent = job.message || "Idle";
+      const message = job.error || job.message || "Idle";
+      $("filterStatus").textContent = message;
       $("runFilter").disabled = !!job.running;
       $("progressStage").textContent = job.stage || "Filtering";
-      $("progressDetail").textContent = job.detail || job.message || "Filtering cached data...";
+      $("progressDetail").textContent = job.error || job.detail || job.message || "Filtering online market data...";
       const total = job.total || 0;
       $("progressCount").textContent = total ? `${job.current || 0} / ${total}` : `${job.current || 0}`;
       $("progressPercent").textContent = `${job.percent || 0}%`;
       $("progressFill").style.width = `${job.percent || 0}%`;
-      $("modalFetchLog").textContent = job.summary && job.summary.error ? job.summary.error : "";
+      $("modalFetchLog").textContent = job.error || (job.summary && job.summary.error ? job.summary.error : "");
       $("closeProgress").disabled = !!job.running;
       if (job.running || (!$("progressModal").classList.contains("hidden") && job.success !== null)) {
         $("progressModal").classList.remove("hidden");
@@ -2794,12 +2795,13 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    async function pollFilterJob() {
+    async function pollFilterJob(jobId) {
       try {
-        const payload = await api("/api/filter/job");
+        const query = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";
+        const payload = await api(`/api/filter/job${query}`);
         updateFilterJob(payload.job);
         if (payload.job.running) {
-          setTimeout(pollFilterJob, 500);
+          setTimeout(() => pollFilterJob(jobId), 1000);
           return;
         }
         if (payload.job.success) {
@@ -2866,7 +2868,7 @@ INDEX_HTML = r"""<!doctype html>
       $("runFilter").disabled = true;
       $("progressModal").classList.remove("hidden");
       $("progressStage").textContent = "Filtering";
-      $("progressDetail").textContent = "Preparing cached filter scan...";
+      $("progressDetail").textContent = "Preparing online market scan...";
       $("progressFill").style.width = "0%";
       $("progressPercent").textContent = "0%";
       $("progressCount").textContent = "0";
@@ -2891,7 +2893,7 @@ INDEX_HTML = r"""<!doctype html>
       try {
         const response = await api("/api/filter/start", { method: "POST", body: JSON.stringify(payload) });
         updateFilterJob(response.job);
-        pollFilterJob();
+        pollFilterJob(response.job.id);
       } catch (error) {
         $("filterStatus").textContent = error.message;
         $("filterStatus").className = "status-line bad";

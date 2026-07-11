@@ -165,7 +165,6 @@ def run_filter(data: dict[str, Any]) -> dict[str, Any]:
         )
 
     with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
-        ensure_schema(conn)
         result = run_postgres_filter(conn, params, progress)
     return {
         "filter": {key: value for key, value in result.items() if key != "results"},

@@ -427,10 +427,13 @@ async def job(request: Request) -> dict[str, Any]:
 
 
 @app.get("/api/filter/job")
-async def filter_job(request: Request) -> dict[str, Any]:
+async def filter_job(request: Request, job_id: str | None = Query(None)) -> dict[str, Any]:
     await require_auth(request)
     with db() as conn, conn.cursor() as cur:
-        cur.execute("SELECT * FROM job_runs WHERE job_type = 'filter' ORDER BY started_at_utc DESC LIMIT 1")
+        if job_id:
+            cur.execute("SELECT * FROM job_runs WHERE id = %s AND job_type = 'filter'", (job_id,))
+        else:
+            cur.execute("SELECT * FROM job_runs WHERE job_type = 'filter' ORDER BY started_at_utc DESC LIMIT 1")
         row = cur.fetchone()
         return {"ok": True, "job": job_payload(dict(row) if row else None)}
 
