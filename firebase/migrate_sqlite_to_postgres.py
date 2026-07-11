@@ -75,6 +75,8 @@ def import_cache(
     market: str,
     chunk_size: int,
     dry_run: bool,
+    price_since: str | None = None,
+    full_tickers: set[str] | None = None,
 ) -> dict[str, int]:
     counts = {"companies": 0, "prices": 0, "scans": 0, "results": 0, "labels": 0}
     source = sqlite_connection(cache_path)
@@ -99,6 +101,20 @@ def import_cache(
                 db.commit()
             counts["companies"] += len(batch)
 
+        price_query = """
+            SELECT provider, ticker, date, open, high, low, close, volume,
+                   fetched_at_utc
+            FROM price_history
+        """
+        price_params: list[str] = []
+        if price_since:
+            price_query += " WHERE date >= ?"
+            price_params.append(price_since)
+            if full_tickers:
+                placeholders = ", ".join("?" for _ in full_tickers)
+                price_query += f" OR ticker IN ({placeholders})"
+                price_params.extend(sorted(full_tickers))
+        price_query += " ORDER BY ticker, date"
         price_rows = (
             (
                 market,
@@ -112,14 +128,7 @@ def import_cache(
                 row["volume"],
                 row["fetched_at_utc"],
             )
-            for row in source.execute(
-                """
-                SELECT provider, ticker, date, open, high, low, close, volume,
-                       fetched_at_utc
-                FROM price_history
-                ORDER BY ticker, date
-                """
-            )
+            for row in source.execute(price_query, price_params)
         )
         for batch in chunks(price_rows, chunk_size):
             if not dry_run:

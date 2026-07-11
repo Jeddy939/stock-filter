@@ -13,6 +13,7 @@ import os
 import sys
 import time
 import traceback
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -63,7 +64,7 @@ def checkpoint_path(market: str) -> Path:
 def download_checkpoint(market: str, path: Path) -> None:
     bucket_name = os.environ.get("MONEYMAKER_CACHE_BUCKET", "").strip()
     if not bucket_name:
-        return
+        raise RuntimeError("MONEYMAKER_CACHE_BUCKET is required for resumable cloud fetches")
     object_name = f"sqlite/{market}/stock_cache.sqlite"
     try:
         storage.Client().bucket(bucket_name).blob(object_name).download_to_filename(str(path))
@@ -74,7 +75,9 @@ def download_checkpoint(market: str, path: Path) -> None:
 
 def upload_checkpoint(market: str, path: Path) -> None:
     bucket_name = os.environ.get("MONEYMAKER_CACHE_BUCKET", "").strip()
-    if not bucket_name or not path.exists():
+    if not bucket_name:
+        raise RuntimeError("MONEYMAKER_CACHE_BUCKET is required for resumable cloud fetches")
+    if not path.exists():
         return
     object_name = f"sqlite/{market}/stock_cache.sqlite"
     storage.Client().bucket(bucket_name).blob(object_name).upload_from_filename(str(path))
@@ -88,6 +91,13 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
         "us_tickers_nasdaqtrader.txt" if market == "us" else "asx_yfinance_valid_stocks_2026-05-11.txt"
     ))
     ticker_path = ROOT / ticker_file if not Path(ticker_file).is_absolute() else Path(ticker_file)
+    requested_tickers = fetcher.get_tickers_from_file(str(ticker_path))
+    requested_tickers = fetcher.apply_ticker_limit(requested_tickers, data.get("limit"))
+    with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT ticker FROM price_history WHERE market = %s", (market,))
+            existing_tickers = {row[0] for row in cur.fetchall()}
+    full_tickers = set(requested_tickers) - existing_tickers
     last_update = 0.0
 
     def progress(stage: str, current: int, total: int | None, message: str) -> None:
@@ -116,9 +126,20 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
             "max_rate_limit_retries", "stop_on_rate_limit"
         }},
     )
+    # SQLite may still have an open WAL after a large batch. Compact it before
+    # uploading the checkpoint so no committed rows are stranded in a sidecar.
+    import sqlite3
+    with sqlite3.connect(str(cache)) as checkpoint:
+        checkpoint.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    overlap_days = max(30, int(data.get("history_refresh_days") or 5) + 7)
+    price_since = (date.today() - timedelta(days=overlap_days)).isoformat()
     with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
         ensure_schema(conn)
-        counts = import_cache(conn, cache, market, 2_000, False)
+        counts = import_cache(
+            conn, cache, market, 2_000, False,
+            price_since=price_since,
+            full_tickers=full_tickers,
+        )
     upload_checkpoint(market, cache)
     return counts
 
@@ -130,6 +151,9 @@ def run_filter(data: dict[str, Any]) -> dict[str, Any]:
     params = dict(data)
     params["cache_file"] = str(cache)
     result = _run_filter(params)
+    import sqlite3
+    with sqlite3.connect(str(cache)) as checkpoint:
+        checkpoint.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
         ensure_schema(conn)
         counts = import_cache(conn, cache, market, 2_000, False)
