@@ -110,7 +110,7 @@ Write-Host "Deploying API service..." -ForegroundColor Cyan
 Invoke-Gcloud @("run", "deploy", "moneymaker-api", "--image", $Image, "--region", $Region, "--allow-unauthenticated", "--max", "1", "--set-env-vars", $envVars, "--set-secrets", "MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest")
 
 Write-Host "Deploying Cloud Run Jobs..." -ForegroundColor Cyan
-Invoke-Gcloud @("run", "jobs", "deploy", "moneymaker-fetch", "--image", $Image, "--region", $Region, "--command", "python", "--args=-m,firebase.worker", "--set-env-vars", "MONEYMAKER_JOB_TYPE=fetch,MONEYMAKER_CACHE_BUCKET=$Bucket,GOOGLE_CLOUD_PROJECT=$Project", "--set-secrets", "MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest")
+Invoke-Gcloud @("run", "jobs", "deploy", "moneymaker-fetch", "--image", $Image, "--region", $Region, "--command", "python", "--args=-m,firebase.worker", "--task-timeout=14400s", "--max-retries=0", "--set-env-vars", "MONEYMAKER_JOB_TYPE=fetch,MONEYMAKER_CACHE_BUCKET=$Bucket,GOOGLE_CLOUD_PROJECT=$Project", "--set-secrets", "MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest")
 Invoke-Gcloud @("run", "jobs", "deploy", "moneymaker-filter", "--image", $Image, "--region", $Region, "--command", "python", "--args=-m,firebase.worker", "--set-env-vars", "MONEYMAKER_JOB_TYPE=filter,MONEYMAKER_CACHE_BUCKET=$Bucket,GOOGLE_CLOUD_PROJECT=$Project", "--set-secrets", "MONEYMAKER_DATABASE_URL=moneymaker-database-url:latest")
 
 if ($ScheduleUpdates) {

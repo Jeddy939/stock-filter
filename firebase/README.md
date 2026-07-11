@@ -93,6 +93,10 @@ The scheduler service account can call only the API endpoint needed to queue a
 fetch. It cannot read the database directly. The US job is offset by 30 minutes
 to avoid starting both large market updates at the same time.
 
+The fetch job is allowed to run for up to four hours. It has no Cloud Run
+whole-job retry because the fetcher performs rate-limit retries itself; this
+prevents a failed long update from immediately starting a duplicate update.
+
 To import the existing local caches, set `MONEYMAKER_DATABASE_URL` only in the
 current PowerShell session and run:
 
