@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Job state and migration metadata are written by Cloud Run service
+    // accounts. Browser clients read them only after Firebase sign-in.
+    match /job_status/{jobId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
