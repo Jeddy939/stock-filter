@@ -1,9 +1,11 @@
 import crypto from "node:crypto";
 import cors from "cors";
 import express, {type NextFunction, type Request, type Response} from "express";
-import {GoogleAuth, OAuth2Client} from "google-auth-library";
-import {Pool} from "pg";
+import {getFunctions} from "firebase-admin/functions";
+import {OAuth2Client} from "google-auth-library";
 import {ApiError, requireAdmin, requireAnalyst, requireAppCheck, requireAuth, type UserContext} from "./auth";
+import {dispatchCloudRunJob} from "./cloudrun";
+import {db} from "./db";
 import {readMarketStatusViaDataConnect, type MarketStatusRow} from "./dataconnect";
 import {currentMarket, MARKET_DEFAULTS, rangeDays, VALID_LABELS, yahooUrl} from "./market";
 
@@ -31,28 +33,32 @@ interface PriceRow {
   volume: number | string | null;
 }
 
+interface RefreshBatch {
+  id: string;
+  batchIndex: number;
+  tickers: string[];
+}
+
+interface RefreshTracking {
+  id: string;
+  totalTickers: number;
+  batchCount: number;
+  batches: RefreshBatch[];
+}
+
+interface RefreshTickerBatchPayload {
+  refreshJobId: string;
+  refreshBatchId: string;
+  parentJobId: string;
+  market: string;
+  provider?: string;
+  tickers: string[];
+  fetchPayload?: Record<string, unknown>;
+}
+
 const apiApp = express();
 apiApp.use(cors({origin: true}));
 apiApp.use(express.json({limit: "5mb"}));
-
-let pool: Pool | undefined;
-
-function databaseUrl(): string {
-  const value = String(process.env.MONEYMAKER_DATABASE_URL ?? process.env.DATABASE_URL ?? "").trim();
-  if (!value) throw new ApiError(503, "MONEYMAKER_DATABASE_URL is not configured");
-  return value;
-}
-
-function db(): Pool {
-  if (!pool) {
-    pool = new Pool({
-      connectionString: databaseUrl(),
-      max: Number(process.env.MONEYMAKER_DB_POOL_MAX ?? 5),
-      idleTimeoutMillis: 30000
-    });
-  }
-  return pool;
-}
 
 function asyncRoute(handler: (req: Request, res: Response) => Promise<void>) {
   return (req: Request, res: Response) => {
@@ -134,33 +140,6 @@ function movingAverage(values: Array<number | null>, period: number): Array<numb
   return output;
 }
 
-async function dispatchCloudRunJob(jobType: string, payload: Record<string, unknown>, jobId: string): Promise<string> {
-  const project = process.env.GOOGLE_CLOUD_PROJECT ?? process.env.GCLOUD_PROJECT ?? "moneymaker-aedf7";
-  const region = process.env.MONEYMAKER_RUN_REGION ?? "australia-southeast1";
-  const jobName = process.env[jobType === "fetch" ? "MONEYMAKER_FETCH_JOB" : "MONEYMAKER_FILTER_JOB"] ?? `moneymaker-${jobType}`;
-  const url = `https://run.googleapis.com/v2/projects/${project}/locations/${region}/jobs/${jobName}:run`;
-  const auth = new GoogleAuth({scopes: ["https://www.googleapis.com/auth/cloud-platform"]});
-  const client = await auth.getClient();
-  await client.request({
-    url,
-    method: "POST",
-    data: {
-      overrides: {
-        containerOverrides: [
-          {
-            env: [
-              {name: "MONEYMAKER_JOB_ID", value: jobId},
-              {name: "MONEYMAKER_JOB_TYPE", value: jobType},
-              {name: "MONEYMAKER_JOB_PAYLOAD", value: JSON.stringify(payload)}
-            ]
-          }
-        ]
-      }
-    }
-  });
-  return `projects/${project}/locations/${region}/jobs/${jobName}`;
-}
-
 async function createJob(jobType: string, payload: Record<string, unknown>) {
   const jobId = crypto.randomUUID();
   const market = currentMarket(payload.market);
@@ -203,10 +182,86 @@ async function createJob(jobType: string, payload: Record<string, unknown>) {
   };
 }
 
+async function createQueuedRefreshJob(
+  payload: Record<string, unknown>,
+  refresh: RefreshTracking
+) {
+  const jobId = crypto.randomUUID();
+  const market = currentMarket(payload.market);
+  const started = new Date();
+  await db().query(
+    `
+    INSERT INTO job_runs
+      (id, job_type, market, status, stage, detail, started_at_utc, total_count, parameters_json)
+    VALUES ($1, 'fetch', $2, 'queued', 'Queued', $3, $4, $5, $6::jsonb)
+    `,
+    [
+      jobId,
+      market,
+      `Queued ${refresh.batchCount} ticker refresh batches`,
+      started,
+      refresh.batchCount,
+      JSON.stringify({...payload, refresh_job_id: refresh.id, task_queue: true})
+    ]
+  );
+
+  try {
+    const queue = getFunctions().taskQueue<RefreshTickerBatchPayload>(
+      "locations/australia-southeast1/functions/refreshTickerBatch"
+    );
+    await Promise.all(refresh.batches.map((batch) => queue.enqueue({
+      refreshJobId: refresh.id,
+      refreshBatchId: batch.id,
+      parentJobId: jobId,
+      market,
+      provider: String(payload.provider ?? "yfinance"),
+      tickers: batch.tickers,
+      fetchPayload: payload
+    })));
+    await db().query("UPDATE job_runs SET detail = $1 WHERE id = $2", ["Ticker refresh batches queued", jobId]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await db().query(
+      "UPDATE job_runs SET status = 'failed', stage = 'Failed', error = $1, detail = $2 WHERE id = $3",
+      [message, "Could not enqueue ticker refresh batches", jobId]
+    );
+    throw new ApiError(502, `Could not queue refresh batches: ${message}`);
+  }
+
+  return {
+    ok: true,
+    job: jobPayload({
+      id: jobId,
+      job_type: "fetch",
+      status: "queued",
+      stage: "Queued",
+      detail: "Ticker refresh batches queued",
+      current_count: 0,
+      total_count: refresh.batchCount,
+      percent: 0,
+      parameters_json: {...payload, refresh_job_id: refresh.id, task_queue: true},
+      result_json: []
+    })
+  };
+}
+
+async function createFetchJob(
+  payload: Record<string, unknown>,
+  refresh: RefreshTracking
+) {
+  const useTaskQueue = ["1", "true", "yes"].includes(
+    String(process.env.MONEYMAKER_USE_TASK_QUEUE ?? "false").toLowerCase()
+  );
+  if (useTaskQueue) {
+    return createQueuedRefreshJob(payload, refresh);
+  }
+  return createJob("fetch", {...payload, refresh_job_id: refresh.id});
+}
+
 async function createRefreshTracking(
   payload: Record<string, unknown>,
   user?: UserContext
-): Promise<{id: string; totalTickers: number; batchCount: number}> {
+): Promise<RefreshTracking> {
   const market = currentMarket(payload.market);
   const provider = String(payload.provider ?? "yfinance");
   const limit = Math.max(Number(payload.limit ?? 0), 0);
@@ -223,6 +278,7 @@ async function createRefreshTracking(
   );
   const tickers = tickerResult.rows.map((row) => String(row.ticker).toUpperCase()).filter(Boolean);
   const refreshJobId = crypto.randomUUID();
+  const batches: RefreshBatch[] = [];
   const client = await db().connect();
   try {
     await client.query("BEGIN");
@@ -245,6 +301,10 @@ async function createRefreshTracking(
       ]
     );
     for (let start = 0; start < tickers.length; start += batchSize) {
+      const batchId = crypto.randomUUID();
+      const batchTickers = tickers.slice(start, start + batchSize);
+      const batchIndex = Math.floor(start / batchSize) + 1;
+      batches.push({id: batchId, batchIndex, tickers: batchTickers});
       await client.query(
         `
         INSERT INTO refresh_batches (
@@ -253,12 +313,12 @@ async function createRefreshTracking(
         VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'queued')
         `,
         [
-          crypto.randomUUID(),
+          batchId,
           refreshJobId,
           market,
           provider,
-          Math.floor(start / batchSize) + 1,
-          JSON.stringify(tickers.slice(start, start + batchSize))
+          batchIndex,
+          JSON.stringify(batchTickers)
         ]
       );
     }
@@ -269,7 +329,7 @@ async function createRefreshTracking(
   } finally {
     client.release();
   }
-  return {id: refreshJobId, totalTickers: tickers.length, batchCount: Math.ceil(tickers.length / batchSize)};
+  return {id: refreshJobId, totalTickers: tickers.length, batchCount: batches.length, batches};
 }
 
 async function requireScheduler(req: Request): Promise<void> {
@@ -714,7 +774,7 @@ apiApp.post("/api/fetch", asyncRoute(async (req, res) => {
   requireAdmin(user);
   const payload = req.body ?? {};
   const refresh = await createRefreshTracking(payload, user);
-  res.json(await createJob("fetch", {...payload, refresh_job_id: refresh.id}));
+  res.json(await createFetchJob(payload, refresh));
 }));
 
 apiApp.post("/api/admin/refresh-market", asyncRoute(async (req, res) => {
@@ -722,7 +782,7 @@ apiApp.post("/api/admin/refresh-market", asyncRoute(async (req, res) => {
   requireAdmin(user);
   const payload = req.body ?? {};
   const refresh = await createRefreshTracking(payload, user);
-  res.json(await createJob("fetch", {...payload, refresh_job_id: refresh.id}));
+  res.json(await createFetchJob(payload, refresh));
 }));
 
 apiApp.post("/api/admin/import-sqlite", asyncRoute(async (req, res) => {
@@ -750,7 +810,7 @@ apiApp.post("/api/scheduled-fetch", asyncRoute(async (req, res) => {
     stop_on_rate_limit: req.body?.stop_on_rate_limit ?? true
   };
   const refresh = await createRefreshTracking(scheduledPayload);
-  res.json(await createJob("fetch", {...scheduledPayload, refresh_job_id: refresh.id}));
+  res.json(await createFetchJob(scheduledPayload, refresh));
 }));
 
 apiApp.post("/api/filter/start", asyncRoute(async (req, res) => {

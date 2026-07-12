@@ -1,5 +1,6 @@
 import {onRequest} from "firebase-functions/v2/https";
 import {apiApp} from "./api";
+export {refreshTickerBatch} from "./tasks";
 
 export const api = onRequest(
   {

@@ -45,11 +45,17 @@ def payload() -> dict[str, Any]:
 
 
 def update_job(**values: Any) -> None:
+    update_job_id(job_id(), **values)
+
+
+def update_job_id(target_job_id: str, **values: Any) -> None:
+    if not target_job_id:
+        return
     values.setdefault("log_tail", "")
     assignments = ", ".join(f"{key} = %s" for key in values)
     with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
         with conn.cursor() as cur:
-            cur.execute(f"UPDATE job_runs SET {assignments} WHERE id = %s", (*values.values(), job_id()))
+            cur.execute(f"UPDATE job_runs SET {assignments} WHERE id = %s", (*values.values(), target_job_id))
         conn.commit()
 
 
@@ -98,6 +104,60 @@ def mark_refresh_batches(refresh_job_id: str, status: str, error: str | None = N
         conn.commit()
 
 
+def update_parent_fetch_job(parent_job_id: str, refresh_job_id: str, detail: str | None = None) -> None:
+    if not parent_job_id or not refresh_job_id:
+        return
+    with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*)::int AS total_batches,
+                    COUNT(*) FILTER (WHERE status = 'succeeded')::int AS succeeded_batches,
+                    COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_batches,
+                    COUNT(*) FILTER (WHERE status IN ('queued', 'running'))::int AS active_batches
+                FROM refresh_batches
+                WHERE refresh_job_id = %s
+                """,
+                (refresh_job_id,),
+            )
+            total_batches, succeeded_batches, failed_batches, active_batches = cur.fetchone() or (0, 0, 0, 0)
+            completed_batches = succeeded_batches + failed_batches
+            if total_batches:
+                percent = round((completed_batches / total_batches) * 100, 2)
+            else:
+                percent = 0
+            status = "failed" if failed_batches and not active_batches else (
+                "succeeded" if total_batches and completed_batches >= total_batches else "running"
+            )
+            stage = "Complete" if status == "succeeded" else ("Failed" if status == "failed" else "Fetching batches")
+            finished = datetime.now(timezone.utc) if status in {"succeeded", "failed"} else None
+            cur.execute(
+                """
+                UPDATE job_runs
+                SET status = %s,
+                    stage = %s,
+                    detail = %s,
+                    current_count = %s,
+                    total_count = %s,
+                    percent = %s,
+                    finished_at_utc = COALESCE(%s, finished_at_utc)
+                WHERE id = %s
+                """,
+                (
+                    status,
+                    stage,
+                    detail or f"{completed_batches} of {total_batches} ticker refresh batches complete",
+                    completed_batches,
+                    total_batches,
+                    percent,
+                    finished,
+                    parent_job_id,
+                ),
+            )
+        conn.commit()
+
+
 def ensure_schema(conn: psycopg.Connection) -> None:
     schema = (ROOT / "firebase" / "migrations" / "001_schema.sql").read_text(encoding="utf-8")
     conn.execute(schema)
@@ -136,13 +196,20 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
     market = str(data.get("market") or "asx").lower()
     provider = fetcher.normalize_provider(data.get("provider") or fetcher.DEFAULT_PROVIDER)
     refresh_job_id = str(data.get("refresh_job_id") or "").strip()
+    refresh_batch_id = str(data.get("refresh_batch_id") or "").strip()
+    parent_job_id = str(data.get("parent_job_id") or "").strip()
     cache = checkpoint_path(market)
     download_checkpoint(market, cache)
+    explicit_tickers = [
+        str(ticker).strip().upper()
+        for ticker in (data.get("tickers") or [])
+        if str(ticker).strip()
+    ]
     ticker_file = str(data.get("ticker_file") or (
         "us_tickers_nasdaqtrader.txt" if market == "us" else "asx_yfinance_valid_stocks_2026-05-11.txt"
     ))
     ticker_path = ROOT / ticker_file if not Path(ticker_file).is_absolute() else Path(ticker_file)
-    requested_tickers = fetcher.get_tickers_from_file(str(ticker_path))
+    requested_tickers = explicit_tickers or fetcher.get_tickers_from_file(str(ticker_path))
     requested_tickers = fetcher.apply_ticker_limit(requested_tickers, data.get("limit"))
     update_refresh_job(
         refresh_job_id,
@@ -171,8 +238,14 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
     params = dict(data)
     params.pop("market", None)
     params.pop("ticker_file", None)
+    params.pop("tickers", None)
+    params.pop("parent_job_id", None)
+    temp_ticker_file = None
+    if explicit_tickers:
+        temp_ticker_file = Path("/tmp") / f"tickers_{job_id()}.txt"
+        temp_ticker_file.write_text("\n".join(requested_tickers) + "\n", encoding="utf-8")
     fetcher.fetch_stock_data(
-        ticker_file=str(ticker_path),
+        ticker_file=str(temp_ticker_file or ticker_path),
         output="/tmp/cloud_fetch.json",
         cache_file=str(cache),
         progress_callback=progress,
@@ -218,15 +291,75 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
         counts["weekly_prices"] = weekly_rows
         counts["weekly_metrics"] = metric_rows
     upload_checkpoint(market, cache)
-    update_refresh_job(
-        refresh_job_id,
-        status="succeeded",
-        stage="Complete",
-        completed_tickers=len(requested_tickers),
-        finished_at_utc=datetime.now(timezone.utc),
-        result_json=Jsonb(counts),
-    )
-    mark_refresh_batches(refresh_job_id, "succeeded")
+    if refresh_batch_id:
+        with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE refresh_batches
+                    SET status = 'succeeded', finished_at_utc = now(), result_json = result_json || %s::jsonb
+                    WHERE id = %s AND refresh_job_id = %s
+                    """,
+                    (Jsonb({"counts": counts}), refresh_batch_id, refresh_job_id),
+                )
+                cur.execute(
+                    """
+                    UPDATE refresh_jobs
+                    SET
+                        completed_tickers = completed_tickers + %s,
+                        stage = 'Fetching batches',
+                        status = CASE
+                            WHEN NOT EXISTS (
+                                SELECT 1 FROM refresh_batches
+                                WHERE refresh_job_id = %s
+                                  AND status IN ('queued', 'running')
+                            )
+                            AND EXISTS (
+                                SELECT 1 FROM refresh_batches
+                                WHERE refresh_job_id = %s
+                                  AND status = 'failed'
+                            )
+                            THEN 'failed'
+                            WHEN NOT EXISTS (
+                                SELECT 1 FROM refresh_batches
+                                WHERE refresh_job_id = %s
+                                  AND status IN ('queued', 'running')
+                            )
+                            THEN 'succeeded'
+                            ELSE 'running'
+                        END,
+                        finished_at_utc = CASE
+                            WHEN NOT EXISTS (
+                                SELECT 1 FROM refresh_batches
+                                WHERE refresh_job_id = %s
+                                  AND status IN ('queued', 'running')
+                            )
+                            THEN now()
+                            ELSE finished_at_utc
+                        END
+                    WHERE id = %s
+                    """,
+                    (
+                        len(requested_tickers),
+                        refresh_job_id,
+                        refresh_job_id,
+                        refresh_job_id,
+                        refresh_job_id,
+                        refresh_job_id,
+                    ),
+                )
+            conn.commit()
+        update_parent_fetch_job(parent_job_id, refresh_job_id)
+    else:
+        update_refresh_job(
+            refresh_job_id,
+            status="succeeded",
+            stage="Complete",
+            completed_tickers=len(requested_tickers),
+            finished_at_utc=datetime.now(timezone.utc),
+            result_json=Jsonb(counts),
+        )
+        mark_refresh_batches(refresh_job_id, "succeeded")
     return counts
 
 
@@ -271,14 +404,40 @@ def main() -> None:
         update_job(status="failed", stage="Failed", error=str(exc),
                    detail="".join(traceback.format_exception(exc))[-4000:])
         refresh_job_id = str(data.get("refresh_job_id") or "").strip()
-        update_refresh_job(
-            refresh_job_id,
-            status="failed",
-            stage="Failed",
-            error=str(exc),
-            finished_at_utc=datetime.now(timezone.utc),
-        )
-        mark_refresh_batches(refresh_job_id, "failed", str(exc))
+        refresh_batch_id = str(data.get("refresh_batch_id") or "").strip()
+        parent_job_id = str(data.get("parent_job_id") or "").strip()
+        if refresh_batch_id:
+            with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE refresh_batches
+                        SET status = 'failed', finished_at_utc = now(), error = %s
+                        WHERE id = %s AND refresh_job_id = %s
+                        """,
+                        (str(exc), refresh_batch_id, refresh_job_id),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE refresh_jobs
+                        SET failed_tickers = failed_tickers + %s,
+                            stage = 'Batch failed',
+                            error = %s
+                        WHERE id = %s
+                        """,
+                        (max(len(data.get("tickers") or []), 1), str(exc), refresh_job_id),
+                    )
+                conn.commit()
+            update_parent_fetch_job(parent_job_id, refresh_job_id, detail=f"Batch failed: {str(exc)[:500]}")
+        else:
+            update_refresh_job(
+                refresh_job_id,
+                status="failed",
+                stage="Failed",
+                error=str(exc),
+                finished_at_utc=datetime.now(timezone.utc),
+            )
+            mark_refresh_batches(refresh_job_id, "failed", str(exc))
         raise
 
 
