@@ -4,6 +4,7 @@ import express, {type NextFunction, type Request, type Response} from "express";
 import {GoogleAuth, OAuth2Client} from "google-auth-library";
 import {Pool} from "pg";
 import {ApiError, requireAdmin, requireAnalyst, requireAppCheck, requireAuth, type UserContext} from "./auth";
+import {readMarketStatusViaDataConnect, type MarketStatusRow} from "./dataconnect";
 import {currentMarket, MARKET_DEFAULTS, rangeDays, VALID_LABELS, yahooUrl} from "./market";
 
 interface JobRow {
@@ -382,24 +383,33 @@ apiApp.get("/api/status", asyncRoute(async (req, res) => {
   await requireAuth(req, db());
   let market = currentMarket(req.query.market);
   if (String(req.query.cache_file ?? "").toLowerCase().includes("_us")) market = "us";
-  const statusResult = await db().query(
-    `
-    SELECT COUNT(DISTINCT ticker) AS ticker_count, COUNT(*) AS history_rows,
-           MAX(price_date)::text AS latest_date
-    FROM price_history WHERE market = $1
-    `,
-    [market]
-  );
+  let status: MarketStatusRow | null = null;
+  try {
+    status = await readMarketStatusViaDataConnect(market);
+  } catch (error) {
+    console.warn("Data Connect status read failed; falling back to PostgreSQL", error);
+  }
+  if (!status) {
+    const statusResult = await db().query(
+      `
+      SELECT COUNT(DISTINCT ticker) AS ticker_count, COUNT(*) AS history_rows,
+             MAX(price_date)::text AS latest_date
+      FROM price_history WHERE market = $1
+      `,
+      [market]
+    );
+    status = statusResult.rows[0] ?? {};
+  }
+  const marketStatus = status ?? {};
   const tickerResult = await db().query(
     "SELECT DISTINCT ticker FROM price_history WHERE market = $1 ORDER BY ticker LIMIT 500",
     [market]
   );
-  const status = statusResult.rows[0] ?? {};
   res.json({
     ok: true,
-    status: {
-      ...status,
-      exists: Boolean(Number(status.ticker_count ?? 0)),
+      status: {
+      ...marketStatus,
+      exists: Boolean(Number(marketStatus.ticker_count ?? 0)),
       size_mb: 0,
       tickers: tickerResult.rows.map((row) => row.ticker)
     },
