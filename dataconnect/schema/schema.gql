@@ -1,8 +1,154 @@
-# Small service-owned table used to verify the SQL Connect deployment.
-# The stock tables are maintained by the checked-in PostgreSQL migration and
-# are intentionally preserved through COMPATIBLE schema validation.
-type BackendMetadata @table(name: "backend_metadata", key: "key") {
-  key: String!
-  value: Any
-  updatedAt: Timestamp! @default(expr: "request.time")
+# Firebase SQL Connect schema for the existing MoneyMaker Cloud SQL database.
+# Field names stay GraphQL-safe camelCase while @col maps to the current
+# PostgreSQL snake_case columns created by firebase/migrations/001_schema.sql.
+
+type Company @table(name: "companies", key: ["market", "ticker"]) {
+  market: String!
+  ticker: String!
+  info: Any! @col(name: "info_json", dataType: "jsonb")
+  fetchedAt: Timestamp! @col(name: "fetched_at_utc")
+}
+
+type PriceHistory @table(name: "price_history", key: ["market", "provider", "ticker", "priceDate"]) {
+  market: String!
+  provider: String!
+  ticker: String!
+  priceDate: Date! @col(name: "price_date")
+  openPrice: Float @col(name: "open_price")
+  highPrice: Float @col(name: "high_price")
+  lowPrice: Float @col(name: "low_price")
+  closePrice: Float @col(name: "close_price")
+  volume: Float
+  fetchedAt: Timestamp! @col(name: "fetched_at_utc")
+}
+
+type WeeklyPriceHistory @table(name: "weekly_price_history", key: ["market", "provider", "ticker", "weekDate"]) {
+  market: String!
+  provider: String!
+  ticker: String!
+  weekDate: Date! @col(name: "week_date")
+  openPrice: Float @col(name: "open_price")
+  highPrice: Float @col(name: "high_price")
+  lowPrice: Float @col(name: "low_price")
+  closePrice: Float @col(name: "close_price")
+  volume: Float
+  refreshedAt: Timestamp! @col(name: "refreshed_at_utc") @default(expr: "request.time")
+}
+
+type ScanRun @table(name: "scan_runs", key: "id") {
+  id: Int64! @col(dataType: "bigserial")
+  market: String!
+  sourceId: Int64! @col(name: "source_id")
+  createdAt: Timestamp! @col(name: "created_at_utc")
+  provider: String!
+  cacheFile: String! @col(name: "cache_file")
+  years: Int
+  limitCount: Int @col(name: "limit_count")
+  query: String
+  scannedCount: Int! @col(name: "scanned_count")
+  resultCount: Int! @col(name: "result_count")
+  skippedNoHistory: Int! @col(name: "skipped_no_history")
+  config: Any! @col(name: "config_json", dataType: "jsonb")
+  tickerUniverse: Any! @col(name: "ticker_universe_json", dataType: "jsonb")
+}
+
+type ScanResult @table(name: "scan_results", key: "id") {
+  id: Int64! @col(dataType: "bigserial")
+  scanId: Int64! @col(name: "scan_id")
+  sourceId: Int64! @col(name: "source_id")
+  rank: Int!
+  ticker: String!
+  signalDate: Date @col(name: "signal_date")
+  closePrice: Float @col(name: "close_price")
+  marketCap: Float @col(name: "market_cap")
+  avgVolume: Float @col(name: "avg_volume")
+  volumeRatio: Float @col(name: "volume_ratio")
+  sector: String
+  industry: String
+  result: Any! @col(name: "result_json", dataType: "jsonb")
+}
+
+type AppUserInvite @table(name: "app_user_invites", key: "email") {
+  email: String!
+  role: String!
+  status: String!
+  invitedAt: Timestamp! @col(name: "invited_at_utc") @default(expr: "request.time")
+}
+
+type UserProfile @table(name: "user_profiles", key: "firebaseUid") {
+  firebaseUid: String! @col(name: "firebase_uid") @default(expr: "auth.uid")
+  email: String
+  displayName: String @col(name: "display_name")
+  role: String!
+  status: String!
+  createdAt: Timestamp! @col(name: "created_at_utc") @default(expr: "request.time")
+  lastSeenAt: Timestamp! @col(name: "last_seen_at_utc") @default(expr: "request.time")
+}
+
+type UserAppraisal @table(name: "user_appraisals", key: ["firebaseUid", "scanId", "sourceId", "ticker"]) {
+  firebaseUid: String! @col(name: "firebase_uid") @default(expr: "auth.uid")
+  scanId: Int64! @col(name: "scan_id")
+  sourceId: Int64! @col(name: "source_id")
+  market: String!
+  ticker: String!
+  label: String
+  note: String
+  status: String
+  appraisedAt: Timestamp! @col(name: "appraised_at_utc") @default(expr: "request.time")
+}
+
+type RatingEvent @table(name: "rating_events", key: "id") {
+  id: Int64! @col(dataType: "bigserial")
+  sourceId: Int64 @col(name: "source_id")
+  eventAt: Timestamp! @col(name: "event_at_utc")
+  action: String!
+  ratedBy: String @col(name: "rated_by")
+  market: String
+  cacheFile: String @col(name: "cache_file")
+  scanId: Int64 @col(name: "scan_id")
+  scanCreatedAt: Timestamp @col(name: "scan_created_at_utc")
+  provider: String
+  query: String
+  ticker: String!
+  label: String
+  note: String
+  rank: Int
+  signalDate: Date @col(name: "signal_date")
+  closePrice: Float @col(name: "close_price")
+  marketCap: Float @col(name: "market_cap")
+  avgVolume: Float @col(name: "avg_volume")
+  volumeRatio: Float @col(name: "volume_ratio")
+  sector: String
+  industry: String
+  result: Any @col(name: "result_json", dataType: "jsonb")
+  yahooUrl: String @col(name: "yahoo_url")
+  firebaseUid: String @col(name: "firebase_uid")
+  userEmail: String @col(name: "user_email")
+}
+
+type RatingOutcome @table(name: "rating_outcomes", key: ["ratingEventId", "horizonDays"]) {
+  ratingEventId: Int64! @col(name: "rating_event_id")
+  horizonDays: Int! @col(name: "horizon_days")
+  measuredAt: Timestamp! @col(name: "measured_at_utc")
+  priceAtSignal: Float @col(name: "price_at_signal")
+  priceAtHorizon: Float @col(name: "price_at_horizon")
+  returnPercent: Float @col(name: "return_percent")
+}
+
+type JobRun @table(name: "job_runs", key: "id") {
+  id: UUID!
+  jobType: String! @col(name: "job_type")
+  market: String
+  status: String!
+  stage: String
+  currentCount: Int64! @col(name: "current_count")
+  totalCount: Int64 @col(name: "total_count")
+  percent: Float!
+  detail: String
+  logTail: String @col(name: "log_tail")
+  startedAt: Timestamp! @col(name: "started_at_utc")
+  finishedAt: Timestamp @col(name: "finished_at_utc")
+  error: String
+  parameters: Any! @col(name: "parameters_json", dataType: "jsonb")
+  result: Any! @col(name: "result_json", dataType: "jsonb")
 }

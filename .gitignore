@@ -1,3 +1,4 @@
+.firebase/
 stock_data.json
 stock_data_*.json
 stock_cache.sqlite
@@ -6,6 +7,9 @@ stock_cache.sqlite-wal
 stock_cache_*.sqlite
 stock_cache_*.sqlite-shm
 stock_cache_*.sqlite-wal
+legacy_local/*.sqlite
+legacy_local/*.sqlite-shm
+legacy_local/*.sqlite-wal
 __pycache__/
 *.py[cod]
 rate_limit_calibration*.json

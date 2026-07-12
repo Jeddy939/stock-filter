@@ -1,1 +1,4 @@
 connectorId: admin
+generate:
+  javascriptSdk:
+    outputDir: ../../functions/src/dataconnect-generated

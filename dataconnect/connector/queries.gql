@@ -1,0 +1,69 @@
+query ListRecentScans($market: String!, $limit: Int!) @auth(level: USER) {
+  scans: _select(
+    sql: """
+      SELECT id, source_id, created_at_utc, provider, query, scanned_count,
+             result_count, skipped_no_history, config_json
+      FROM scan_runs
+      WHERE market = $1
+      ORDER BY created_at_utc DESC
+      LIMIT $2
+    """,
+    params: [$market, $limit]
+  )
+}
+
+query GetScanResults($scanId: Int64!) @auth(level: USER) {
+  results: _select(
+    sql: """
+      SELECT sr.id, sr.scan_id, sr.source_id, sr.rank, sr.ticker,
+             sr.signal_date, sr.close_price, sr.market_cap, sr.avg_volume,
+             sr.volume_ratio, sr.sector, sr.industry, sr.result_json,
+             ua.label, ua.note AS personal_note, ua.status AS personal_status,
+             ua.appraised_at_utc
+      FROM scan_results sr
+      LEFT JOIN user_appraisals ua
+        ON ua.scan_id = sr.scan_id
+       AND ua.source_id = sr.source_id
+       AND ua.ticker = sr.ticker
+       AND ua.firebase_uid = $2
+      WHERE sr.scan_id = $1
+      ORDER BY sr.rank ASC
+    """,
+    params: [$scanId, {_expr: "auth.uid"}]
+  )
+}
+
+query GetChartBars($market: String!, $provider: String!, $ticker: String!, $startDate: Date!) @auth(level: USER) {
+  bars: _select(
+    sql: """
+      SELECT price_date, open_price, high_price, low_price, close_price, volume
+      FROM price_history
+      WHERE market = $1 AND provider = $2 AND ticker = $3 AND price_date >= $4
+      ORDER BY price_date ASC
+    """,
+    params: [$market, $provider, $ticker, $startDate]
+  )
+}
+
+query GetCompanyProfile($market: String!, $ticker: String!) @auth(level: USER) {
+  company: _selectFirst(
+    sql: """
+      SELECT market, ticker, info_json, fetched_at_utc
+      FROM companies
+      WHERE market = $1 AND ticker = $2
+    """,
+    params: [$market, $ticker]
+  )
+}
+
+query GetMyAppraisals($scanId: Int64!) @auth(level: USER) {
+  appraisals: _select(
+    sql: """
+      SELECT ticker, label, note, status, appraised_at_utc
+      FROM user_appraisals
+      WHERE firebase_uid = $1 AND scan_id = $2
+      ORDER BY ticker ASC
+    """,
+    params: [{_expr: "auth.uid"}, $scanId]
+  )
+}

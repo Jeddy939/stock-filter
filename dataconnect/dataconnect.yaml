@@ -1,8 +1,8 @@
-specVersion: "v1beta"
+specVersion: v1
 serviceId: moneymaker
 location: australia-southeast1
 schema:
-  source: schema
+  source: ./schema
   datasource:
     postgresql:
       database: moneymaker
@@ -10,4 +10,4 @@ schema:
         instanceId: moneymaker-db
         schemaValidation: COMPATIBLE
 connectorDirs:
-  - connector
+  - ./connector

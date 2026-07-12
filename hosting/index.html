@@ -1,0 +1,1594 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Moneymaker Stock Filter</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0d1014;
+      --panel: #15191f;
+      --panel-2: #1d232b;
+      --line: #303844;
+      --text: #f1f4f7;
+      --muted: #9ca8b5;
+      --accent: #45bd82;
+      --accent-2: #68aee8;
+      --warn: #e0b45b;
+      --bad: #df7770;
+      --shadow: rgba(0, 0, 0, .25);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 14px/1.45 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #12161b;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+      min-height: calc(100vh - 58px);
+    }
+    aside {
+      border-right: 1px solid var(--line);
+      background: #11151a;
+      padding: 16px;
+      overflow: auto;
+    }
+    section.workspace {
+      padding: 16px;
+      overflow: auto;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .metric, .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      box-shadow: 0 3px 12px var(--shadow);
+    }
+    .metric { padding: 12px; min-height: 78px; }
+    .metric span { color: var(--muted); display: block; font-size: 12px; }
+    .metric strong { display: block; font-size: 22px; margin-top: 6px; }
+    .panel { padding: 14px; margin-bottom: 14px; }
+    .panel h2 {
+      margin: 0 0 12px;
+      font-size: 14px;
+      font-weight: 650;
+      color: #e6ebf0;
+    }
+    label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin: 9px 0 4px;
+    }
+    input, select {
+      width: 100%;
+      background: #0e1217;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      min-height: 34px;
+      padding: 6px 9px;
+      font: inherit;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+    .inline-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      color: var(--text);
+    }
+    .inline-check input[type="checkbox"] {
+      width: auto;
+      min-height: auto;
+      margin: 0;
+    }
+    button {
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 5px;
+      min-height: 36px;
+      padding: 7px 12px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button.primary { background: #237046; border-color: #35925e; }
+    button.secondary { background: #205c48; border-color: #348a69; }
+    button:disabled { opacity: .55; cursor: default; }
+    input:disabled {
+      opacity: .55;
+      cursor: default;
+    }
+    .status-line {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      background: #11161b;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 8px 9px;
+      text-align: right;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      background: #1a2027;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    td:first-child, th:first-child { text-align: left; }
+    .ticker {
+      color: #8fe1a9;
+      font-weight: 650;
+      text-decoration: none;
+    }
+    .label-cell {
+      display: flex;
+      gap: 5px;
+      justify-content: flex-end;
+      align-items: center;
+    }
+    .label-btn {
+      min-height: 28px;
+      padding: 4px 7px;
+      font-size: 12px;
+      border-radius: 5px;
+    }
+    .label-btn.active[data-label="winner"] {
+      background: #246d42;
+      border-color: #49b973;
+    }
+    .label-btn.active[data-label="potential_winner"] {
+      background: #285f6d;
+      border-color: #58b8ce;
+    }
+    .label-btn.active[data-label="maybe"] {
+      background: #6d5422;
+      border-color: #d1a94e;
+    }
+    .label-btn.active[data-label="bad"] {
+      background: #73342f;
+      border-color: #d87268;
+    }
+    tr.label-winner td:first-child { border-left: 3px solid var(--accent); }
+    tr.label-potential_winner td:first-child { border-left: 3px solid var(--accent-2); }
+    tr.label-maybe td:first-child { border-left: 3px solid var(--warn); }
+    tr.label-bad td:first-child { border-left: 3px solid var(--bad); }
+    tr.incomplete-ma td { background: rgba(242, 193, 78, 0.06); }
+    tr.incomplete-ma td:nth-child(7) { color: var(--warn); }
+    .results-wrap { max-height: calc(100vh - 210px); overflow: auto; border-radius: 6px; }
+    .chart-controls {
+      display: grid;
+      grid-template-columns: minmax(110px, 160px) minmax(110px, 140px) minmax(110px, 140px) auto;
+      gap: 8px;
+      align-items: end;
+      margin-bottom: 10px;
+    }
+    .chart-box {
+      height: 430px;
+      min-height: 280px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #0c1110;
+      overflow: hidden;
+      position: relative;
+    }
+    #chartPanel.fullscreen {
+      position: fixed;
+      inset: 12px;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      overflow: auto;
+      background: var(--panel);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .48);
+    }
+    body.chart-fullscreen {
+      overflow: hidden;
+    }
+    #chartPanel.fullscreen .chart-box {
+      flex: 1 1 auto;
+      height: auto;
+      min-height: 560px;
+    }
+    .chart-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .ma-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 10px;
+    }
+    .ma-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      padding: 5px 8px;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #111816;
+      font-size: 12px;
+    }
+    .ma-toggle input {
+      width: auto;
+      min-height: auto;
+      margin: 0;
+    }
+    .ma-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .company-profile {
+      margin: 0 0 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #101715;
+    }
+    .company-profile.empty {
+      color: var(--muted);
+    }
+    .company-profile h3 {
+      margin: 0 0 4px;
+      font-size: 15px;
+      font-weight: 650;
+    }
+    .company-profile .company-meta {
+      margin: 0 0 7px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .company-profile p {
+      margin: 0;
+      color: #d6e0da;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .company-profile a {
+      color: var(--accent-2);
+      text-decoration: none;
+    }
+    .company-profile.focused {
+      border-color: var(--accent-2);
+      box-shadow: 0 0 0 2px rgba(103, 177, 142, .18);
+    }
+    #priceChart {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    .log {
+      margin: 0;
+      max-height: 230px;
+      overflow: auto;
+      background: #0c1110;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 10px;
+      color: #b7c6bd;
+      font: 12px/1.35 Consolas, "Cascadia Mono", monospace;
+      white-space: pre-wrap;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      border: 1px solid var(--line);
+      background: #111816;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 12px;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      background: rgba(3, 7, 6, .72);
+    }
+    .modal.hidden { display: none; }
+    .progress-window {
+      width: min(760px, 100%);
+      max-height: min(720px, calc(100vh - 32px));
+      display: flex;
+      flex-direction: column;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      box-shadow: 0 18px 55px rgba(0, 0, 0, .45);
+      overflow: hidden;
+    }
+    .progress-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #151d1a;
+    }
+    .progress-head h2 {
+      margin: 0;
+      font-size: 15px;
+    }
+    .progress-body {
+      padding: 16px;
+      overflow: auto;
+    }
+    .progress-bar {
+      height: 14px;
+      overflow: hidden;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #0d1411;
+      margin: 10px 0 8px;
+    }
+    .progress-fill {
+      width: 0%;
+      height: 100%;
+      background: var(--accent);
+      transition: width .2s ease;
+    }
+    .progress-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .progress-tile {
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 9px;
+      background: #111816;
+      min-height: 58px;
+    }
+    .progress-tile span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .progress-tile strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 17px;
+    }
+    .ok { color: var(--accent); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    .market-switch {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .market-switch select { min-height: 42px; font-weight: 650; }
+    .online-source {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    .online-source::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 3px rgba(69, 189, 130, .14);
+    }
+    body.cloud-mode .local-data-controls { display: none; }
+    body.cloud-mode .online-source { display: flex; }
+    body.cloud-mode main { grid-template-columns: minmax(270px, 320px) minmax(0, 1fr); }
+    body.cloud-mode aside { padding: 12px; }
+    body.cloud-mode .panel { margin-bottom: 10px; }
+    @media (max-width: 940px) {
+      main { grid-template-columns: 1fr; }
+      aside { border-right: 0; border-bottom: 1px solid var(--line); }
+      .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+      .chart-controls { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 520px) {
+      header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 4px;
+      }
+      header .status-line {
+        white-space: normal;
+      }
+      .progress-grid {
+        grid-template-columns: 1fr;
+      }
+      .chart-controls { grid-template-columns: 1fr; }
+      .chart-box { height: 330px; }
+      main {
+        min-height: calc(100vh - 82px);
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Moneymaker Stock Filter</h1>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+      <span class="status-line" id="topStatus">Connecting to market data...</span>
+      <input id="authEmail" type="email" placeholder="Email" autocomplete="username" style="width:180px">
+      <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password" style="width:140px">
+      <button id="authSignIn" type="button">Sign in</button>
+      <button id="authCreate" type="button">Create account</button>
+      <button id="authSignOut" type="button" hidden>Sign out</button>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <div class="panel local-data-controls">
+        <h2>Cache</h2>
+        <label for="cacheFile">SQLite file</label>
+        <input id="cacheFile" value="stock_cache.sqlite">
+        <div class="actions">
+          <span class="pill" id="cachePill">No cache</span>
+        </div>
+      </div>
+
+      <div class="panel local-data-controls">
+        <h2>Fetch</h2>
+        <div class="actions" style="margin-top:0">
+          <button id="downloadUsTickers" type="button">Download US Tickers</button>
+          <span class="status-line" id="tickerSourceStatus">Nasdaq Trader source</span>
+        </div>
+        <label for="tickerFileSelect">Available ticker files</label>
+        <select id="tickerFileSelect"></select>
+        <label for="tickerFile">Ticker file</label>
+        <input id="tickerFile" value="asx_yfinance_valid_stocks_2026-05-11.txt">
+        <div class="grid-2">
+          <div>
+            <label for="provider">Provider</label>
+            <select id="provider"><option>yfinance</option><option>stooq</option></select>
+          </div>
+          <div>
+            <label for="fetchLimit">Limit</label>
+            <input id="fetchLimit" type="number" min="1" value="100" disabled>
+          </div>
+        </div>
+        <label class="inline-check">
+          <input id="useFetchLimit" type="checkbox">
+          Limit fetch to first N tickers
+        </label>
+        <div class="grid-2">
+          <div>
+            <label for="years">Years</label>
+            <input id="years" type="number" min="1" value="15">
+          </div>
+          <div>
+            <label for="workers">Workers</label>
+            <input id="workers" type="number" min="1" value="1">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div>
+            <label for="infoRefresh">Info refresh days</label>
+            <input id="infoRefresh" type="number" min="0" value="7">
+          </div>
+          <div>
+            <label for="historyRefresh">History overlap days</label>
+            <input id="historyRefresh" type="number" min="0" value="5">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div>
+            <label for="historyChunkSize">History batch size</label>
+            <input id="historyChunkSize" type="number" min="1" value="50">
+          </div>
+          <div>
+            <label for="historyPause">Batch pause sec</label>
+            <input id="historyPause" type="number" min="0" step="1" value="5">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div>
+            <label for="infoPause">Info pause sec</label>
+            <input id="infoPause" type="number" min="0" step="1" value="1">
+          </div>
+          <div>
+            <label for="ratePause">Rate-limit pause sec</label>
+            <input id="ratePause" type="number" min="0" step="10" value="900">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div>
+            <label for="rateRetries">Rate-limit retries</label>
+            <input id="rateRetries" type="number" min="0" value="3">
+          </div>
+          <div>
+            <label>&nbsp;</label>
+            <span class="status-line">Use workers=1 for safest full ASX runs.</span>
+          </div>
+        </div>
+        <label class="inline-check">
+          <input id="stopOnRateLimit" type="checkbox" checked>
+          Stop and resume later if rate-limited
+        </label>
+        <label class="inline-check">
+          <input id="pruneMissing" type="checkbox">
+          Create cleaned ticker file when symbols fail
+        </label>
+        <div class="actions">
+          <button class="primary" id="startFetch">Update Cache</button>
+          <span class="status-line" id="fetchStatus">Idle</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Market Screen</h2>
+        <label for="marketSelect">Market</label>
+        <div class="market-switch">
+          <select id="marketSelect">
+            <option value="asx">ASX market</option>
+            <option value="us">US market</option>
+          </select>
+          <button id="refreshStatus" type="button">Refresh data</button>
+        </div>
+        <div class="online-source">Screening the automatically updated online database</div>
+        <div class="grid-2">
+          <div>
+            <label for="volumeMultiplier">Volume multiplier</label>
+            <input id="volumeMultiplier" type="number" step="0.1" value="2.0">
+          </div>
+          <div>
+            <label for="lookbackWeeks">Lookback weeks</label>
+            <input id="lookbackWeeks" type="number" min="1" value="1">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div>
+            <label for="minCap">Min cap M</label>
+            <input id="minCap" type="number" step="1" value="0">
+          </div>
+          <div>
+            <label for="maxCap">Max cap M</label>
+            <input id="maxCap" type="number" step="1" value="0">
+          </div>
+        </div>
+        <label>Moving averages weeks (0 off)</label>
+        <div class="grid-4">
+          <input id="maShort" type="number" value="90">
+          <input id="maIntermediate" type="number" value="180">
+          <input id="maMedium" type="number" value="360">
+          <input id="maLong" type="number" value="700" title="Set to 0 to turn off the 700-week moving average">
+        </div>
+        <div class="grid-2">
+          <div>
+            <label for="query">Ticker search</label>
+            <input id="query" placeholder="CBA">
+          </div>
+          <div>
+            <label for="scanLimit">Scan limit</label>
+            <input id="scanLimit" type="number" min="1" value="250" disabled>
+          </div>
+        </div>
+        <label class="inline-check">
+          <input id="useScanLimit" type="checkbox">
+          Limit scan to first N tickers
+        </label>
+        <div class="actions">
+          <button class="secondary" id="runFilter">Run Filter</button>
+          <span class="status-line" id="filterStatus">Ready</span>
+        </div>
+      </div>
+
+      <div class="panel local-data-controls">
+        <h2>Fetch Log</h2>
+        <pre class="log" id="fetchLog"></pre>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <div class="metrics">
+        <div class="metric"><span>Covered stocks</span><strong id="metricTickers">0</strong></div>
+        <div class="metric"><span>History rows</span><strong id="metricRows">0</strong></div>
+        <div class="metric"><span>Latest bar</span><strong id="metricLatest">-</strong></div>
+        <div class="metric"><span>Matches</span><strong id="metricMatches">0</strong></div>
+      </div>
+      <div class="panel" id="chartPanel">
+        <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
+          <h2 style="margin:0">Chart</h2>
+          <div class="chart-header-actions">
+            <span class="status-line" id="chartStatus">Select a ticker</span>
+            <button id="toggleChartFullscreen" type="button" aria-pressed="false">Fullscreen</button>
+          </div>
+        </div>
+        <div class="chart-controls">
+          <div>
+            <label for="chartTicker">Ticker</label>
+            <input id="chartTicker" value="CBA.AX">
+          </div>
+          <div>
+            <label for="chartInterval">Candles</label>
+            <select id="chartInterval">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </div>
+          <div>
+            <label for="chartRange">Timeframe</label>
+            <select id="chartRange">
+              <option value="3m">3M</option>
+              <option value="6m">6M</option>
+              <option value="1y" selected>1Y</option>
+              <option value="2y">2Y</option>
+              <option value="5y">5Y</option>
+              <option value="10y">10Y</option>
+              <option value="all">All</option>
+            </select>
+          </div>
+          <button id="loadChart">Load Chart</button>
+        </div>
+        <div class="ma-controls" aria-label="Moving average overlays">
+          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="30" checked><span class="ma-dot" style="background:#f2c14e"></span>MA 30</label>
+          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="90" checked><span class="ma-dot" style="background:#8dd7ff"></span>MA 90</label>
+          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="180" checked><span class="ma-dot" style="background:#b58cff"></span>MA 180</label>
+          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="360" checked><span class="ma-dot" style="background:#ff9f7a"></span>MA 360</label>
+          <label class="ma-toggle"><input class="ma-check" type="checkbox" value="700" checked><span class="ma-dot" style="background:#d9e672"></span>MA 700</label>
+        </div>
+        <div class="company-profile empty" id="companyProfile">
+          <p>Load a cached ticker to show the company description.</p>
+        </div>
+        <div class="chart-box">
+          <canvas id="priceChart"></canvas>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
+          <h2 style="margin:0">Results</h2>
+          <span class="status-line" id="resultMeta">No scan yet</span>
+        </div>
+        <div class="results-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:90px">Ticker</th>
+                <th style="width:90px">Date</th>
+                <th style="width:80px">Close</th>
+                <th style="width:105px">Market Cap</th>
+                <th style="width:110px">Avg Volume</th>
+                <th style="width:95px">Volume Ratio</th>
+                <th style="width:150px">MA Data</th>
+                <th style="width:260px">Label</th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody">
+              <tr><td colspan="8" style="text-align:left;color:var(--muted)">No results loaded.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal hidden" id="progressModal" role="dialog" aria-modal="true" aria-labelledby="progressTitle">
+    <div class="progress-window">
+      <div class="progress-head">
+        <h2 id="progressTitle">Process Progress</h2>
+        <button id="closeProgress">Close</button>
+      </div>
+      <div class="progress-body">
+        <div class="status-line" id="progressDetail">Idle</div>
+        <div class="progress-bar" aria-label="Progress">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-grid">
+          <div class="progress-tile"><span>Stage</span><strong id="progressStage">Idle</strong></div>
+          <div class="progress-tile"><span>Count</span><strong id="progressCount">0</strong></div>
+          <div class="progress-tile"><span>Complete</span><strong id="progressPercent">0%</strong></div>
+        </div>
+        <pre class="log" id="modalFetchLog"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const fmt = new Intl.NumberFormat();
+    let authReady = Promise.resolve(null);
+    let firebaseAuth = null;
+    let firebaseAuthMethods = null;
+    let currentUserProfile = null;
+    async function initializeFirebaseAuth() {
+      try {
+        const response = await fetch("/api/auth-config");
+        if (!response.ok) return null;
+        const config = await response.json();
+        if (!config.enabled || !config.apiKey || !config.appId) return null;
+        const [{ initializeApp }, authModule] = await Promise.all([
+          import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"),
+          import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js")
+        ]);
+        const app = initializeApp(config);
+        const auth = authModule.getAuth(app);
+        firebaseAuth = auth;
+        firebaseAuthMethods = authModule;
+        authModule.onAuthStateChanged(auth, async (user) => {
+          if (user) {
+            $("authEmail").value = user.email || "";
+            $("authSignOut").hidden = false;
+            const anonymous = Boolean(user.isAnonymous);
+            $("authSignIn").hidden = !anonymous;
+            $("authCreate").hidden = !anonymous;
+            $("authPassword").hidden = !anonymous;
+            if (currentUserProfile?.user) $("topStatus").textContent = `Signed in as ${currentUserProfile.user.email || "anonymous"}`;
+            else $("topStatus").textContent = anonymous ? "Anonymous session" : `Signed in as ${user.email || "user"}`;
+          }
+        });
+        await auth.authStateReady();
+        const result = auth.currentUser ? { user: auth.currentUser } : await authModule.signInAnonymously(auth);
+        return () => authModule.getIdToken(result.user, true);
+      } catch (error) {
+        console.warn("Firebase authentication is unavailable", error);
+        return null;
+      }
+    }
+    authReady = initializeFirebaseAuth();
+    let lastCandles = [];
+    let lastChartTicker = "";
+    let lastMovingAverages = {};
+    let currentScanId = null;
+    const maColors = {
+      "30": "#f2c14e",
+      "90": "#8dd7ff",
+      "180": "#b58cff",
+      "360": "#ff9f7a",
+      "700": "#d9e672"
+    };
+    const marketDefaults = {
+      asx: {
+        cacheFile: "stock_cache.sqlite",
+        tickerFile: "asx_yfinance_valid_stocks_2026-05-11.txt",
+        provider: "yfinance",
+        chartTicker: "CBA.AX",
+        output: "stock_data_web.json"
+      },
+      us: {
+        cacheFile: "stock_cache_us.sqlite",
+        tickerFile: "us_tickers_nasdaqtrader.txt",
+        provider: "yfinance",
+        chartTicker: "AAPL",
+        output: "stock_data_us_web.json"
+      }
+    };
+
+    function numberValue(id) {
+      const value = $(id).value.trim();
+      return value === "" ? null : Number(value);
+    }
+
+    function marketCap(value) {
+      if (value === null || value === undefined) return "N/A";
+      if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
+      if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+      return fmt.format(Math.round(value));
+    }
+
+    function renderCompanyProfile(company, ticker) {
+      const box = $("companyProfile");
+      box.replaceChildren();
+      if (!company || (!company.summary && !company.name && !company.sector && !company.industry)) {
+        box.className = "company-profile empty";
+        const p = document.createElement("p");
+        p.textContent = `${ticker || "Ticker"}: no cached company description yet. Run a fetch with company info enabled to fill this in.`;
+        box.appendChild(p);
+        if (company && company.yahoo_url) {
+          const meta = document.createElement("div");
+          meta.className = "company-meta";
+          const yahoo = document.createElement("a");
+          yahoo.href = company.yahoo_url;
+          yahoo.target = "_blank";
+          yahoo.rel = "noreferrer";
+          yahoo.textContent = "Yahoo Finance";
+          meta.appendChild(yahoo);
+          box.appendChild(meta);
+        }
+        return;
+      }
+
+      box.className = "company-profile";
+      const heading = document.createElement("h3");
+      heading.textContent = company.name || ticker;
+      box.appendChild(heading);
+
+      const metaParts = [company.sector, company.industry, company.country].filter(Boolean);
+      if (metaParts.length || company.website || company.yahoo_url) {
+        const meta = document.createElement("div");
+        meta.className = "company-meta";
+        meta.appendChild(document.createTextNode(metaParts.join(" / ")));
+        if (company.website) {
+          if (metaParts.length) meta.appendChild(document.createTextNode(" / "));
+          const link = document.createElement("a");
+          link.href = company.website;
+          link.target = "_blank";
+          link.rel = "noreferrer";
+          link.textContent = "Website";
+          meta.appendChild(link);
+        }
+        if (company.yahoo_url) {
+          if (metaParts.length || company.website) meta.appendChild(document.createTextNode(" / "));
+          const yahoo = document.createElement("a");
+          yahoo.href = company.yahoo_url;
+          yahoo.target = "_blank";
+          yahoo.rel = "noreferrer";
+          yahoo.textContent = "Yahoo Finance";
+          meta.appendChild(yahoo);
+        }
+        box.appendChild(meta);
+      }
+
+      const summary = document.createElement("p");
+      summary.textContent = company.summary || "No business summary was included in the cached company info.";
+      box.appendChild(summary);
+    }
+
+    function priceLabel(value) {
+      if (!Number.isFinite(value)) return "";
+      if (value >= 100) return value.toFixed(2);
+      if (value >= 1) return value.toFixed(3);
+      return value.toFixed(4);
+    }
+
+    function selectedMaPeriods() {
+      return Array.from(document.querySelectorAll(".ma-check:checked"))
+        .map((input) => input.value)
+        .join(",");
+    }
+
+    function activeLimit(checkboxId, inputId) {
+      return $(checkboxId).checked ? $(inputId).value.trim() : "";
+    }
+
+    function bindLimitToggle(checkboxId, inputId) {
+      const sync = () => {
+        $(inputId).disabled = !$(checkboxId).checked;
+      };
+      $(checkboxId).addEventListener("change", sync);
+      sync();
+    }
+
+    async function api(path, options = {}) {
+      const getToken = await authReady;
+      const headers = new Headers(options.headers || {});
+      headers.set("Content-Type", "application/json");
+      if (getToken) {
+        const token = await getToken();
+        if (token) headers.set("Authorization", `Bearer ${token}`);
+      }
+      const response = await fetch(path, { ...options, headers });
+      const responseText = await response.text();
+      let payload;
+      try {
+        payload = JSON.parse(responseText);
+      } catch (_) {
+        const contentType = response.headers.get("Content-Type") || "unknown content type";
+        throw new Error(`Server returned ${response.status} ${contentType}: ${responseText.slice(0, 180)}`);
+      }
+      if (!response.ok || !payload.ok) throw new Error(payload.detail || payload.error || "Request failed");
+      return payload;
+    }
+
+    async function initializeAppMode() {
+      try {
+        const payload = await api("/api/config");
+        if (payload.cloud) {
+          document.body.classList.add("cloud-mode");
+          document.title = "Moneymaker Markets";
+          document.querySelector("h1").textContent = "Moneymaker Markets";
+        }
+      } catch (error) {
+        console.warn("Could not determine application mode", error);
+      }
+    }
+
+    function currentMarketDefaults() {
+      return marketDefaults[$("marketSelect").value] || marketDefaults.asx;
+    }
+
+    function applyMarketDefaults() {
+      const defaults = currentMarketDefaults();
+      $("cacheFile").value = defaults.cacheFile;
+      $("tickerFile").value = defaults.tickerFile;
+      $("provider").value = defaults.provider;
+      $("chartTicker").value = defaults.chartTicker;
+      $("tickerSourceStatus").textContent = $("marketSelect").value === "us"
+        ? "US uses Nasdaq Trader tickers and a separate SQLite cache"
+        : "ASX uses the existing local ticker files and cache";
+      loadTickerFiles();
+      refreshStatus().catch((error) => {
+        $("topStatus").textContent = error.message;
+        $("topStatus").className = "status-line bad";
+      }).finally(() => loadChart());
+    }
+
+    async function refreshStatus() {
+      const cache = encodeURIComponent($("cacheFile").value.trim() || "stock_cache.sqlite");
+      const market = encodeURIComponent($("marketSelect").value);
+      const payload = await api(`/api/status?market=${market}&cache_file=${cache}`);
+      const s = payload.status;
+      $("metricTickers").textContent = fmt.format(s.ticker_count || 0);
+      $("metricRows").textContent = fmt.format(s.history_rows || 0);
+      $("metricLatest").textContent = s.latest_date || "-";
+      $("cachePill").textContent = s.exists ? `${s.size_mb} MB` : "No cache";
+      $("cachePill").className = `pill ${s.exists ? "ok" : "warn"}`;
+      $("topStatus").textContent = s.exists
+        ? `${fmt.format(s.ticker_count || 0)} stocks online, ${fmt.format(s.history_rows || 0)} price rows, latest ${s.latest_date || "-"}`
+        : "No online market data found";
+      if (s.tickers && s.tickers.length && !$("chartTicker").value.trim()) {
+        $("chartTicker").value = s.tickers[0];
+      }
+      updateJob(payload.job);
+    }
+
+    async function loadTickerFiles() {
+      try {
+        const payload = await api("/api/ticker-files");
+        const select = $("tickerFileSelect");
+        select.innerHTML = (payload.files || []).map((file) =>
+          `<option value="${file.name}">${file.name} (${file.size_kb} KB)</option>`
+        ).join("");
+        const current = $("tickerFile").value.trim();
+        if (current) select.value = current;
+        if (!current && payload.files && payload.files.length) {
+          $("tickerFile").value = payload.files[0].name;
+        }
+      } catch (error) {
+        $("fetchStatus").textContent = error.message;
+        $("fetchStatus").className = "status-line bad";
+      }
+    }
+
+    async function downloadUsTickers() {
+      $("tickerSourceStatus").textContent = "Downloading US ticker list...";
+      $("tickerSourceStatus").className = "status-line warn";
+      try {
+        const response = await api("/api/us-tickers", {
+          method: "POST",
+          body: JSON.stringify({ output_file: marketDefaults.us.tickerFile })
+        });
+        const result = response.result;
+        $("marketSelect").value = "us";
+        await loadTickerFiles();
+        applyMarketDefaults();
+        $("tickerSourceStatus").textContent = `Wrote ${fmt.format(result.ticker_count || 0)} symbols to ${result.output_file}`;
+        $("tickerSourceStatus").className = "status-line ok";
+      } catch (error) {
+        $("tickerSourceStatus").textContent = error.message;
+        $("tickerSourceStatus").className = "status-line bad";
+      }
+    }
+
+    function focusChartPanel() {
+      $("chartPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+      $("companyProfile").classList.add("focused");
+      window.setTimeout(() => $("companyProfile").classList.remove("focused"), 1600);
+    }
+
+    function redrawChartSoon() {
+      window.setTimeout(() => {
+        if (lastCandles.length) drawCandles(lastCandles, lastChartTicker, lastMovingAverages);
+      }, 80);
+    }
+
+    function toggleChartFullscreen(force = null) {
+      const panel = $("chartPanel");
+      const button = $("toggleChartFullscreen");
+      const enabled = force === null ? !panel.classList.contains("fullscreen") : !!force;
+      panel.classList.toggle("fullscreen", enabled);
+      document.body.classList.toggle("chart-fullscreen", enabled);
+      button.textContent = enabled ? "Exit Fullscreen" : "Fullscreen";
+      button.setAttribute("aria-pressed", String(enabled));
+      redrawChartSoon();
+    }
+
+    async function loadChart(ticker = null, focusChart = false) {
+      if (ticker) $("chartTicker").value = ticker;
+      const selectedTicker = $("chartTicker").value.trim().toUpperCase();
+      if (!selectedTicker) {
+        $("chartStatus").textContent = "Enter a ticker";
+        if (focusChart) focusChartPanel();
+        return;
+      }
+      $("chartTicker").value = selectedTicker;
+      $("chartStatus").textContent = "Loading candles...";
+      $("chartStatus").className = "status-line";
+      const params = new URLSearchParams({
+        market: $("marketSelect").value,
+        cache_file: $("cacheFile").value.trim() || "stock_cache.sqlite",
+        provider: $("provider").value,
+        ticker: selectedTicker,
+        interval: $("chartInterval").value,
+        range: $("chartRange").value,
+        ma: selectedMaPeriods()
+      });
+      try {
+        const payload = await api(`/api/chart?${params.toString()}`);
+        renderCompanyProfile(payload.company || {}, payload.ticker || selectedTicker);
+        drawCandles(payload.candles || [], payload.ticker, payload.moving_averages || {});
+        $("chartStatus").textContent = payload.count
+          ? `${payload.ticker} ${payload.interval} candles, ${payload.start} to ${payload.end}`
+          : `${payload.ticker || selectedTicker}: no cached candles`;
+      } catch (error) {
+        renderCompanyProfile({}, selectedTicker);
+        $("chartStatus").textContent = error.message;
+        $("chartStatus").className = "status-line bad";
+      } finally {
+        if (focusChart) focusChartPanel();
+      }
+    }
+
+    function drawCandles(candles, ticker, movingAverages = {}) {
+      lastCandles = candles;
+      lastChartTicker = ticker || lastChartTicker;
+      lastMovingAverages = movingAverages || {};
+      const canvas = $("priceChart");
+      const box = canvas.parentElement;
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.max(320, box.clientWidth);
+      const height = Math.max(260, box.clientHeight);
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#0c1110";
+      ctx.fillRect(0, 0, width, height);
+
+      if (!candles.length) {
+        ctx.fillStyle = "#9fb0a8";
+        ctx.font = "13px Segoe UI, sans-serif";
+        ctx.fillText("No cached candle data for this selection.", 18, 32);
+        return;
+      }
+
+      const pad = { left: 58, right: 12, top: 44, bottom: 28 };
+      const volumeBandHeight = Math.max(70, Math.min(150, height * 0.22));
+      const volumeGap = 16;
+      const priceTop = pad.top;
+      const volumeBottom = height - pad.bottom;
+      const volumeTop = volumeBottom - volumeBandHeight;
+      const priceBottom = Math.max(priceTop + 80, volumeTop - volumeGap);
+      const chartWidth = width - pad.left - pad.right;
+      const priceHeight = priceBottom - priceTop;
+
+      const maValues = Object.values(movingAverages || {})
+        .flat()
+        .filter((value) => Number.isFinite(value));
+      const high = Math.max(...candles.map(c => c.high), ...maValues);
+      const low = Math.min(...candles.map(c => c.low), ...maValues);
+      const volumeMax = Math.max(...candles.map(c => c.volume || 0), 1);
+      const priceRange = Math.max(high - low, 0.000001);
+      const y = (price) => priceTop + ((high - price) / priceRange) * priceHeight;
+      const candleStep = chartWidth / candles.length;
+      const bodyWidth = Math.max(2, Math.min(11, candleStep * 0.62));
+
+      ctx.strokeStyle = "#24332d";
+      ctx.lineWidth = 1;
+      ctx.fillStyle = "#9fb0a8";
+      ctx.font = "11px Segoe UI, sans-serif";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+
+      for (let i = 0; i <= 4; i++) {
+        const py = priceTop + (priceHeight / 4) * i;
+        const price = high - (priceRange / 4) * i;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, py);
+        ctx.lineTo(width - pad.right, py);
+        ctx.stroke();
+        ctx.fillText(priceLabel(price), pad.left - 8, py);
+      }
+
+      ctx.strokeStyle = "#1f2d27";
+      ctx.beginPath();
+      ctx.moveTo(pad.left, volumeTop);
+      ctx.lineTo(width - pad.right, volumeTop);
+      ctx.stroke();
+      ctx.fillStyle = "#9fb0a8";
+      ctx.font = "11px Segoe UI, sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText("Volume", pad.left - 8, volumeTop + 12);
+
+      candles.forEach((candle, index) => {
+        const x = pad.left + index * candleStep + candleStep / 2;
+        const up = candle.close >= candle.open;
+        const color = up ? "#59c981" : "#e47b72";
+        const wickTop = y(candle.high);
+        const wickBottom = y(candle.low);
+        const openY = y(candle.open);
+        const closeY = y(candle.close);
+        const bodyTop = Math.min(openY, closeY);
+        const bodyHeight = Math.max(1, Math.abs(closeY - openY));
+        const volumeHeight = ((candle.volume || 0) / volumeMax) * (volumeBottom - volumeTop);
+
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(x, wickTop);
+        ctx.lineTo(x, wickBottom);
+        ctx.stroke();
+
+        ctx.fillStyle = color;
+        ctx.fillRect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyHeight);
+        ctx.globalAlpha = 0.35;
+        ctx.fillRect(x - bodyWidth / 2, volumeBottom - volumeHeight, bodyWidth, volumeHeight);
+        ctx.globalAlpha = 1;
+      });
+
+      Object.entries(movingAverages || {}).forEach(([period, values]) => {
+        if (!values.some((value) => Number.isFinite(value))) return;
+        ctx.strokeStyle = maColors[period] || "#f1f4f0";
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        let drawing = false;
+        values.forEach((value, index) => {
+          if (!Number.isFinite(value)) {
+            drawing = false;
+            return;
+          }
+          const x = pad.left + index * candleStep + candleStep / 2;
+          const py = y(value);
+          if (!drawing) {
+            ctx.moveTo(x, py);
+            drawing = true;
+          } else {
+            ctx.lineTo(x, py);
+          }
+        });
+        ctx.stroke();
+      });
+
+      ctx.fillStyle = "#edf4ef";
+      ctx.font = "13px Segoe UI, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText(`${ticker} ${$("chartInterval").value.toUpperCase()} ${$("chartRange").value.toUpperCase()}`, pad.left, 8);
+
+      let legendX = pad.left;
+      Object.entries(movingAverages || {}).forEach(([period, values]) => {
+        if (!values.some((value) => Number.isFinite(value))) return;
+        ctx.fillStyle = maColors[period] || "#f1f4f0";
+        ctx.fillRect(legendX, 28, 14, 2);
+        ctx.fillStyle = "#cbd8d1";
+        ctx.font = "11px Segoe UI, sans-serif";
+        ctx.fillText(`MA ${period}`, legendX + 18, 22);
+        legendX += 62;
+      });
+
+      ctx.fillStyle = "#9fb0a8";
+      ctx.font = "11px Segoe UI, sans-serif";
+      ctx.textAlign = "center";
+      const dateIndexes = [0, Math.floor(candles.length / 2), candles.length - 1];
+      [...new Set(dateIndexes)].forEach((index) => {
+        const x = pad.left + index * candleStep + candleStep / 2;
+        ctx.fillText(candles[index].date, x, height - 16);
+      });
+    }
+
+    function updateJob(job) {
+      $("fetchStatus").textContent = job.message || "Idle";
+      $("startFetch").disabled = !!job.running;
+      $("fetchLog").textContent = job.log || "";
+      $("modalFetchLog").textContent = job.log || "";
+      $("progressStage").textContent = job.stage || "Idle";
+      $("progressDetail").textContent = job.detail || job.message || "Idle";
+      const total = job.total || 0;
+      $("progressCount").textContent = total ? `${job.current || 0} / ${total}` : `${job.current || 0}`;
+      $("progressPercent").textContent = `${job.percent || 0}%`;
+      $("progressFill").style.width = `${job.percent || 0}%`;
+      $("closeProgress").disabled = !!job.running;
+      if (job.running || (!$("progressModal").classList.contains("hidden") && job.success !== null)) {
+        $("progressModal").classList.remove("hidden");
+      }
+      if (job.running) {
+        $("fetchStatus").className = "status-line warn";
+      } else if (job.success === false) {
+        $("fetchStatus").className = "status-line bad";
+      } else {
+        $("fetchStatus").className = "status-line";
+      }
+    }
+
+    async function pollJob() {
+      try {
+        const payload = await api("/api/job");
+        updateJob(payload.job);
+        if (payload.job.running) {
+          setTimeout(pollJob, 1200);
+        } else {
+          await refreshStatus();
+        }
+      } catch (error) {
+        $("fetchStatus").textContent = error.message;
+        $("fetchStatus").className = "status-line bad";
+      }
+    }
+
+    function updateFilterJob(job) {
+      const message = job.error || job.message || "Idle";
+      $("filterStatus").textContent = message;
+      $("runFilter").disabled = !!job.running;
+      $("progressStage").textContent = job.stage || "Filtering";
+      $("progressDetail").textContent = job.error || job.detail || job.message || "Filtering online market data...";
+      const total = job.total || 0;
+      $("progressCount").textContent = total ? `${job.current || 0} / ${total}` : `${job.current || 0}`;
+      $("progressPercent").textContent = `${job.percent || 0}%`;
+      $("progressFill").style.width = `${job.percent || 0}%`;
+      $("modalFetchLog").textContent = job.error || (job.summary && job.summary.error ? job.summary.error : "");
+      $("closeProgress").disabled = !!job.running;
+      if (job.running || (!$("progressModal").classList.contains("hidden") && job.success !== null)) {
+        $("progressModal").classList.remove("hidden");
+      }
+      if (job.running) {
+        $("filterStatus").className = "status-line warn";
+      } else if (job.success === false) {
+        $("filterStatus").className = "status-line bad";
+      } else {
+        $("filterStatus").className = "status-line";
+      }
+    }
+
+    async function pollFilterJob(jobId) {
+      try {
+        const query = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";
+        const payload = await api(`/api/filter/job${query}`);
+        updateFilterJob(payload.job);
+        if (payload.job.running) {
+          setTimeout(() => pollFilterJob(jobId), 1000);
+          return;
+        }
+        if (payload.job.success) {
+          const summary = payload.job.summary || {};
+          currentScanId = summary.scan_id || null;
+          renderResults(payload.job.results || [], currentScanId);
+          $("metricMatches").textContent = fmt.format((payload.job.results || []).length);
+          const scanText = currentScanId ? `scan ${currentScanId}, ` : "";
+          const youngerCount = summary.incomplete_ma_count || 0;
+          const tierCounts = summary.ma_tier_counts || {};
+          const youngerParts = Object.entries(tierCounts)
+            .filter(([label]) => label !== "Full")
+            .map(([label, count]) => `${count} ${label.toLowerCase()}`);
+          const youngerText = youngerCount ? `, younger groups: ${youngerParts.join(", ")}` : "";
+          $("resultMeta").textContent = `${scanText}${(payload.job.results || []).length} matches${youngerText} from ${summary.scanned_count || 0} scanned at ${summary.generated_at || ""}`;
+        }
+      } catch (error) {
+        $("filterStatus").textContent = error.message;
+        $("filterStatus").className = "status-line bad";
+      }
+    }
+
+    async function startFetch() {
+      $("fetchStatus").textContent = "Starting...";
+      $("progressModal").classList.remove("hidden");
+      $("progressStage").textContent = "Starting";
+      $("progressDetail").textContent = "Preparing fetch job...";
+      $("progressFill").style.width = "0%";
+      $("progressPercent").textContent = "0%";
+      $("progressCount").textContent = "0";
+      $("modalFetchLog").textContent = "";
+      const payload = {
+        market: $("marketSelect").value,
+        ticker_file: $("tickerFile").value.trim(),
+        provider: $("provider").value,
+        limit: activeLimit("useFetchLimit", "fetchLimit"),
+        years: numberValue("years"),
+        workers: numberValue("workers"),
+        cache_file: $("cacheFile").value.trim(),
+        output: currentMarketDefaults().output,
+        info_refresh_days: numberValue("infoRefresh"),
+        history_refresh_days: numberValue("historyRefresh"),
+        history_chunk_size: numberValue("historyChunkSize"),
+        history_pause_seconds: numberValue("historyPause"),
+        info_pause_seconds: numberValue("infoPause"),
+        rate_limit_pause_seconds: numberValue("ratePause"),
+        max_rate_limit_retries: numberValue("rateRetries"),
+        stop_on_rate_limit: $("stopOnRateLimit").checked,
+        prune_missing_tickers: $("pruneMissing").checked,
+        export_json: false
+      };
+      try {
+        const response = await api("/api/fetch", { method: "POST", body: JSON.stringify(payload) });
+        updateJob(response.job);
+        pollJob();
+      } catch (error) {
+        $("fetchStatus").textContent = error.message;
+        $("fetchStatus").className = "status-line bad";
+      }
+    }
+
+    async function runFilter() {
+      $("filterStatus").textContent = "Scanning...";
+      $("runFilter").disabled = true;
+      $("progressModal").classList.remove("hidden");
+      $("progressStage").textContent = "Filtering";
+      $("progressDetail").textContent = "Preparing online market scan...";
+      $("progressFill").style.width = "0%";
+      $("progressPercent").textContent = "0%";
+      $("progressCount").textContent = "0";
+      $("modalFetchLog").textContent = "";
+      const payload = {
+        market: $("marketSelect").value,
+        cache_file: $("cacheFile").value.trim(),
+        provider: $("provider").value,
+        years: numberValue("years"),
+        limit: $("useScanLimit").checked ? numberValue("scanLimit") : null,
+        query: $("query").value.trim(),
+        volume_multiplier: numberValue("volumeMultiplier"),
+        min_market_cap: numberValue("minCap"),
+        max_market_cap: numberValue("maxCap"),
+        lookback_weeks: numberValue("lookbackWeeks"),
+        ma_short: numberValue("maShort"),
+        ma_intermediate: numberValue("maIntermediate"),
+        ma_medium: numberValue("maMedium"),
+        ma_long: numberValue("maLong"),
+        price_avg_weeks: 1
+      };
+      try {
+        const response = await api("/api/filter/start", { method: "POST", body: JSON.stringify(payload) });
+        updateFilterJob(response.job);
+        pollFilterJob(response.job.id);
+      } catch (error) {
+        $("filterStatus").textContent = error.message;
+        $("filterStatus").className = "status-line bad";
+        $("runFilter").disabled = false;
+      }
+    }
+
+    function labelText(label) {
+      if (label === "winner") return "Winner";
+      if (label === "potential_winner") return "Potential Winner";
+      if (label === "maybe") return "Maybe";
+      if (label === "bad") return "Bad";
+      return "";
+    }
+
+    function labelButtons(row) {
+      const labels = [
+        ["winner", "Winner"],
+        ["potential_winner", "Potential"],
+        ["maybe", "Maybe"],
+        ["bad", "Bad"]
+      ];
+      return `<div class="label-cell">${labels.map(([value, text]) =>
+        `<button class="label-btn ${row.label === value ? "active" : ""}" data-label="${value}" data-ticker="${row.ticker}" title="Mark ${text}">${text}</button>`
+      ).join("")}</div>`;
+    }
+
+    function maDataText(row) {
+      if (row.ma_data_complete !== false) return "Full";
+      if (row.ma_history_label) {
+        const weeks = Number(row.available_ma_weeks);
+        return Number.isFinite(weeks) ? `${row.ma_history_label} (${weeks}w)` : row.ma_history_label;
+      }
+      const missing = Array.isArray(row.missing_ma_periods) ? row.missing_ma_periods : [];
+      if (!missing.length) return "Younger";
+      return `Younger: missing ${missing.map((item) => `${item.period}w`).join(", ")}`;
+    }
+
+    function applyRowLabel(ticker, label) {
+      const row = document.querySelector(`tr[data-ticker="${ticker}"]`);
+      if (!row) return;
+      row.classList.remove("label-winner", "label-potential_winner", "label-maybe", "label-bad");
+      if (label) row.classList.add(`label-${label}`);
+      row.querySelectorAll(".label-btn").forEach((button) => {
+        button.classList.toggle("active", button.dataset.label === label);
+      });
+    }
+
+    async function labelResult(ticker, label) {
+      if (!currentScanId) {
+        $("resultMeta").textContent = "Run a saved scan before labelling results.";
+        return;
+      }
+      const row = document.querySelector(`tr[data-ticker="${ticker}"]`);
+      const existing = row && row.querySelector(`.label-btn.active`);
+      const nextLabel = existing && existing.dataset.label === label ? "clear" : label;
+      try {
+        const response = await api("/api/label", {
+          method: "POST",
+          body: JSON.stringify({
+            market: $("marketSelect").value,
+            cache_file: $("cacheFile").value.trim() || "stock_cache.sqlite",
+            scan_id: currentScanId,
+            ticker,
+            label: nextLabel,
+            note: row?.dataset.note || null
+          })
+        });
+        applyRowLabel(ticker, response.label);
+        let centralMessage = response.central_ratings_file ? " - saved to central ratings DB" : "";
+        if (response.google_sheets?.sent) {
+          centralMessage += " and Google Sheets";
+        } else if (response.google_sheets?.queued) {
+          centralMessage += " - Google Sheets queued for retry";
+        } else if (response.google_sheets?.configured === false) {
+          centralMessage += " - Google Sheets not configured";
+        }
+        $("resultMeta").textContent = response.label
+          ? `${ticker} marked ${labelText(response.label)} in scan ${currentScanId}${centralMessage}`
+          : `${ticker} label cleared in scan ${currentScanId}${centralMessage}`;
+      } catch (error) {
+        $("resultMeta").textContent = error.message;
+        $("resultMeta").className = "status-line bad";
+      }
+    }
+
+    function renderResults(results, scanId = null) {
+      const body = $("resultsBody");
+      if (!results.length) {
+        body.innerHTML = `<tr><td colspan="8" style="text-align:left;color:var(--muted)">No matches.</td></tr>`;
+        return;
+      }
+      body.innerHTML = results.map((row) => {
+        const rowScanId = row.scan_id || scanId || "";
+        const rowClasses = [row.label ? `label-${row.label}` : "", row.ma_data_complete === false ? "incomplete-ma" : ""].filter(Boolean).join(" ");
+        return `<tr data-ticker="${row.ticker}" data-scan-id="${rowScanId}" data-note="${String(row.personal_note || "").replaceAll('"', '&quot;') }" class="${rowClasses}">
+          <td><a class="ticker chart-link" href="#" data-ticker="${row.ticker}">${row.ticker}</a></td>
+          <td>${row.date}</td>
+          <td>${Number(row.close_price).toFixed(2)}</td>
+          <td>${marketCap(row.market_cap)}</td>
+          <td>${fmt.format(Math.round(row.avg_volume || 0))}</td>
+          <td>${Number(row.volume_ratio).toFixed(2)}x</td>
+          <td>${maDataText(row)}</td>
+          <td>${labelButtons(row)} <button class="note-btn" data-ticker="${row.ticker}" type="button" title="Edit private note">Note</button></td>
+        </tr>`;
+      }).join("");
+      body.querySelectorAll(".chart-link").forEach((link) => {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          loadChart(link.dataset.ticker, true);
+        });
+      });
+      body.querySelectorAll(".label-btn").forEach((button) => {
+        button.addEventListener("click", () => labelResult(button.dataset.ticker, button.dataset.label));
+      });
+      body.querySelectorAll(".note-btn").forEach((button) => {
+        button.addEventListener("click", () => noteResult(button.dataset.ticker));
+      });
+    }
+
+    async function noteResult(ticker) {
+      const row = document.querySelector(`tr[data-ticker="${ticker}"]`);
+      if (!row || !currentScanId) return;
+      const note = window.prompt(`Private note for ${ticker}`, row.dataset.note || "");
+      if (note === null) return;
+      const active = row.querySelector(".label-btn.active");
+      try {
+        const response = await api("/api/label", {
+          method: "POST",
+          body: JSON.stringify({
+            market: $("marketSelect").value,
+            cache_file: $("cacheFile").value.trim() || "stock_cache.sqlite",
+            scan_id: currentScanId,
+            ticker,
+            label: active ? active.dataset.label : "maybe",
+            note
+          })
+        });
+        row.dataset.note = note;
+        $("resultMeta").textContent = `${ticker} private note saved for ${response.user?.email || "this account"}`;
+      } catch (error) {
+        $("resultMeta").textContent = error.message;
+        $("resultMeta").className = "status-line bad";
+      }
+    }
+
+    $("authSignIn").addEventListener("click", async () => {
+      try {
+        await authReady;
+        await firebaseAuthMethods.signInWithEmailAndPassword(firebaseAuth, $("authEmail").value.trim(), $("authPassword").value);
+        window.location.reload();
+      } catch (error) { $("topStatus").textContent = error.message; }
+    });
+    $("authCreate").addEventListener("click", async () => {
+      try {
+        await authReady;
+        await firebaseAuthMethods.createUserWithEmailAndPassword(firebaseAuth, $("authEmail").value.trim(), $("authPassword").value);
+        window.location.reload();
+      } catch (error) { $("topStatus").textContent = error.message; }
+    });
+    $("authSignOut").addEventListener("click", async () => {
+      await firebaseAuthMethods.signOut(firebaseAuth);
+      window.location.reload();
+    });
+
+    $("marketSelect").addEventListener("change", applyMarketDefaults);
+    $("refreshStatus").addEventListener("click", refreshStatus);
+    bindLimitToggle("useFetchLimit", "fetchLimit");
+    bindLimitToggle("useScanLimit", "scanLimit");
+    $("tickerFileSelect").addEventListener("change", () => {
+      if ($("tickerFileSelect").value) $("tickerFile").value = $("tickerFileSelect").value;
+    });
+    $("downloadUsTickers").addEventListener("click", downloadUsTickers);
+    $("startFetch").addEventListener("click", startFetch);
+    $("runFilter").addEventListener("click", runFilter);
+    $("loadChart").addEventListener("click", () => loadChart());
+    $("toggleChartFullscreen").addEventListener("click", () => toggleChartFullscreen());
+    $("chartInterval").addEventListener("change", () => loadChart());
+    $("chartRange").addEventListener("change", () => loadChart());
+    document.querySelectorAll(".ma-check").forEach((input) => {
+      input.addEventListener("change", () => loadChart());
+    });
+    $("chartTicker").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") loadChart();
+    });
+    window.addEventListener("resize", () => {
+      if (lastCandles.length) drawCandles(lastCandles, lastChartTicker, lastMovingAverages);
+    });
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && $("chartPanel").classList.contains("fullscreen")) {
+        toggleChartFullscreen(false);
+      }
+    });
+    $("closeProgress").addEventListener("click", () => $("progressModal").classList.add("hidden"));
+    initializeAppMode().finally(() => applyMarketDefaults());
+  </script>
+</body>
+</html>
