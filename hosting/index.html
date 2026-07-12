@@ -753,6 +753,7 @@
     let authReady = Promise.resolve(null);
     let firebaseAuth = null;
     let firebaseAuthMethods = null;
+    let appCheckTokenProvider = null;
     let currentUserProfile = null;
     async function initializeFirebaseAuth() {
       try {
@@ -760,11 +761,22 @@
         if (!response.ok) return null;
         const config = await response.json();
         if (!config.enabled || !config.apiKey || !config.appId) return null;
-        const [{ initializeApp }, authModule] = await Promise.all([
+        const [{ initializeApp }, authModule, appCheckModule] = await Promise.all([
           import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"),
-          import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js")
+          import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js"),
+          import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app-check.js")
         ]);
         const app = initializeApp(config);
+        if (config.appCheck?.enabled && config.appCheck.siteKey) {
+          const appCheck = appCheckModule.initializeAppCheck(app, {
+            provider: new appCheckModule.ReCaptchaEnterpriseProvider(config.appCheck.siteKey),
+            isTokenAutoRefreshEnabled: true
+          });
+          appCheckTokenProvider = async () => {
+            const token = await appCheckModule.getToken(appCheck, false);
+            return token?.token || "";
+          };
+        }
         const auth = authModule.getAuth(app);
         firebaseAuth = auth;
         firebaseAuthMethods = authModule;
@@ -919,6 +931,14 @@
       if (getToken) {
         const token = await getToken();
         if (token) headers.set("Authorization", `Bearer ${token}`);
+      }
+      if (appCheckTokenProvider) {
+        try {
+          const appCheckToken = await appCheckTokenProvider();
+          if (appCheckToken) headers.set("X-Firebase-AppCheck", appCheckToken);
+        } catch (error) {
+          console.warn("Could not get App Check token", error);
+        }
       }
       const response = await fetch(path, { ...options, headers });
       const responseText = await response.text();

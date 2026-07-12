@@ -12,6 +12,52 @@ query ListRecentScans($market: String!, $limit: Int!) @auth(level: USER, insecur
   )
 }
 
+query GetMarketStatus($market: String!) @auth(level: USER, insecureReason: "Market coverage status is shared read-only data for every signed-in app user.") {
+  status: _selectFirst(
+    sql: """
+      SELECT COUNT(DISTINCT ticker) AS ticker_count,
+             COUNT(*) AS history_rows,
+             MAX(price_date)::text AS latest_date
+      FROM price_history
+      WHERE market = $1
+    """,
+    params: [$market]
+  )
+}
+
+query GetLatestRefreshJobs($market: String!, $limit: Int!) @auth(level: USER, insecureReason: "Refresh status contains shared market-job progress, not private user data.") {
+  jobs: _select(
+    sql: """
+      SELECT id, market, provider, status, stage, requested_by_email,
+             total_tickers, completed_tickers, failed_tickers,
+             started_at_utc, finished_at_utc, result_json, error
+      FROM refresh_jobs
+      WHERE market = $1
+      ORDER BY started_at_utc DESC
+      LIMIT $2
+    """,
+    params: [$market, $limit]
+  )
+}
+
+query GetWeeklyMetricSnapshot($market: String!, $provider: String!, $ticker: String!, $limit: Int!) @auth(level: USER, insecureReason: "Derived market metrics are shared read-only data for every signed-in app user.") {
+  metrics: _select(
+    sql: """
+      SELECT ticker, week_date, close_price, previous_close_price,
+             weekly_change, weekly_change_percent, weekly_volume,
+             avg_volume_52, volume_ratio_52, price_avg_1,
+             ma_30, ma_90, ma_180, ma_360, ma_700,
+             available_weeks, history_weeks, market_cap, sector,
+             industry, refreshed_at_utc
+      FROM weekly_metrics
+      WHERE market = $1 AND provider = $2 AND ticker = $3
+      ORDER BY week_date DESC
+      LIMIT $4
+    """,
+    params: [$market, $provider, $ticker, $limit]
+  )
+}
+
 query GetScanResults($scanId: Int64!) @auth(level: USER) {
   results: _select(
     sql: """

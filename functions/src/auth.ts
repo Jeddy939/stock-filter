@@ -101,3 +101,19 @@ export function requireAdmin(user: UserContext): void {
 export function requireAnalyst(user: UserContext): void {
   requireRole(user, "analyst");
 }
+
+export async function requireAppCheck(req: Request): Promise<void> {
+  const required = ["1", "true", "yes"].includes(String(process.env.MONEYMAKER_REQUIRE_APP_CHECK ?? "false").toLowerCase());
+  if (!required) return;
+
+  const token = String(req.header("X-Firebase-AppCheck") ?? "").trim();
+  if (!token) {
+    throw new ApiError(401, "App Check token required");
+  }
+
+  try {
+    await admin.appCheck().verifyToken(token);
+  } catch (error) {
+    throw new ApiError(401, "Invalid App Check token");
+  }
+}

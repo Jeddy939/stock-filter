@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 import cors from "cors";
-import express, {type Request, type Response} from "express";
+import express, {type NextFunction, type Request, type Response} from "express";
 import {GoogleAuth, OAuth2Client} from "google-auth-library";
 import {Pool} from "pg";
-import {ApiError, requireAdmin, requireAnalyst, requireAuth, type UserContext} from "./auth";
+import {ApiError, requireAdmin, requireAnalyst, requireAppCheck, requireAuth, type UserContext} from "./auth";
 import {currentMarket, MARKET_DEFAULTS, rangeDays, VALID_LABELS, yahooUrl} from "./market";
 
 interface JobRow {
@@ -338,9 +338,24 @@ apiApp.get("/api/auth-config", asyncRoute(async (_req, res) => {
     authDomain: process.env.FIREBASE_AUTH_DOMAIN ?? "moneymaker-aedf7.firebaseapp.com",
     projectId: process.env.GOOGLE_CLOUD_PROJECT ?? "moneymaker-aedf7",
     storageBucket: process.env.FIREBASE_STORAGE_BUCKET ?? "",
-    appId: process.env.FIREBASE_APP_ID ?? ""
+    appId: process.env.FIREBASE_APP_ID ?? "",
+    appCheck: {
+      enabled: Boolean(process.env.FIREBASE_APPCHECK_SITE_KEY),
+      enforce: ["1", "true", "yes"].includes(String(process.env.MONEYMAKER_REQUIRE_APP_CHECK ?? "false").toLowerCase()),
+      siteKey: process.env.FIREBASE_APPCHECK_SITE_KEY ?? ""
+    }
   });
 }));
+
+apiApp.use("/api", (req: Request, res: Response, next: NextFunction) => {
+  requireAppCheck(req)
+    .then(() => next())
+    .catch((error) => {
+      const status = error instanceof ApiError ? error.status : 500;
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(status).json({ok: false, error: message, detail: message});
+    });
+});
 
 apiApp.get("/api/config", asyncRoute(async (req, res) => {
   await requireAuth(req, db());
