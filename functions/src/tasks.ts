@@ -15,7 +15,6 @@ interface RefreshTickerBatchPayload {
 
 export const refreshTickerBatch = onTaskDispatched<RefreshTickerBatchPayload>(
   {
-    omit: !["1", "true", "yes"].includes(String(process.env.MONEYMAKER_DEPLOY_TASK_FUNCTIONS ?? "false").toLowerCase()),
     region: "australia-southeast1",
     timeoutSeconds: 1800,
     memory: "512MiB",

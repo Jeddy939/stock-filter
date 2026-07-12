@@ -332,6 +332,60 @@ async function createRefreshTracking(
   return {id: refreshJobId, totalTickers: tickers.length, batchCount: batches.length, batches};
 }
 
+export function defaultScheduledFetchPayload(marketInput: unknown): Record<string, unknown> {
+  const market = currentMarket(marketInput);
+  return {
+    market,
+    ticker_file: market === "us" ? "us_tickers_nasdaqtrader.txt" : "asx_yfinance_valid_stocks_2026-05-11.txt",
+    provider: "yfinance",
+    years: 15,
+    workers: 1,
+    info_refresh_days: 30,
+    history_refresh_days: 5,
+    history_chunk_size: 50,
+    history_pause_seconds: 5,
+    info_pause_seconds: 1,
+    rate_limit_pause_seconds: 900,
+    max_rate_limit_retries: 3,
+    stop_on_rate_limit: true,
+    scheduled: true
+  };
+}
+
+export async function startMarketRefresh(
+  payload: Record<string, unknown>,
+  user?: UserContext
+): Promise<Record<string, unknown>> {
+  const refresh = await createRefreshTracking(payload, user);
+  return createFetchJob(payload, refresh);
+}
+
+export function defaultScanPayload(marketInput: unknown): Record<string, unknown> {
+  return {
+    market: currentMarket(marketInput),
+    provider: "yfinance",
+    limit: 0,
+    query: "",
+    volume_multiplier: 2,
+    avg_volume_weeks: 52,
+    price_avg_weeks: 1,
+    lookback_weeks: 1,
+    ma_periods: {
+      short: 90,
+      intermediate: 180,
+      medium: 360,
+      long: 700
+    },
+    min_market_cap: 0,
+    max_market_cap: 0,
+    scheduled: true
+  };
+}
+
+export async function startFilterJob(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return createJob("filter", payload);
+}
+
 async function requireScheduler(req: Request): Promise<void> {
   const audience = String(process.env.MONEYMAKER_SCHEDULER_AUDIENCE ?? "").trim();
   const expectedEmail = String(process.env.MONEYMAKER_SCHEDULER_SERVICE_ACCOUNT ?? "").trim();
@@ -784,16 +838,14 @@ apiApp.post("/api/fetch", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   requireAdmin(user);
   const payload = req.body ?? {};
-  const refresh = await createRefreshTracking(payload, user);
-  res.json(await createFetchJob(payload, refresh));
+  res.json(await startMarketRefresh(payload, user));
 }));
 
 apiApp.post("/api/admin/refresh-market", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   requireAdmin(user);
   const payload = req.body ?? {};
-  const refresh = await createRefreshTracking(payload, user);
-  res.json(await createFetchJob(payload, refresh));
+  res.json(await startMarketRefresh(payload, user));
 }));
 
 apiApp.post("/api/admin/import-sqlite", asyncRoute(async (req, res) => {
@@ -806,34 +858,23 @@ apiApp.post("/api/scheduled-fetch", asyncRoute(async (req, res) => {
   await requireScheduler(req);
   const market = currentMarket(req.body?.market);
   const scheduledPayload = {
-    market,
-    ticker_file: req.body?.ticker_file ?? (market === "us" ? "us_tickers_nasdaqtrader.txt" : "asx_yfinance_valid_stocks_2026-05-11.txt"),
-    provider: req.body?.provider ?? "yfinance",
-    years: Number(req.body?.years ?? 15),
-    workers: Number(req.body?.workers ?? 1),
-    info_refresh_days: Number(req.body?.info_refresh_days ?? 30),
-    history_refresh_days: Number(req.body?.history_refresh_days ?? 5),
-    history_chunk_size: Number(req.body?.history_chunk_size ?? 50),
-    history_pause_seconds: Number(req.body?.history_pause_seconds ?? 5),
-    info_pause_seconds: Number(req.body?.info_pause_seconds ?? 1),
-    rate_limit_pause_seconds: Number(req.body?.rate_limit_pause_seconds ?? 900),
-    max_rate_limit_retries: Number(req.body?.max_rate_limit_retries ?? 3),
-    stop_on_rate_limit: req.body?.stop_on_rate_limit ?? true
+    ...defaultScheduledFetchPayload(market),
+    ...(req.body ?? {}),
+    market
   };
-  const refresh = await createRefreshTracking(scheduledPayload);
-  res.json(await createFetchJob(scheduledPayload, refresh));
+  res.json(await startMarketRefresh(scheduledPayload));
 }));
 
 apiApp.post("/api/filter/start", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   requireAnalyst(user);
-  res.json(await createJob("filter", req.body ?? {}));
+  res.json(await startFilterJob(req.body ?? {}));
 }));
 
 apiApp.post("/api/admin/rebuild-default-scans", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   requireAdmin(user);
-  res.json(await createJob("filter", req.body ?? {}));
+  res.json(await startFilterJob(req.body ?? {}));
 }));
 
 apiApp.post("/api/filter", asyncRoute(async (req, res) => {

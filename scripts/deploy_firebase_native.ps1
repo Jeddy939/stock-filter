@@ -19,8 +19,8 @@ $AppId = "1:137012961005:web:4e50719b24c3bb382c76e4"
 $AppCheckSiteKey = if ($env:FIREBASE_APPCHECK_SITE_KEY) { $env:FIREBASE_APPCHECK_SITE_KEY } else { "" }
 $RequireAppCheck = if ($env:MONEYMAKER_REQUIRE_APP_CHECK) { $env:MONEYMAKER_REQUIRE_APP_CHECK } else { "false" }
 $UseDataConnect = if ($env:MONEYMAKER_USE_DATA_CONNECT) { $env:MONEYMAKER_USE_DATA_CONNECT } else { "false" }
-$UseTaskQueue = if ($env:MONEYMAKER_USE_TASK_QUEUE) { $env:MONEYMAKER_USE_TASK_QUEUE } else { "false" }
-$DeployTaskFunctions = if ($env:MONEYMAKER_DEPLOY_TASK_FUNCTIONS) { $env:MONEYMAKER_DEPLOY_TASK_FUNCTIONS } else { "false" }
+$UseTaskQueue = if ($env:MONEYMAKER_USE_TASK_QUEUE) { $env:MONEYMAKER_USE_TASK_QUEUE } else { "true" }
+$DeployTaskFunctions = if ($env:MONEYMAKER_DEPLOY_TASK_FUNCTIONS) { $env:MONEYMAKER_DEPLOY_TASK_FUNCTIONS } else { "true" }
 $Firebase = if (Get-Command firebase.cmd -ErrorAction SilentlyContinue) { "firebase.cmd" } else { "firebase" }
 $Gcloud = if (Get-Command gcloud.cmd -ErrorAction SilentlyContinue) { "gcloud.cmd" } else { "gcloud" }
 
@@ -96,9 +96,24 @@ try {
             "--set-env-vars", $functionEnvVars,
             "--set-secrets", "MONEYMAKER_DATABASE_URL=$DatabaseSecret`:latest"
         )
+        foreach ($scheduledService in @(
+            "scheduledrefreshasx",
+            "scheduledrefreshus",
+            "scheduleddefaultscanasx",
+            "scheduleddefaultscanus"
+        )) {
+            Invoke-Checked $Gcloud @(
+                "run", "services", "update", $scheduledService,
+                "--region", $Region,
+                "--project", $Project,
+                "--add-cloudsql-instances", $CloudSqlInstance,
+                "--set-env-vars", $functionEnvVars,
+                "--set-secrets", "MONEYMAKER_DATABASE_URL=$DatabaseSecret`:latest"
+            )
+        }
         if (@("1", "true", "yes") -contains $DeployTaskFunctions.ToLower()) {
             Invoke-Checked $Gcloud @(
-                "run", "services", "update", "refreshTickerBatch",
+                "run", "services", "update", "refreshtickerbatch",
                 "--region", $Region,
                 "--project", $Project,
                 "--add-cloudsql-instances", $CloudSqlInstance,

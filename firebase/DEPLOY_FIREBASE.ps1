@@ -18,7 +18,7 @@ $AppId = "1:137012961005:web:4e50719b24c3bb382c76e4"
 $AppCheckSiteKey = if ($env:FIREBASE_APPCHECK_SITE_KEY) { $env:FIREBASE_APPCHECK_SITE_KEY } else { "" }
 $RequireAppCheck = if ($env:MONEYMAKER_REQUIRE_APP_CHECK) { $env:MONEYMAKER_REQUIRE_APP_CHECK } else { "false" }
 $UseDataConnect = if ($env:MONEYMAKER_USE_DATA_CONNECT) { $env:MONEYMAKER_USE_DATA_CONNECT } else { "false" }
-$UseTaskQueue = if ($env:MONEYMAKER_USE_TASK_QUEUE) { $env:MONEYMAKER_USE_TASK_QUEUE } else { "false" }
+$UseTaskQueue = if ($env:MONEYMAKER_USE_TASK_QUEUE) { $env:MONEYMAKER_USE_TASK_QUEUE } else { "true" }
 $Gcloud = if (Get-Command gcloud.cmd -ErrorAction SilentlyContinue) { "gcloud.cmd" } else { "gcloud" }
 
 function Require-Command([string]$Name) {
