@@ -1,4 +1,4 @@
-"""Backfill weekly_price_history from the canonical daily price table."""
+"""Backfill weekly_metrics from the derived weekly_price_history table."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cloud_backend.weekly_cache import chunks, sync_weekly_history
+from cloud_backend.weekly_cache import chunks
 from cloud_backend.weekly_metrics import sync_weekly_metrics
 
 
@@ -30,18 +30,26 @@ def main() -> None:
             tickers = [
                 row[0]
                 for row in conn.execute(
-                    "SELECT ticker FROM companies WHERE market = %s ORDER BY ticker",
-                    (market,),
+                    """
+                    SELECT DISTINCT w.ticker
+                    FROM weekly_price_history w
+                    LEFT JOIN weekly_metrics m
+                      ON m.market = w.market
+                     AND m.provider = w.provider
+                     AND m.ticker = w.ticker
+                    WHERE w.market = %s AND w.provider = %s
+                      AND m.ticker IS NULL
+                    ORDER BY w.ticker
+                    """,
+                    (market, provider),
                 )
             ]
             total = 0
-            metric_total = 0
             for index, ticker_batch in enumerate(chunks(tickers), 1):
-                total += sync_weekly_history(conn, market, provider, ticker_batch)
-                metric_total += sync_weekly_metrics(conn, market, provider, ticker_batch)
+                total += sync_weekly_metrics(conn, market, provider, ticker_batch)
                 print(
                     f"{market.upper()} {provider}: {min(index * 100, len(tickers))}/{len(tickers)} "
-                    f"tickers, {total} weeks, {metric_total} metrics",
+                    f"tickers, {total} metrics",
                     flush=True,
                 )
 

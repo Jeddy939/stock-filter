@@ -35,6 +35,77 @@ type WeeklyPriceHistory @table(name: "weekly_price_history", key: ["market", "pr
   refreshedAt: Timestamp! @col(name: "refreshed_at_utc") @default(expr: "request.time")
 }
 
+type WeeklyMetric @table(name: "weekly_metrics", key: ["market", "provider", "ticker", "weekDate"]) {
+  market: String!
+  provider: String!
+  ticker: String!
+  weekDate: Date! @col(name: "week_date")
+  closePrice: Float @col(name: "close_price")
+  previousClosePrice: Float @col(name: "previous_close_price")
+  weeklyChange: Float @col(name: "weekly_change")
+  weeklyChangePercent: Float @col(name: "weekly_change_percent")
+  weeklyVolume: Float @col(name: "weekly_volume")
+  avgVolume52: Float @col(name: "avg_volume_52")
+  volumeRatio52: Float @col(name: "volume_ratio_52")
+  priceAvg1: Float @col(name: "price_avg_1")
+  ma30: Float @col(name: "ma_30")
+  ma90: Float @col(name: "ma_90")
+  ma180: Float @col(name: "ma_180")
+  ma360: Float @col(name: "ma_360")
+  ma700: Float @col(name: "ma_700")
+  availableWeeks: Int! @col(name: "available_weeks")
+  historyWeeks: Int! @col(name: "history_weeks")
+  marketCap: Float @col(name: "market_cap")
+  sector: String
+  industry: String
+  refreshedAt: Timestamp! @col(name: "refreshed_at_utc") @default(expr: "request.time")
+}
+
+type RefreshJob @table(name: "refresh_jobs", key: "id") {
+  id: UUID!
+  market: String!
+  provider: String!
+  status: String!
+  stage: String
+  requestedByUid: String @col(name: "requested_by_uid")
+  requestedByEmail: String @col(name: "requested_by_email")
+  totalTickers: Int @col(name: "total_tickers")
+  completedTickers: Int! @col(name: "completed_tickers")
+  failedTickers: Int! @col(name: "failed_tickers")
+  startedAt: Timestamp! @col(name: "started_at_utc") @default(expr: "request.time")
+  finishedAt: Timestamp @col(name: "finished_at_utc")
+  parameters: Any! @col(name: "parameters_json", dataType: "jsonb")
+  result: Any! @col(name: "result_json", dataType: "jsonb")
+  error: String
+}
+
+type RefreshBatch @table(name: "refresh_batches", key: "id") {
+  id: UUID!
+  refreshJobId: UUID! @col(name: "refresh_job_id")
+  market: String!
+  provider: String!
+  batchIndex: Int! @col(name: "batch_index")
+  tickers: Any! @col(name: "tickers_json", dataType: "jsonb")
+  status: String!
+  attempts: Int!
+  startedAt: Timestamp @col(name: "started_at_utc")
+  finishedAt: Timestamp @col(name: "finished_at_utc")
+  result: Any! @col(name: "result_json", dataType: "jsonb")
+  error: String
+}
+
+type FetchError @table(name: "fetch_errors", key: "id") {
+  id: Int64! @col(dataType: "bigserial")
+  refreshJobId: UUID @col(name: "refresh_job_id")
+  refreshBatchId: UUID @col(name: "refresh_batch_id")
+  market: String!
+  provider: String!
+  ticker: String!
+  errorType: String @col(name: "error_type")
+  errorMessage: String! @col(name: "error_message")
+  occurredAt: Timestamp! @col(name: "occurred_at_utc") @default(expr: "request.time")
+}
+
 type ScanRun @table(name: "scan_runs", key: "id") {
   id: Int64! @col(dataType: "bigserial")
   market: String!

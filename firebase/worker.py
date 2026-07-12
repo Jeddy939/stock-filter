@@ -13,7 +13,7 @@ import os
 import sys
 import time
 import traceback
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,7 @@ from moneymaker import fetcher
 from firebase.migrate_sqlite_to_postgres import import_cache
 from cloud_backend.postgres_screener import run_postgres_filter
 from cloud_backend.weekly_cache import sync_weekly_history
+from cloud_backend.weekly_metrics import sync_weekly_metrics
 
 
 def job_id() -> str:
@@ -49,6 +50,51 @@ def update_job(**values: Any) -> None:
     with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
         with conn.cursor() as cur:
             cur.execute(f"UPDATE job_runs SET {assignments} WHERE id = %s", (*values.values(), job_id()))
+        conn.commit()
+
+
+def update_refresh_job(refresh_job_id: str, **values: Any) -> None:
+    if not refresh_job_id:
+        return
+    assignments = ", ".join(f"{key} = %s" for key in values)
+    with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE refresh_jobs SET {assignments} WHERE id = %s", (*values.values(), refresh_job_id))
+        conn.commit()
+
+
+def mark_refresh_batches(refresh_job_id: str, status: str, error: str | None = None) -> None:
+    if not refresh_job_id:
+        return
+    with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            if status == "running":
+                cur.execute(
+                    """
+                    UPDATE refresh_batches
+                    SET status = 'running', attempts = attempts + 1, started_at_utc = COALESCE(started_at_utc, now())
+                    WHERE refresh_job_id = %s AND status = 'queued'
+                    """,
+                    (refresh_job_id,),
+                )
+            elif status == "succeeded":
+                cur.execute(
+                    """
+                    UPDATE refresh_batches
+                    SET status = 'succeeded', finished_at_utc = now()
+                    WHERE refresh_job_id = %s AND status IN ('queued', 'running')
+                    """,
+                    (refresh_job_id,),
+                )
+            elif status == "failed":
+                cur.execute(
+                    """
+                    UPDATE refresh_batches
+                    SET status = 'failed', finished_at_utc = now(), error = %s
+                    WHERE refresh_job_id = %s AND status IN ('queued', 'running')
+                    """,
+                    (error, refresh_job_id),
+                )
         conn.commit()
 
 
@@ -89,6 +135,7 @@ def upload_checkpoint(market: str, path: Path) -> None:
 def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
     market = str(data.get("market") or "asx").lower()
     provider = fetcher.normalize_provider(data.get("provider") or fetcher.DEFAULT_PROVIDER)
+    refresh_job_id = str(data.get("refresh_job_id") or "").strip()
     cache = checkpoint_path(market)
     download_checkpoint(market, cache)
     ticker_file = str(data.get("ticker_file") or (
@@ -97,6 +144,13 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
     ticker_path = ROOT / ticker_file if not Path(ticker_file).is_absolute() else Path(ticker_file)
     requested_tickers = fetcher.get_tickers_from_file(str(ticker_path))
     requested_tickers = fetcher.apply_ticker_limit(requested_tickers, data.get("limit"))
+    update_refresh_job(
+        refresh_job_id,
+        status="running",
+        stage="Fetching",
+        total_tickers=len(requested_tickers),
+    )
+    mark_refresh_batches(refresh_job_id, "running")
     with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT DISTINCT ticker FROM price_history WHERE market = %s", (market,))
@@ -146,6 +200,7 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
         )
         incremental_tickers = set(requested_tickers) - full_tickers
         weekly_rows = sync_weekly_history(conn, market, provider, full_tickers)
+        metric_rows = sync_weekly_metrics(conn, market, provider, full_tickers)
         weekly_rows += sync_weekly_history(
             conn,
             market,
@@ -153,8 +208,25 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
             incremental_tickers,
             start_date=(date.today() - timedelta(days=overlap_days + 7)),
         )
+        metric_rows += sync_weekly_metrics(
+            conn,
+            market,
+            provider,
+            incremental_tickers,
+            start_date=(date.today() - timedelta(days=overlap_days + 7)),
+        )
         counts["weekly_prices"] = weekly_rows
+        counts["weekly_metrics"] = metric_rows
     upload_checkpoint(market, cache)
+    update_refresh_job(
+        refresh_job_id,
+        status="succeeded",
+        stage="Complete",
+        completed_tickers=len(requested_tickers),
+        finished_at_utc=datetime.now(timezone.utc),
+        result_json=Jsonb(counts),
+    )
+    mark_refresh_batches(refresh_job_id, "succeeded")
     return counts
 
 
@@ -198,6 +270,15 @@ def main() -> None:
     except Exception as exc:
         update_job(status="failed", stage="Failed", error=str(exc),
                    detail="".join(traceback.format_exception(exc))[-4000:])
+        refresh_job_id = str(data.get("refresh_job_id") or "").strip()
+        update_refresh_job(
+            refresh_job_id,
+            status="failed",
+            stage="Failed",
+            error=str(exc),
+            finished_at_utc=datetime.now(timezone.utc),
+        )
+        mark_refresh_batches(refresh_job_id, "failed", str(exc))
         raise
 
 

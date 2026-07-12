@@ -202,6 +202,75 @@ async function createJob(jobType: string, payload: Record<string, unknown>) {
   };
 }
 
+async function createRefreshTracking(
+  payload: Record<string, unknown>,
+  user?: UserContext
+): Promise<{id: string; totalTickers: number; batchCount: number}> {
+  const market = currentMarket(payload.market);
+  const provider = String(payload.provider ?? "yfinance");
+  const limit = Math.max(Number(payload.limit ?? 0), 0);
+  const batchSize = Math.min(Math.max(Number(payload.batch_size ?? payload.history_chunk_size ?? 100), 1), 500);
+  const tickerResult = await db().query(
+    `
+    SELECT ticker
+    FROM companies
+    WHERE market = $1
+    ORDER BY ticker
+    ${limit > 0 ? "LIMIT $2" : ""}
+    `,
+    limit > 0 ? [market, limit] : [market]
+  );
+  const tickers = tickerResult.rows.map((row) => String(row.ticker).toUpperCase()).filter(Boolean);
+  const refreshJobId = crypto.randomUUID();
+  const client = await db().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `
+      INSERT INTO refresh_jobs (
+        id, market, provider, status, stage, requested_by_uid,
+        requested_by_email, total_tickers, parameters_json
+      )
+      VALUES ($1, $2, $3, 'queued', 'Queued', $4, $5, $6, $7::jsonb)
+      `,
+      [
+        refreshJobId,
+        market,
+        provider,
+        user?.uid ?? null,
+        user?.email ?? null,
+        tickers.length,
+        JSON.stringify(payload)
+      ]
+    );
+    for (let start = 0; start < tickers.length; start += batchSize) {
+      await client.query(
+        `
+        INSERT INTO refresh_batches (
+          id, refresh_job_id, market, provider, batch_index, tickers_json, status
+        )
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'queued')
+        `,
+        [
+          crypto.randomUUID(),
+          refreshJobId,
+          market,
+          provider,
+          Math.floor(start / batchSize) + 1,
+          JSON.stringify(tickers.slice(start, start + batchSize))
+        ]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+  return {id: refreshJobId, totalTickers: tickers.length, batchCount: Math.ceil(tickers.length / batchSize)};
+}
+
 async function requireScheduler(req: Request): Promise<void> {
   const audience = String(process.env.MONEYMAKER_SCHEDULER_AUDIENCE ?? "").trim();
   const expectedEmail = String(process.env.MONEYMAKER_SCHEDULER_SERVICE_ACCOUNT ?? "").trim();
@@ -618,13 +687,17 @@ apiApp.post("/api/label", asyncRoute(async (req, res) => {
 apiApp.post("/api/fetch", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   requireAdmin(user);
-  res.json(await createJob("fetch", req.body ?? {}));
+  const payload = req.body ?? {};
+  const refresh = await createRefreshTracking(payload, user);
+  res.json(await createJob("fetch", {...payload, refresh_job_id: refresh.id}));
 }));
 
 apiApp.post("/api/admin/refresh-market", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   requireAdmin(user);
-  res.json(await createJob("fetch", req.body ?? {}));
+  const payload = req.body ?? {};
+  const refresh = await createRefreshTracking(payload, user);
+  res.json(await createJob("fetch", {...payload, refresh_job_id: refresh.id}));
 }));
 
 apiApp.post("/api/admin/import-sqlite", asyncRoute(async (req, res) => {
@@ -651,7 +724,8 @@ apiApp.post("/api/scheduled-fetch", asyncRoute(async (req, res) => {
     max_rate_limit_retries: Number(req.body?.max_rate_limit_retries ?? 3),
     stop_on_rate_limit: req.body?.stop_on_rate_limit ?? true
   };
-  res.json(await createJob("fetch", scheduledPayload));
+  const refresh = await createRefreshTracking(scheduledPayload);
+  res.json(await createJob("fetch", {...scheduledPayload, refresh_job_id: refresh.id}));
 }));
 
 apiApp.post("/api/filter/start", asyncRoute(async (req, res) => {

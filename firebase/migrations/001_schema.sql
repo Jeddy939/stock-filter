@@ -45,6 +45,96 @@ CREATE TABLE IF NOT EXISTS weekly_price_history (
 CREATE INDEX IF NOT EXISTS idx_weekly_price_history_lookup
     ON weekly_price_history (market, provider, ticker, week_date DESC);
 
+-- Compact per-stock/week metrics used by interactive scans. These values are
+-- derived from weekly_price_history and can be rebuilt at any time.
+CREATE TABLE IF NOT EXISTS weekly_metrics (
+    market TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    week_date DATE NOT NULL,
+    close_price DOUBLE PRECISION,
+    previous_close_price DOUBLE PRECISION,
+    weekly_change DOUBLE PRECISION,
+    weekly_change_percent DOUBLE PRECISION,
+    weekly_volume DOUBLE PRECISION,
+    avg_volume_52 DOUBLE PRECISION,
+    volume_ratio_52 DOUBLE PRECISION,
+    price_avg_1 DOUBLE PRECISION,
+    ma_30 DOUBLE PRECISION,
+    ma_90 DOUBLE PRECISION,
+    ma_180 DOUBLE PRECISION,
+    ma_360 DOUBLE PRECISION,
+    ma_700 DOUBLE PRECISION,
+    available_weeks INTEGER NOT NULL DEFAULT 0,
+    history_weeks INTEGER NOT NULL DEFAULT 0,
+    market_cap DOUBLE PRECISION,
+    sector TEXT,
+    industry TEXT,
+    refreshed_at_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (market, provider, ticker, week_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_weekly_metrics_lookup
+    ON weekly_metrics (market, provider, ticker, week_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_weekly_metrics_scan
+    ON weekly_metrics (market, provider, week_date DESC, ticker);
+
+CREATE TABLE IF NOT EXISTS refresh_jobs (
+    id UUID PRIMARY KEY,
+    market TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'yfinance',
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+    stage TEXT,
+    requested_by_uid TEXT,
+    requested_by_email TEXT,
+    total_tickers INTEGER,
+    completed_tickers INTEGER NOT NULL DEFAULT 0,
+    failed_tickers INTEGER NOT NULL DEFAULT 0,
+    started_at_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at_utc TIMESTAMPTZ,
+    parameters_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    result_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_jobs_recent
+    ON refresh_jobs (started_at_utc DESC);
+
+CREATE TABLE IF NOT EXISTS refresh_batches (
+    id UUID PRIMARY KEY,
+    refresh_job_id UUID NOT NULL REFERENCES refresh_jobs(id) ON DELETE CASCADE,
+    market TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'yfinance',
+    batch_index INTEGER NOT NULL,
+    tickers_json JSONB NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'succeeded', 'failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    started_at_utc TIMESTAMPTZ,
+    finished_at_utc TIMESTAMPTZ,
+    result_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error TEXT,
+    UNIQUE (refresh_job_id, batch_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_batches_job
+    ON refresh_batches (refresh_job_id, batch_index);
+
+CREATE TABLE IF NOT EXISTS fetch_errors (
+    id BIGSERIAL PRIMARY KEY,
+    refresh_job_id UUID REFERENCES refresh_jobs(id) ON DELETE SET NULL,
+    refresh_batch_id UUID REFERENCES refresh_batches(id) ON DELETE SET NULL,
+    market TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'yfinance',
+    ticker TEXT NOT NULL,
+    error_type TEXT,
+    error_message TEXT NOT NULL,
+    occurred_at_utc TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fetch_errors_ticker
+    ON fetch_errors (market, provider, ticker, occurred_at_utc DESC);
+
 CREATE TABLE IF NOT EXISTS scan_runs (
     id BIGSERIAL PRIMARY KEY,
     market TEXT NOT NULL,
