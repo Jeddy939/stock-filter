@@ -3,7 +3,7 @@ import cors from "cors";
 import express, {type Request, type Response} from "express";
 import {GoogleAuth, OAuth2Client} from "google-auth-library";
 import {Pool} from "pg";
-import {ApiError, requireAuth, requireOwner, type UserContext} from "./auth";
+import {ApiError, requireAdmin, requireAnalyst, requireAuth, type UserContext} from "./auth";
 import {currentMarket, MARKET_DEFAULTS, rangeDays, VALID_LABELS, yahooUrl} from "./market";
 
 interface JobRow {
@@ -228,9 +228,14 @@ async function overlayUserAppraisals(user: UserContext, scanId: number, results:
   const tickers = results.map((row) => String(row.ticker ?? "").toUpperCase()).filter(Boolean);
   const appraisalResult = await db().query(
     `
-    SELECT ticker, label, note, status, appraised_at_utc
-    FROM user_appraisals
-    WHERE firebase_uid = $1 AND scan_id = $2 AND ticker = ANY($3)
+    SELECT up.ticker, up.label, un.note, up.status, up.updated_at_utc AS appraised_at_utc
+    FROM user_picks up
+    LEFT JOIN user_notes un
+      ON un.firebase_uid = up.firebase_uid
+     AND un.scan_id = up.scan_id
+     AND un.source_id = up.source_id
+     AND un.ticker = up.ticker
+    WHERE up.firebase_uid = $1 AND up.scan_id = $2 AND up.ticker = ANY($3)
     `,
     [user.uid, scanId, tickers]
   );
@@ -274,6 +279,11 @@ apiApp.get("/api/config", asyncRoute(async (req, res) => {
 }));
 
 apiApp.get("/api/profile", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  res.json({ok: true, user});
+}));
+
+apiApp.get("/api/user/profile", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   res.json({ok: true, user});
 }));
@@ -342,13 +352,89 @@ apiApp.get("/api/labels", asyncRoute(async (req, res) => {
   const scanId = Number(req.query.scan_id ?? 0);
   const result = await db().query(
     `
-    SELECT ticker, label, note, status, appraised_at_utc AS labeled_at_utc
-    FROM user_appraisals
-    WHERE firebase_uid = $1 AND scan_id = $2 ORDER BY ticker
+    SELECT up.ticker, up.label, un.note, up.status, up.updated_at_utc AS labeled_at_utc
+    FROM user_picks up
+    LEFT JOIN user_notes un
+      ON un.firebase_uid = up.firebase_uid
+     AND un.scan_id = up.scan_id
+     AND un.source_id = up.source_id
+     AND un.ticker = up.ticker
+    WHERE up.firebase_uid = $1 AND up.scan_id = $2
+    ORDER BY up.ticker
     `,
     [user.uid, scanId]
   );
   res.json({ok: true, labels: result.rows});
+}));
+
+apiApp.get("/api/user/picks", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  const market = String(req.query.market ?? "").trim().toLowerCase() || null;
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 250), 1), 1000);
+  const result = await db().query(
+    `
+    SELECT up.scan_id, up.source_id, up.market, up.ticker, up.label, up.status,
+           up.created_at_utc, up.updated_at_utc, un.note,
+           sr.rank, sr.signal_date, sr.close_price, sr.market_cap,
+           sr.avg_volume, sr.volume_ratio, sr.sector, sr.industry, sr.result_json
+    FROM user_picks up
+    LEFT JOIN user_notes un
+      ON un.firebase_uid = up.firebase_uid
+     AND un.scan_id = up.scan_id
+     AND un.source_id = up.source_id
+     AND un.ticker = up.ticker
+    LEFT JOIN scan_results sr
+      ON sr.scan_id = up.scan_id
+     AND sr.source_id = up.source_id
+     AND sr.ticker = up.ticker
+    WHERE up.firebase_uid = $1
+      AND ($2::text IS NULL OR up.market = $2)
+    ORDER BY up.updated_at_utc DESC
+    LIMIT $3
+    `,
+    [user.uid, market, limit]
+  );
+  res.json({ok: true, picks: result.rows});
+}));
+
+apiApp.get("/api/user/notes", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  const market = String(req.query.market ?? "").trim().toLowerCase() || null;
+  const ticker = String(req.query.ticker ?? "").trim().toUpperCase() || null;
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 250), 1), 1000);
+  const result = await db().query(
+    `
+    SELECT id, scan_id, source_id, market, ticker, note, created_at_utc, updated_at_utc
+    FROM user_notes
+    WHERE firebase_uid = $1
+      AND ($2::text IS NULL OR market = $2)
+      AND ($3::text IS NULL OR ticker = $3)
+    ORDER BY updated_at_utc DESC
+    LIMIT $4
+    `,
+    [user.uid, market, ticker, limit]
+  );
+  res.json({ok: true, notes: result.rows});
+}));
+
+apiApp.get("/api/user/rating-history", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  const ticker = String(req.query.ticker ?? "").trim().toUpperCase() || null;
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 250), 1), 1000);
+  const result = await db().query(
+    `
+    SELECT id, event_at_utc, action, market, scan_id, ticker, label, note,
+           rank, signal_date, close_price, market_cap, avg_volume,
+           volume_ratio, sector, industry, yahoo_url
+    FROM rating_events
+    WHERE firebase_uid = $1
+      AND ($2::text IS NULL OR ticker = $2)
+    ORDER BY event_at_utc DESC
+    LIMIT $3
+    `,
+    [user.uid, ticker, limit]
+  );
+  res.json({ok: true, events: result.rows});
 }));
 
 apiApp.get("/api/chart", asyncRoute(async (req, res) => {
@@ -408,9 +494,12 @@ apiApp.get("/api/chart", asyncRoute(async (req, res) => {
 
 apiApp.post("/api/label", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
+  requireAnalyst(user);
   const scanId = Number(req.body.scan_id ?? 0);
   const ticker = String(req.body.ticker ?? "").trim().toUpperCase();
   let label = String(req.body.label ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  const note = String(req.body.note ?? "").trim();
+  const status = String(req.body.status ?? "").trim() || null;
   if (!scanId || !ticker) throw new ApiError(400, "scan_id and ticker are required");
   if (["", "clear", "none", "unlabelled", "unlabeled"].includes(label)) {
     label = "";
@@ -430,10 +519,32 @@ apiApp.post("/api/label", asyncRoute(async (req, res) => {
 
     if (!label) {
       await client.query(
+        "DELETE FROM user_picks WHERE firebase_uid = $1 AND scan_id = $2 AND source_id = $3 AND ticker = $4",
+        [user.uid, scanId, result.source_id, ticker]
+      );
+      if (!note) {
+        await client.query(
+          "DELETE FROM user_notes WHERE firebase_uid = $1 AND scan_id = $2 AND source_id = $3 AND ticker = $4",
+          [user.uid, scanId, result.source_id, ticker]
+        );
+      }
+      await client.query(
         "DELETE FROM user_appraisals WHERE firebase_uid = $1 AND scan_id = $2 AND source_id = $3 AND ticker = $4",
         [user.uid, scanId, result.source_id, ticker]
       );
     } else {
+      await client.query(
+        `
+        INSERT INTO user_picks
+          (firebase_uid, scan_id, source_id, market, ticker, label, status, created_at_utc, updated_at_utc)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+        ON CONFLICT (firebase_uid, scan_id, source_id, ticker) DO UPDATE SET
+          label = EXCLUDED.label,
+          status = EXCLUDED.status,
+          updated_at_utc = EXCLUDED.updated_at_utc
+        `,
+        [user.uid, scanId, result.source_id, scan.market, ticker, label, status]
+      );
       await client.query(
         `
         INSERT INTO user_appraisals
@@ -445,7 +556,20 @@ apiApp.post("/api/label", asyncRoute(async (req, res) => {
           status = EXCLUDED.status,
           appraised_at_utc = EXCLUDED.appraised_at_utc
         `,
-        [user.uid, scanId, result.source_id, scan.market, ticker, label, req.body.note ?? null, req.body.status ?? null]
+        [user.uid, scanId, result.source_id, scan.market, ticker, label, note || null, status]
+      );
+    }
+    if (note) {
+      await client.query(
+        `
+        INSERT INTO user_notes
+          (firebase_uid, scan_id, source_id, market, ticker, note, created_at_utc, updated_at_utc)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+        ON CONFLICT (firebase_uid, scan_id, source_id, ticker) DO UPDATE SET
+          note = EXCLUDED.note,
+          updated_at_utc = EXCLUDED.updated_at_utc
+        `,
+        [user.uid, scanId, result.source_id, scan.market, ticker, note]
       );
     }
 
@@ -466,7 +590,7 @@ apiApp.post("/api/label", asyncRoute(async (req, res) => {
         scanId,
         ticker,
         label || null,
-        req.body.note ?? null,
+        note || null,
         result.rank,
         result.signal_date,
         result.close_price,
@@ -482,7 +606,7 @@ apiApp.post("/api/label", asyncRoute(async (req, res) => {
       ]
     );
     await client.query("COMMIT");
-    res.json({ok: true, scan_id: scanId, ticker, label: label || null, online: true, user});
+    res.json({ok: true, scan_id: scanId, ticker, label: label || null, note: note || null, online: true, user});
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -493,8 +617,20 @@ apiApp.post("/api/label", asyncRoute(async (req, res) => {
 
 apiApp.post("/api/fetch", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
-  requireOwner(user);
+  requireAdmin(user);
   res.json(await createJob("fetch", req.body ?? {}));
+}));
+
+apiApp.post("/api/admin/refresh-market", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  res.json(await createJob("fetch", req.body ?? {}));
+}));
+
+apiApp.post("/api/admin/import-sqlite", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  throw new ApiError(501, "SQLite imports must be uploaded to Storage and run through the admin migration worker");
 }));
 
 apiApp.post("/api/scheduled-fetch", asyncRoute(async (req, res) => {
@@ -519,7 +655,14 @@ apiApp.post("/api/scheduled-fetch", asyncRoute(async (req, res) => {
 }));
 
 apiApp.post("/api/filter/start", asyncRoute(async (req, res) => {
-  await requireAuth(req, db());
+  const user = await requireAuth(req, db());
+  requireAnalyst(user);
+  res.json(await createJob("filter", req.body ?? {}));
+}));
+
+apiApp.post("/api/admin/rebuild-default-scans", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
   res.json(await createJob("filter", req.body ?? {}));
 }));
 
@@ -532,6 +675,27 @@ apiApp.post("/api/filter", asyncRoute(async (req, res) => {
     payload.results = await overlayUserAppraisals(user, scanId, payload.results as Array<Record<string, unknown>>);
   }
   res.json({ok: true, ...payload});
+}));
+
+apiApp.get("/api/export/ratings", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  const market = String(req.query.market ?? "").trim().toLowerCase() || null;
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 5000), 1), 25000);
+  const result = await db().query(
+    `
+    SELECT id, event_at_utc, action, rated_by, user_email, firebase_uid,
+           market, scan_id, ticker, label, note, rank, signal_date,
+           close_price, market_cap, avg_volume, volume_ratio, sector,
+           industry, yahoo_url
+    FROM rating_events
+    WHERE ($1::text IS NULL OR market = $1)
+    ORDER BY event_at_utc DESC
+    LIMIT $2
+    `,
+    [market, limit]
+  );
+  res.json({ok: true, ratings: result.rows});
 }));
 
 apiApp.use((_req, res) => {

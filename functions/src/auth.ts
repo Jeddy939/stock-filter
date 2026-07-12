@@ -16,7 +16,7 @@ export interface UserContext {
   uid: string;
   email: string | null;
   display_name: string | null;
-  role: "owner" | "member";
+  role: "admin" | "analyst" | "viewer";
   status: string;
 }
 
@@ -26,7 +26,7 @@ function authRequired(): boolean {
 
 export async function requireAuth(req: Request, pool: Pool): Promise<UserContext> {
   if (!authRequired()) {
-    return {uid: "local", email: null, display_name: "Local user", role: "owner", status: "active"};
+    return {uid: "local", email: null, display_name: "Local user", role: "admin", status: "active"};
   }
 
   const header = String(req.header("authorization") ?? "");
@@ -46,11 +46,11 @@ export async function requireAuth(req: Request, pool: Pool): Promise<UserContext
       "SELECT role, status FROM app_user_invites WHERE email = $1",
       [email]
     );
-    const invite = inviteResult.rows[0] as {role?: "owner" | "member"; status?: string} | undefined;
+    const invite = inviteResult.rows[0] as {role?: string; status?: string} | undefined;
     if (invite?.status === "disabled") {
       throw new ApiError(403, "This account is disabled");
     }
-    const role = invite?.role ?? "member";
+    const role = normalizeRole(invite?.role);
 
     const profileResult = await pool.query(
       `
@@ -67,16 +67,37 @@ export async function requireAuth(req: Request, pool: Pool): Promise<UserContext
       `,
       [uid, email, displayName, role]
     );
-    const profile = profileResult.rows[0] as {role?: "owner" | "member"; status?: string} | undefined;
-    return {uid, email, display_name: displayName, role: profile?.role ?? role, status: profile?.status ?? "active"};
+    const profile = profileResult.rows[0] as {role?: string; status?: string} | undefined;
+    return {uid, email, display_name: displayName, role: normalizeRole(profile?.role ?? role), status: profile?.status ?? "active"};
   } catch (error) {
     if (error instanceof ApiError) throw error;
     throw new ApiError(401, "Invalid Firebase ID token");
   }
 }
 
-export function requireOwner(user: UserContext): void {
-  if (user.role !== "owner") {
-    throw new ApiError(403, "Owner access required");
+function normalizeRole(role: unknown): UserContext["role"] {
+  const value = String(role ?? "").toLowerCase();
+  if (value === "owner" || value === "admin") return "admin";
+  if (value === "member" || value === "analyst") return "analyst";
+  return "viewer";
+}
+
+const ROLE_RANK: Record<UserContext["role"], number> = {
+  viewer: 1,
+  analyst: 2,
+  admin: 3
+};
+
+export function requireRole(user: UserContext, role: UserContext["role"]): void {
+  if (ROLE_RANK[user.role] < ROLE_RANK[role]) {
+    throw new ApiError(403, `${role} access required`);
   }
+}
+
+export function requireAdmin(user: UserContext): void {
+  requireRole(user, "admin");
+}
+
+export function requireAnalyst(user: UserContext): void {
+  requireRole(user, "analyst");
 }

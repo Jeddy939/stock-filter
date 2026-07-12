@@ -12,6 +12,7 @@ $Region = "australia-southeast1"
 $FunctionName = "api"
 $CloudSqlInstance = "$Project`:$Region`:moneymaker-db"
 $DatabaseSecret = "moneymaker-database-url"
+$ApiUrl = "https://api-137012961005.australia-southeast1.run.app"
 $ApiKey = "AIzaSyA4tXcCkEv26i83WlM8k_dv-EubkjRCFRM"
 $AppId = "1:137012961005:web:4e50719b24c3bb382c76e4"
 $Firebase = if (Get-Command firebase.cmd -ErrorAction SilentlyContinue) { "firebase.cmd" } else { "firebase" }
@@ -50,7 +51,7 @@ try {
             "--region", $Region,
             "--project", $Project,
             "--add-cloudsql-instances", $CloudSqlInstance,
-            "--set-env-vars", "MONEYMAKER_REQUIRE_AUTH=true,MONEYMAKER_CLOUD_MODE=true,GOOGLE_CLOUD_PROJECT=$Project,MONEYMAKER_RUN_REGION=$Region,MONEYMAKER_FETCH_JOB=moneymaker-fetch,MONEYMAKER_FILTER_JOB=moneymaker-filter,FIREBASE_API_KEY=$ApiKey,FIREBASE_APP_ID=$AppId,FIREBASE_AUTH_DOMAIN=$Project.firebaseapp.com,FIREBASE_STORAGE_BUCKET=$Project.firebasestorage.app",
+            "--set-env-vars", "MONEYMAKER_REQUIRE_AUTH=true,MONEYMAKER_CLOUD_MODE=true,GOOGLE_CLOUD_PROJECT=$Project,MONEYMAKER_RUN_REGION=$Region,MONEYMAKER_FETCH_JOB=moneymaker-fetch,MONEYMAKER_FILTER_JOB=moneymaker-filter,MONEYMAKER_SCHEDULER_AUDIENCE=$ApiUrl,MONEYMAKER_SCHEDULER_SERVICE_ACCOUNT=moneymaker-scheduler@$Project.iam.gserviceaccount.com,FIREBASE_API_KEY=$ApiKey,FIREBASE_APP_ID=$AppId,FIREBASE_AUTH_DOMAIN=$Project.firebaseapp.com,FIREBASE_STORAGE_BUCKET=$Project.firebasestorage.app",
             "--set-secrets", "MONEYMAKER_DATABASE_URL=$DatabaseSecret`:latest"
         )
     }

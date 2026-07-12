@@ -97,6 +97,30 @@ type UserAppraisal @table(name: "user_appraisals", key: ["firebaseUid", "scanId"
   appraisedAt: Timestamp! @col(name: "appraised_at_utc") @default(expr: "request.time")
 }
 
+type UserPick @table(name: "user_picks", key: ["firebaseUid", "scanId", "sourceId", "ticker"]) {
+  firebaseUid: String! @col(name: "firebase_uid") @default(expr: "auth.uid")
+  scanId: Int64! @col(name: "scan_id")
+  sourceId: Int64! @col(name: "source_id")
+  market: String!
+  ticker: String!
+  label: String!
+  status: String
+  createdAt: Timestamp! @col(name: "created_at_utc") @default(expr: "request.time")
+  updatedAt: Timestamp! @col(name: "updated_at_utc") @default(expr: "request.time")
+}
+
+type UserNote @table(name: "user_notes", key: "id") {
+  id: Int64! @col(dataType: "bigserial")
+  firebaseUid: String! @col(name: "firebase_uid") @default(expr: "auth.uid")
+  scanId: Int64 @col(name: "scan_id")
+  sourceId: Int64 @col(name: "source_id")
+  market: String!
+  ticker: String!
+  note: String!
+  createdAt: Timestamp! @col(name: "created_at_utc") @default(expr: "request.time")
+  updatedAt: Timestamp! @col(name: "updated_at_utc") @default(expr: "request.time")
+}
+
 type RatingEvent @table(name: "rating_events", key: "id") {
   id: Int64! @col(dataType: "bigserial")
   sourceId: Int64 @col(name: "source_id")

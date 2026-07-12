@@ -4,31 +4,50 @@ mutation UpsertMyAppraisal(
   $market: String!,
   $ticker: String!,
   $label: String!,
-  $note: String,
   $status: String
 ) @auth(level: USER) {
   appraisal: _executeReturningFirst(
     sql: """
-      INSERT INTO user_appraisals
-        (firebase_uid, scan_id, source_id, market, ticker, label, note, status, appraised_at_utc)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      INSERT INTO user_picks
+        (firebase_uid, scan_id, source_id, market, ticker, label, status, created_at_utc, updated_at_utc)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
       ON CONFLICT (firebase_uid, scan_id, source_id, ticker) DO UPDATE SET
         label = EXCLUDED.label,
-        note = EXCLUDED.note,
         status = EXCLUDED.status,
-        appraised_at_utc = EXCLUDED.appraised_at_utc
-      RETURNING firebase_uid, scan_id, source_id, market, ticker, label, note, status, appraised_at_utc
+        updated_at_utc = EXCLUDED.updated_at_utc
+      RETURNING firebase_uid, scan_id, source_id, market, ticker, label, status, updated_at_utc
     """,
-    params: [{_expr: "auth.uid"}, $scanId, $sourceId, $market, $ticker, $label, $note, $status]
+    params: [{_expr: "auth.uid"}, $scanId, $sourceId, $market, $ticker, $label, $status]
   )
 }
 
 mutation ClearMyAppraisal($scanId: Int64!, $sourceId: Int64!, $ticker: String!) @auth(level: USER) {
   cleared: _execute(
     sql: """
-      DELETE FROM user_appraisals
+      DELETE FROM user_picks
       WHERE firebase_uid = $1 AND scan_id = $2 AND source_id = $3 AND ticker = $4
     """,
     params: [{_expr: "auth.uid"}, $scanId, $sourceId, $ticker]
+  )
+}
+
+mutation UpsertMyNote(
+  $scanId: Int64!,
+  $sourceId: Int64!,
+  $market: String!,
+  $ticker: String!,
+  $note: String!
+) @auth(level: USER) {
+  note: _executeReturningFirst(
+    sql: """
+      INSERT INTO user_notes
+        (firebase_uid, scan_id, source_id, market, ticker, note, created_at_utc, updated_at_utc)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+      ON CONFLICT (firebase_uid, scan_id, source_id, ticker) DO UPDATE SET
+        note = EXCLUDED.note,
+        updated_at_utc = EXCLUDED.updated_at_utc
+      RETURNING id, firebase_uid, scan_id, source_id, market, ticker, note, created_at_utc, updated_at_utc
+    """,
+    params: [{_expr: "auth.uid"}, $scanId, $sourceId, $market, $ticker, $note]
   )
 }

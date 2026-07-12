@@ -1,4 +1,4 @@
-query ListRecentScans($market: String!, $limit: Int!) @auth(level: USER) {
+query ListRecentScans($market: String!, $limit: Int!) @auth(level: USER, insecureReason: "Shared scan metadata is readable by every signed-in app user.") {
   scans: _select(
     sql: """
       SELECT id, source_id, created_at_utc, provider, query, scanned_count,
@@ -18,14 +18,19 @@ query GetScanResults($scanId: Int64!) @auth(level: USER) {
       SELECT sr.id, sr.scan_id, sr.source_id, sr.rank, sr.ticker,
              sr.signal_date, sr.close_price, sr.market_cap, sr.avg_volume,
              sr.volume_ratio, sr.sector, sr.industry, sr.result_json,
-             ua.label, ua.note AS personal_note, ua.status AS personal_status,
-             ua.appraised_at_utc
+             up.label, un.note AS personal_note, up.status AS personal_status,
+             up.updated_at_utc AS appraised_at_utc
       FROM scan_results sr
-      LEFT JOIN user_appraisals ua
-        ON ua.scan_id = sr.scan_id
-       AND ua.source_id = sr.source_id
-       AND ua.ticker = sr.ticker
-       AND ua.firebase_uid = $2
+      LEFT JOIN user_picks up
+        ON up.scan_id = sr.scan_id
+       AND up.source_id = sr.source_id
+       AND up.ticker = sr.ticker
+       AND up.firebase_uid = $2
+      LEFT JOIN user_notes un
+        ON un.scan_id = sr.scan_id
+       AND un.source_id = sr.source_id
+       AND un.ticker = sr.ticker
+       AND un.firebase_uid = $2
       WHERE sr.scan_id = $1
       ORDER BY sr.rank ASC
     """,
@@ -33,7 +38,7 @@ query GetScanResults($scanId: Int64!) @auth(level: USER) {
   )
 }
 
-query GetChartBars($market: String!, $provider: String!, $ticker: String!, $startDate: Date!) @auth(level: USER) {
+query GetChartBars($market: String!, $provider: String!, $ticker: String!, $startDate: Date!) @auth(level: USER, insecureReason: "Market candle data is shared read-only data for every signed-in app user.") {
   bars: _select(
     sql: """
       SELECT price_date, open_price, high_price, low_price, close_price, volume
@@ -45,7 +50,7 @@ query GetChartBars($market: String!, $provider: String!, $ticker: String!, $star
   )
 }
 
-query GetCompanyProfile($market: String!, $ticker: String!) @auth(level: USER) {
+query GetCompanyProfile($market: String!, $ticker: String!) @auth(level: USER, insecureReason: "Company profile data is shared read-only data for every signed-in app user.") {
   company: _selectFirst(
     sql: """
       SELECT market, ticker, info_json, fetched_at_utc
@@ -59,11 +64,73 @@ query GetCompanyProfile($market: String!, $ticker: String!) @auth(level: USER) {
 query GetMyAppraisals($scanId: Int64!) @auth(level: USER) {
   appraisals: _select(
     sql: """
-      SELECT ticker, label, note, status, appraised_at_utc
-      FROM user_appraisals
-      WHERE firebase_uid = $1 AND scan_id = $2
+      SELECT up.ticker, up.label, un.note, up.status, up.updated_at_utc AS appraised_at_utc
+      FROM user_picks up
+      LEFT JOIN user_notes un
+        ON un.firebase_uid = up.firebase_uid
+       AND un.scan_id = up.scan_id
+       AND un.source_id = up.source_id
+       AND un.ticker = up.ticker
+      WHERE up.firebase_uid = $1 AND up.scan_id = $2
       ORDER BY ticker ASC
     """,
     params: [{_expr: "auth.uid"}, $scanId]
+  )
+}
+
+query GetMySavedPicks($market: String, $limit: Int!) @auth(level: USER) {
+  picks: _select(
+    sql: """
+      SELECT up.scan_id, up.source_id, up.market, up.ticker, up.label, up.status,
+             up.created_at_utc, up.updated_at_utc, un.note,
+             sr.rank, sr.signal_date, sr.close_price, sr.market_cap,
+             sr.avg_volume, sr.volume_ratio, sr.sector, sr.industry, sr.result_json
+      FROM user_picks up
+      LEFT JOIN user_notes un
+        ON un.firebase_uid = up.firebase_uid
+       AND un.scan_id = up.scan_id
+       AND un.source_id = up.source_id
+       AND un.ticker = up.ticker
+      LEFT JOIN scan_results sr
+        ON sr.scan_id = up.scan_id
+       AND sr.source_id = up.source_id
+       AND sr.ticker = up.ticker
+      WHERE up.firebase_uid = $1
+        AND ($2::text IS NULL OR up.market = $2)
+      ORDER BY up.updated_at_utc DESC
+      LIMIT $3
+    """,
+    params: [{_expr: "auth.uid"}, $market, $limit]
+  )
+}
+
+query GetMyRatingHistory($ticker: String, $limit: Int!) @auth(level: USER) {
+  events: _select(
+    sql: """
+      SELECT id, event_at_utc, action, market, scan_id, ticker, label, note,
+             rank, signal_date, close_price, market_cap, avg_volume,
+             volume_ratio, sector, industry, yahoo_url
+      FROM rating_events
+      WHERE firebase_uid = $1
+        AND ($2::text IS NULL OR ticker = $2)
+      ORDER BY event_at_utc DESC
+      LIMIT $3
+    """,
+    params: [{_expr: "auth.uid"}, $ticker, $limit]
+  )
+}
+
+query GetMyNotes($market: String, $ticker: String, $limit: Int!) @auth(level: USER) {
+  notes: _select(
+    sql: """
+      SELECT id, scan_id, source_id, market, ticker, note, created_at_utc, updated_at_utc
+      FROM user_notes
+      WHERE firebase_uid = $1
+        AND ($2::text IS NULL OR market = $2)
+        AND ($3::text IS NULL OR ticker = $3)
+      ORDER BY updated_at_utc DESC
+      LIMIT $4
+    """,
+    params: [{_expr: "auth.uid"}, $market, $ticker, $limit]
   )
 }

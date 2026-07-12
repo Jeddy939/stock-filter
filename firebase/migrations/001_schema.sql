@@ -98,27 +98,41 @@ CREATE TABLE IF NOT EXISTS scan_labels (
 -- to the Firebase identity that created them.
 CREATE TABLE IF NOT EXISTS app_user_invites (
     email TEXT PRIMARY KEY,
-    role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'member')),
+    role TEXT NOT NULL DEFAULT 'analyst',
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('pending', 'active', 'disabled')),
     invited_at_utc TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE app_user_invites DROP CONSTRAINT IF EXISTS app_user_invites_role_check;
+ALTER TABLE app_user_invites ALTER COLUMN role SET DEFAULT 'analyst';
+UPDATE app_user_invites
+SET role = CASE role WHEN 'owner' THEN 'admin' WHEN 'member' THEN 'analyst' ELSE role END;
+ALTER TABLE app_user_invites ADD CONSTRAINT app_user_invites_role_check
+    CHECK (role IN ('admin', 'analyst', 'viewer'));
+
 INSERT INTO app_user_invites (email, role)
 VALUES
-    ('mrbowcock@gmail.com', 'owner'),
-    ('brady.bowcock@gmail.com', 'member'),
-    ('damien.sundgren@gmail.com', 'member')
-ON CONFLICT (email) DO NOTHING;
+    ('mrbowcock@gmail.com', 'admin'),
+    ('brady.bowcock@gmail.com', 'analyst'),
+    ('damien.sundgren@gmail.com', 'analyst')
+ON CONFLICT (email) DO UPDATE SET role = EXCLUDED.role;
 
 CREATE TABLE IF NOT EXISTS user_profiles (
     firebase_uid TEXT PRIMARY KEY,
     email TEXT UNIQUE,
     display_name TEXT,
-    role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'member')),
+    role TEXT NOT NULL DEFAULT 'analyst',
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('pending', 'active', 'disabled')),
     created_at_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_seen_at_utc TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE user_profiles DROP CONSTRAINT IF EXISTS user_profiles_role_check;
+ALTER TABLE user_profiles ALTER COLUMN role SET DEFAULT 'viewer';
+UPDATE user_profiles
+SET role = CASE role WHEN 'owner' THEN 'admin' WHEN 'member' THEN 'analyst' ELSE role END;
+ALTER TABLE user_profiles ADD CONSTRAINT user_profiles_role_check
+    CHECK (role IN ('admin', 'analyst', 'viewer'));
 
 CREATE TABLE IF NOT EXISTS user_appraisals (
     firebase_uid TEXT NOT NULL REFERENCES user_profiles(firebase_uid) ON DELETE CASCADE,
@@ -135,6 +149,60 @@ CREATE TABLE IF NOT EXISTS user_appraisals (
 
 CREATE INDEX IF NOT EXISTS idx_user_appraisals_scan
     ON user_appraisals (firebase_uid, scan_id, ticker);
+
+CREATE TABLE IF NOT EXISTS user_picks (
+    firebase_uid TEXT NOT NULL REFERENCES user_profiles(firebase_uid) ON DELETE CASCADE,
+    scan_id BIGINT NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+    source_id BIGINT NOT NULL,
+    market TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    label TEXT NOT NULL CHECK (label IN ('winner', 'potential_winner', 'maybe', 'bad')),
+    status TEXT,
+    created_at_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (firebase_uid, scan_id, source_id, ticker)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_picks_user_updated
+    ON user_picks (firebase_uid, updated_at_utc DESC);
+
+CREATE INDEX IF NOT EXISTS idx_user_picks_scan
+    ON user_picks (firebase_uid, scan_id, ticker);
+
+CREATE TABLE IF NOT EXISTS user_notes (
+    id BIGSERIAL PRIMARY KEY,
+    firebase_uid TEXT NOT NULL REFERENCES user_profiles(firebase_uid) ON DELETE CASCADE,
+    scan_id BIGINT REFERENCES scan_runs(id) ON DELETE CASCADE,
+    source_id BIGINT,
+    market TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    note TEXT NOT NULL,
+    created_at_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (firebase_uid, scan_id, source_id, ticker)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_notes_user_updated
+    ON user_notes (firebase_uid, updated_at_utc DESC);
+
+INSERT INTO user_picks
+    (firebase_uid, scan_id, source_id, market, ticker, label, status, created_at_utc, updated_at_utc)
+SELECT firebase_uid, scan_id, source_id, market, ticker, label, status, appraised_at_utc, appraised_at_utc
+FROM user_appraisals
+WHERE label IS NOT NULL
+ON CONFLICT (firebase_uid, scan_id, source_id, ticker) DO UPDATE SET
+    label = EXCLUDED.label,
+    status = EXCLUDED.status,
+    updated_at_utc = EXCLUDED.updated_at_utc;
+
+INSERT INTO user_notes
+    (firebase_uid, scan_id, source_id, market, ticker, note, created_at_utc, updated_at_utc)
+SELECT firebase_uid, scan_id, source_id, market, ticker, note, appraised_at_utc, appraised_at_utc
+FROM user_appraisals
+WHERE note IS NOT NULL AND btrim(note) <> ''
+ON CONFLICT (firebase_uid, scan_id, source_id, ticker) DO UPDATE SET
+    note = EXCLUDED.note,
+    updated_at_utc = EXCLUDED.updated_at_utc;
 
 CREATE TABLE IF NOT EXISTS rating_events (
     id BIGSERIAL PRIMARY KEY,
