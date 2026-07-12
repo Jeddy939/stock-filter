@@ -464,6 +464,48 @@
       transition: width .15s ease;
     }
     .admin-actions { flex-wrap: wrap; }
+    .app-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #0e1318;
+    }
+    .app-tabs button {
+      min-height: 30px;
+      padding: 4px 9px;
+      border-color: transparent;
+      background: transparent;
+      font-size: 12px;
+    }
+    .app-tabs button.active {
+      border-color: #3b6452;
+      background: #173324;
+    }
+    .analysis-page {
+      min-height: calc(100vh - 58px);
+      padding: 16px;
+      background: var(--bg);
+    }
+    .analysis-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 0 0 14px;
+    }
+    .analysis-heading h2 { margin: 0; font-size: 18px; }
+    .analysis-tools { display: flex; gap: 8px; align-items: center; }
+    .analysis-tools select { width: 150px; }
+    .analysis-summary { margin-bottom: 14px; }
+    .analysis-summary table td, .analysis-summary table th { text-align: left; }
+    .analysis-picks table td:nth-child(5), .analysis-picks table td:nth-child(6),
+    .analysis-picks table td:nth-child(7), .analysis-picks table th:nth-child(5),
+    .analysis-picks table th:nth-child(6), .analysis-picks table th:nth-child(7) { text-align: right; }
+    .return-positive { color: var(--accent); }
+    .return-negative { color: var(--bad); }
+    .return-neutral { color: var(--muted); }
     body.cloud-mode .local-data-controls { display: none; }
     body.cloud-mode .online-source { display: flex; }
     body.cloud-mode main { grid-template-columns: minmax(270px, 320px) minmax(0, 1fr); }
@@ -474,6 +516,7 @@
       aside, body.cloud-mode aside { border-right: 0; border-bottom: 1px solid var(--line); }
       .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .chart-controls { grid-template-columns: 1fr 1fr; }
+      .analysis-page { padding: 12px; }
     }
     @media (max-width: 520px) {
       header {
@@ -490,6 +533,9 @@
       .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .chart-controls { grid-template-columns: 1fr; }
       .chart-box { height: 330px; }
+      .analysis-heading { align-items: flex-start; flex-direction: column; }
+      .analysis-tools { width: 100%; }
+      .analysis-tools select { flex: 1; width: auto; }
       main {
         min-height: calc(100vh - 82px);
       }
@@ -500,6 +546,10 @@
   <header>
     <h1>Moneymaker Stock Filter</h1>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+      <nav class="app-tabs" id="appTabs" aria-label="Application views" hidden>
+        <button id="marketTab" class="active" type="button" aria-pressed="true">Market</button>
+        <button id="analysisTab" type="button" aria-pressed="false">Analysis</button>
+      </nav>
       <span class="status-line" id="topStatus">Connecting to market data...</span>
       <span class="role-pill" id="authRole" hidden></span>
       <input id="authEmail" type="email" placeholder="Email" autocomplete="username" style="width:180px">
@@ -509,7 +559,7 @@
       <button id="authSignOut" type="button" hidden>Sign out</button>
     </div>
   </header>
-  <main>
+  <main id="marketMain">
     <aside>
       <div class="panel local-data-controls">
         <h2>Cache</h2>
@@ -788,6 +838,50 @@
     </section>
   </main>
 
+  <section class="analysis-page" id="analysisPage" hidden>
+    <div class="analysis-heading">
+      <h2>Rating Analysis</h2>
+      <div class="analysis-tools">
+        <select id="analysisMarket" aria-label="Analysis market">
+          <option value="all">All markets</option>
+          <option value="asx">ASX</option>
+          <option value="us">US</option>
+        </select>
+        <button id="refreshAnalysis" type="button">Refresh</button>
+      </div>
+    </div>
+    <div class="metrics analysis-metrics">
+      <div class="metric"><span>Active picks</span><strong id="analysisPickCount">-</strong></div>
+      <div class="metric"><span>Priced picks</span><strong id="analysisPricedCount">-</strong></div>
+      <div class="metric"><span>Positive picks</span><strong id="analysisPositiveRate">-</strong></div>
+      <div class="metric"><span>Average return</span><strong id="analysisAverageReturn">-</strong></div>
+    </div>
+    <div class="panel analysis-summary">
+      <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
+        <h2 style="margin:0">Performance by Appraisal</h2>
+        <span class="status-line" id="analysisStatus">Load analysis to view active appraisals.</span>
+      </div>
+      <div class="results-wrap">
+        <table>
+          <thead><tr><th>Appraisal</th><th>Picks</th><th>Priced</th><th>Positive</th><th>Hit Rate</th><th>Average Return</th><th>Median Return</th><th>Average Age</th></tr></thead>
+          <tbody id="analysisSummaryBody"><tr><td colspan="8" style="text-align:left;color:var(--muted)">No analysis loaded.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel analysis-picks">
+      <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
+        <h2 style="margin:0">Current Appraisals</h2>
+        <span class="status-line" id="analysisPickMeta"></span>
+      </div>
+      <div class="results-wrap">
+        <table>
+          <thead><tr><th>Market</th><th>Ticker</th><th>Appraisal</th><th>Selected</th><th>Signal</th><th>Latest</th><th>Return</th><th>Latest Bar</th></tr></thead>
+          <tbody id="analysisPicksBody"><tr><td colspan="8" style="text-align:left;color:var(--muted)">No appraisals loaded.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <div class="modal hidden" id="progressModal" role="dialog" aria-modal="true" aria-labelledby="progressTitle">
     <div class="progress-window">
       <div class="progress-head">
@@ -1025,6 +1119,7 @@
         $("authRole").textContent = role;
         $("authRole").hidden = false;
         $("adminPanel").hidden = role !== "admin";
+        $("appTabs").hidden = role !== "admin";
         const canRunScans = role === "admin" || role === "analyst";
         $("runFilter").disabled = !canRunScans;
         $("runFilter").title = canRunScans ? "" : "An analyst account is required to run a new scan";
@@ -1032,7 +1127,96 @@
       } catch (error) {
         $("authRole").hidden = true;
         $("adminPanel").hidden = true;
+        $("appTabs").hidden = true;
         console.warn("Could not load user profile", error);
+      }
+    }
+
+    function activateView(view) {
+      const analysis = view === "analysis";
+      $("marketMain").hidden = analysis;
+      $("analysisPage").hidden = !analysis;
+      $("marketTab").classList.toggle("active", !analysis);
+      $("marketTab").setAttribute("aria-pressed", String(!analysis));
+      $("analysisTab").classList.toggle("active", analysis);
+      $("analysisTab").setAttribute("aria-pressed", String(analysis));
+      if (analysis) loadAnalysis();
+    }
+
+    function returnText(value) {
+      const number = Number(value);
+      return Number.isFinite(number) ? `${number.toFixed(2)}%` : "-";
+    }
+
+    function returnClass(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "return-neutral";
+      return number > 0 ? "return-positive" : number < 0 ? "return-negative" : "return-neutral";
+    }
+
+    function renderAnalysis(summary, picks) {
+      const totalPicks = summary.reduce((total, row) => total + Number(row.pick_count || 0), 0);
+      const pricedPicks = summary.reduce((total, row) => total + Number(row.priced_count || 0), 0);
+      const positivePicks = summary.reduce((total, row) => total + Number(row.positive_count || 0), 0);
+      const weightedReturn = summary.reduce((total, row) =>
+        total + Number(row.average_return_percent || 0) * Number(row.priced_count || 0), 0);
+      $("analysisPickCount").textContent = fmt.format(totalPicks);
+      $("analysisPricedCount").textContent = fmt.format(pricedPicks);
+      $("analysisPositiveRate").textContent = pricedPicks ? `${((positivePicks / pricedPicks) * 100).toFixed(1)}%` : "-";
+      const averageReturn = pricedPicks ? weightedReturn / pricedPicks : null;
+      $("analysisAverageReturn").textContent = returnText(averageReturn);
+      $("analysisAverageReturn").className = returnClass(averageReturn);
+
+      $("analysisSummaryBody").innerHTML = summary.length ? summary.map((row) => {
+        const priced = Number(row.priced_count || 0);
+        const positive = Number(row.positive_count || 0);
+        const hitRate = priced ? `${((positive / priced) * 100).toFixed(1)}%` : "-";
+        return `<tr>
+          <td>${labelText(row.label)}</td><td>${fmt.format(Number(row.pick_count || 0))}</td>
+          <td>${fmt.format(priced)}</td><td>${fmt.format(positive)}</td><td>${hitRate}</td>
+          <td class="${returnClass(row.average_return_percent)}">${returnText(row.average_return_percent)}</td>
+          <td class="${returnClass(row.median_return_percent)}">${returnText(row.median_return_percent)}</td>
+          <td>${Number(row.average_age_days || 0).toFixed(0)}d</td>
+        </tr>`;
+      }).join("") : '<tr><td colspan="8" style="text-align:left;color:var(--muted)">No current appraisals with price history.</td></tr>';
+
+      $("analysisPicksBody").innerHTML = picks.length ? picks.map((row) => `<tr>
+        <td>${String(row.market || "").toUpperCase()}</td>
+        <td><a class="ticker analysis-chart-link" href="#" data-market="${row.market}" data-ticker="${row.ticker}">${row.ticker}</a></td>
+        <td>${labelText(row.label)}</td>
+        <td>${row.event_at_utc ? new Date(row.event_at_utc).toLocaleDateString() : "-"}</td>
+        <td>${Number.isFinite(Number(row.signal_price)) ? Number(row.signal_price).toFixed(2) : "-"}</td>
+        <td>${Number.isFinite(Number(row.latest_price)) ? Number(row.latest_price).toFixed(2) : "-"}</td>
+        <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
+        <td>${row.latest_date || "-"}</td>
+      </tr>`).join("") : '<tr><td colspan="8" style="text-align:left;color:var(--muted)">No active appraisals found.</td></tr>';
+      $("analysisPickMeta").textContent = `${fmt.format(picks.length)} active appraisals`;
+      document.querySelectorAll(".analysis-chart-link").forEach((link) => {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          $("marketSelect").value = link.dataset.market;
+          applyMarketDefaults();
+          activateView("market");
+          loadChart(link.dataset.ticker, true);
+        });
+      });
+    }
+
+    async function loadAnalysis() {
+      $("analysisStatus").textContent = "Loading online appraisal outcomes...";
+      $("analysisStatus").className = "status-line warn";
+      const market = encodeURIComponent($("analysisMarket").value);
+      try {
+        const [summaryPayload, picksPayload] = await Promise.all([
+          api(`/api/analysis/summary?market=${market}`),
+          api(`/api/analysis/picks?market=${market}&limit=250`)
+        ]);
+        renderAnalysis(summaryPayload.summary || [], picksPayload.picks || []);
+        $("analysisStatus").textContent = "Current price performance";
+        $("analysisStatus").className = "status-line ok";
+      } catch (error) {
+        $("analysisStatus").textContent = error.message;
+        $("analysisStatus").className = "status-line bad";
       }
     }
 
@@ -1786,6 +1970,10 @@
       window.location.reload();
     });
 
+    $("marketTab").addEventListener("click", () => activateView("market"));
+    $("analysisTab").addEventListener("click", () => activateView("analysis"));
+    $("refreshAnalysis").addEventListener("click", loadAnalysis);
+    $("analysisMarket").addEventListener("change", loadAnalysis);
     $("marketSelect").addEventListener("change", applyMarketDefaults);
     $("refreshStatus").addEventListener("click", refreshStatus);
     bindLimitToggle("useFetchLimit", "fetchLimit");

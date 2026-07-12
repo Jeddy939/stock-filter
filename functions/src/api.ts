@@ -773,6 +773,116 @@ apiApp.get("/api/user/rating-history", asyncRoute(async (req, res) => {
   res.json({ok: true, events: result.rows});
 }));
 
+apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  const requestedMarket = strictMarket(req.query.market, true);
+  const market = requestedMarket === "all" ? null : requestedMarket;
+  const result = await db().query(
+    `
+    WITH latest_labels AS (
+      SELECT DISTINCT ON (firebase_uid, market, ticker)
+        firebase_uid, user_email, market, ticker, label, event_at_utc, signal_date,
+        close_price AS signal_price
+      FROM rating_events
+      WHERE action = 'label'
+        AND label IS NOT NULL
+        AND ($1::text IS NULL OR market = $1)
+      ORDER BY firebase_uid, market, ticker, event_at_utc DESC, id DESC
+    ), performance AS (
+      SELECT
+        labelled.*,
+        latest.close_price AS latest_price,
+        latest.price_date AS latest_date,
+        CASE
+          WHEN labelled.signal_price > 0 AND latest.close_price IS NOT NULL
+          THEN ((latest.close_price - labelled.signal_price) / labelled.signal_price) * 100
+          ELSE NULL
+        END AS return_percent
+      FROM latest_labels labelled
+      LEFT JOIN LATERAL (
+        SELECT close_price, price_date
+        FROM price_history
+        WHERE market = labelled.market
+          AND ticker = labelled.ticker
+          AND provider = 'yfinance'
+          AND close_price IS NOT NULL
+        ORDER BY price_date DESC
+        LIMIT 1
+      ) latest ON TRUE
+    )
+    SELECT
+      label,
+      COUNT(*)::int AS pick_count,
+      COUNT(*) FILTER (WHERE return_percent IS NOT NULL)::int AS priced_count,
+      COUNT(*) FILTER (WHERE return_percent > 0)::int AS positive_count,
+      ROUND(AVG(return_percent)::numeric, 2) AS average_return_percent,
+      ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY return_percent)::numeric, 2) AS median_return_percent,
+      ROUND(AVG(EXTRACT(EPOCH FROM (NOW() - event_at_utc)) / 86400)::numeric, 1) AS average_age_days
+    FROM performance
+    GROUP BY label
+    ORDER BY CASE label
+      WHEN 'winner' THEN 1
+      WHEN 'potential_winner' THEN 2
+      WHEN 'maybe' THEN 3
+      WHEN 'bad' THEN 4
+      ELSE 5
+    END
+    `,
+    [market]
+  );
+  res.json({ok: true, market: requestedMarket, summary: result.rows});
+}));
+
+apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  const requestedMarket = strictMarket(req.query.market, true);
+  const market = requestedMarket === "all" ? null : requestedMarket;
+  const requestedLabel = String(req.query.label ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (requestedLabel && !VALID_LABELS.has(requestedLabel)) throw new ApiError(400, "Invalid rating label");
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 250), 1), 1000);
+  const result = await db().query(
+    `
+    WITH latest_labels AS (
+      SELECT DISTINCT ON (firebase_uid, market, ticker)
+        firebase_uid, user_email, market, ticker, label, event_at_utc, signal_date,
+        close_price AS signal_price
+      FROM rating_events
+      WHERE action = 'label'
+        AND label IS NOT NULL
+        AND ($1::text IS NULL OR market = $1)
+        AND ($2::text IS NULL OR label = $2)
+      ORDER BY firebase_uid, market, ticker, event_at_utc DESC, id DESC
+    )
+    SELECT
+      labelled.market, labelled.ticker, labelled.label, labelled.user_email,
+      labelled.event_at_utc, labelled.signal_date, labelled.signal_price,
+      latest.close_price AS latest_price, latest.price_date AS latest_date,
+      CASE
+        WHEN labelled.signal_price > 0 AND latest.close_price IS NOT NULL
+        THEN ROUND((((latest.close_price - labelled.signal_price) / labelled.signal_price) * 100)::numeric, 2)
+        ELSE NULL
+      END AS return_percent
+    FROM latest_labels labelled
+    LEFT JOIN LATERAL (
+      SELECT close_price, price_date
+      FROM price_history
+      WHERE market = labelled.market
+        AND ticker = labelled.ticker
+        AND provider = 'yfinance'
+        AND close_price IS NOT NULL
+      ORDER BY price_date DESC
+      LIMIT 1
+    ) latest ON TRUE
+    ORDER BY return_percent ASC NULLS LAST, labelled.event_at_utc DESC
+    LIMIT $3
+    `,
+    [market, requestedLabel || null, limit]
+  );
+  res.json({ok: true, market: requestedMarket, picks: result.rows});
+}));
+
 apiApp.get("/api/chart", asyncRoute(async (req, res) => {
   await requireAuth(req, db());
   const ticker = String(req.query.ticker ?? "").trim().toUpperCase();
