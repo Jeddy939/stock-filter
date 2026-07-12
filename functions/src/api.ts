@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import cors from "cors";
 import express, {type NextFunction, type Request, type Response} from "express";
 import {getFunctions} from "firebase-admin/functions";
+import {getStorage} from "firebase-admin/storage";
 import {OAuth2Client} from "google-auth-library";
 import {ApiError, requireAdmin, requireAnalyst, requireAppCheck, requireAuth, type UserContext} from "./auth";
 import {dispatchCloudRunJob} from "./cloudrun";
@@ -197,6 +198,29 @@ function storageObjectPath(value: unknown, allowedPrefixes: string[]): string {
 function optionalStorageObjectPath(value: unknown, allowedPrefixes: string[]): string | undefined {
   if (value === undefined || value === null || String(value).trim() === "") return undefined;
   return storageObjectPath(value, allowedPrefixes);
+}
+
+function storageBucketName(): string {
+  const bucket = String(
+    process.env.MONEYMAKER_STORAGE_BUCKET ?? process.env.FIREBASE_STORAGE_BUCKET ?? ""
+  ).trim();
+  if (!bucket) throw new ApiError(503, "Firebase Storage is not configured");
+  return bucket;
+}
+
+function sqliteFileExtension(value: unknown): ".sqlite" | ".sqlite3" | ".db" {
+  const name = String(value ?? "").trim().toLowerCase();
+  if (name.endsWith(".sqlite")) return ".sqlite";
+  if (name.endsWith(".sqlite3")) return ".sqlite3";
+  if (name.endsWith(".db")) return ".db";
+  throw new ApiError(400, "Choose a SQLite (.sqlite, .sqlite3, or .db) file");
+}
+
+function importUploadPath(market: "asx" | "us", uid: string, filename: unknown): string {
+  const extension = sqliteFileExtension(filename);
+  const safeUid = uid.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 48) || "user";
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `imports/sqlite/${market}/${timestamp}_${safeUid}_${crypto.randomUUID()}${extension}`;
 }
 
 function booleanValue(value: unknown, defaultValue: boolean): boolean {
@@ -605,6 +629,60 @@ apiApp.get("/api/scans", asyncRoute(async (req, res) => {
   res.json({ok: true, scans: result.rows});
 }));
 
+apiApp.get("/api/scan-results", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  const market = currentMarket(req.query.market);
+  const requestedScanId = Number(req.query.scan_id ?? 0);
+  const scanResult = requestedScanId
+    ? await db().query(
+      `SELECT id, source_id, created_at_utc, provider, query, scanned_count, result_count,
+              skipped_no_history, config_json
+       FROM scan_runs WHERE id = $1 AND market = $2`,
+      [requestedScanId, market]
+    )
+    : await db().query(
+      `SELECT id, source_id, created_at_utc, provider, query, scanned_count, result_count,
+              skipped_no_history, config_json
+       FROM scan_runs WHERE market = $1 ORDER BY created_at_utc DESC LIMIT 1`,
+      [market]
+    );
+  const scan = scanResult.rows[0];
+  if (!scan) throw new ApiError(404, "No shared scan is available for this market yet");
+
+  const rows = await db().query(
+    `
+    SELECT id, scan_id, source_id, rank, ticker, signal_date, close_price, market_cap,
+           avg_volume, volume_ratio, sector, industry, result_json
+    FROM scan_results
+    WHERE scan_id = $1
+    ORDER BY rank ASC
+    `,
+    [scan.id]
+  );
+  const results = rows.rows.map((row) => {
+    const raw = row.result_json;
+    const source = raw && typeof raw === "object" && !Array.isArray(raw)
+      ? raw as Record<string, unknown>
+      : {};
+    return {
+      ...source,
+      id: row.id,
+      scan_id: row.scan_id,
+      source_id: row.source_id,
+      rank: row.rank,
+      ticker: row.ticker,
+      date: source.date ?? (row.signal_date ? dateOnly(row.signal_date) : null),
+      close_price: row.close_price,
+      market_cap: row.market_cap,
+      avg_volume: row.avg_volume,
+      volume_ratio: row.volume_ratio,
+      sector: row.sector,
+      industry: row.industry
+    };
+  });
+  res.json({ok: true, scan, results: await overlayUserAppraisals(user, Number(scan.id), results)});
+}));
+
 apiApp.get("/api/labels", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   const scanId = Number(req.query.scan_id ?? 0);
@@ -899,7 +977,7 @@ apiApp.post("/api/admin/import-sqlite", asyncRoute(async (req, res) => {
   if (ratingsPath && !/\.(sqlite|sqlite3|db)$/i.test(ratingsPath)) {
     throw new ApiError(400, "Ratings import must point to a .sqlite, .sqlite3, or .db file");
   }
-  const market = strictMarket(body.market);
+  const market = strictMarket(body.market) as "asx" | "us";
   const payload = {
     market,
     storage_path: storagePath,
@@ -914,6 +992,49 @@ apiApp.post("/api/admin/import-sqlite", asyncRoute(async (req, res) => {
     requested_by_email: user.email
   };
   res.json(await createJob("import-sqlite", payload));
+}));
+
+apiApp.post("/api/admin/import-upload-url", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  const body = req.body ?? {};
+  const market = strictMarket(body.market) as "asx" | "us";
+  const fileName = String(body.file_name ?? body.fileName ?? "").trim();
+  sqliteFileExtension(fileName);
+  const byteSize = Number(body.size_bytes ?? body.sizeBytes ?? 0);
+  if (!Number.isFinite(byteSize) || byteSize < 1 || byteSize > 5 * 1024 * 1024 * 1024) {
+    throw new ApiError(400, "SQLite upload must be between 1 byte and 5 GB");
+  }
+
+  const storagePath = importUploadPath(market, user.uid, fileName);
+  const expiresAt = new Date(Date.now() + 20 * 60 * 1000);
+  const [uploadUrl] = await getStorage().bucket(storageBucketName()).file(storagePath).getSignedUrl({
+    version: "v4",
+    action: "write",
+    expires: expiresAt,
+    contentType: "application/x-sqlite3"
+  });
+  res.json({
+    ok: true,
+    storage_path: storagePath,
+    content_type: "application/x-sqlite3",
+    expires_at: expiresAt.toISOString(),
+    upload: {url: uploadUrl, method: "PUT"}
+  });
+}));
+
+apiApp.get("/api/admin/storage-download-url", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  const storagePath = storageObjectPath(req.query.path, ["exports/"]);
+  const expiresAt = new Date(Date.now() + 20 * 60 * 1000);
+  const [downloadUrl] = await getStorage().bucket(storageBucketName()).file(storagePath).getSignedUrl({
+    version: "v4",
+    action: "read",
+    expires: expiresAt,
+    responseDisposition: `attachment; filename="${storagePath.split("/").at(-1) ?? "moneymaker-export"}"`
+  });
+  res.json({ok: true, storage_path: storagePath, expires_at: expiresAt.toISOString(), download_url: downloadUrl});
 }));
 
 apiApp.post("/api/scheduled-fetch", asyncRoute(async (req, res) => {

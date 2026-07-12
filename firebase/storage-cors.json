@@ -1,0 +1,12 @@
+[
+  {
+    "origin": [
+      "https://moneymaker-aedf7.web.app",
+      "https://moneymaker-aedf7.firebaseapp.com",
+      "http://localhost:8000"
+    ],
+    "method": ["GET", "HEAD", "PUT"],
+    "responseHeader": ["Content-Type", "x-goog-resumable"],
+    "maxAgeSeconds": 3600
+  }
+]

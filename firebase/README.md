@@ -158,9 +158,29 @@ database credential:
 FIREBASE_API_KEY=...
 FIREBASE_APP_ID=...
 FIREBASE_AUTH_DOMAIN=moneymaker-aedf7.firebaseapp.com
-FIREBASE_STORAGE_BUCKET=...
+FIREBASE_STORAGE_BUCKET=moneymaker-aedf7-cache
+MONEYMAKER_STORAGE_BUCKET=moneymaker-aedf7-cache
 MONEYMAKER_REQUIRE_AUTH=true
 ```
+
+## Storage operations
+
+The deployed app uses the private `moneymaker-aedf7-cache` Cloud Storage bucket
+within the Firebase project. It keeps operational artifacts separate from the
+market refresh checkpoint:
+
+```text
+sqlite/<market>/...       resumable fetch checkpoint
+imports/sqlite/<market>/  owner-uploaded legacy SQLite databases
+exports/ratings/...       generated rating exports
+```
+
+The owner-only **Data Operations** panel asks the API for a short-lived signed
+upload URL, sends the selected SQLite file directly to Storage, then queues the
+import worker. The same panel queues rating exports and creates a short-lived
+download URL. `firebase/storage-cors.json` is applied by
+`scripts/deploy_firebase_native.ps1 -Hosting` so browser uploads are allowed
+only from the hosted app and local development URL.
 
 Enable Anonymous Authentication for the first private deployment, or replace
 the browser bootstrap with email/Google sign-in before inviting other users.

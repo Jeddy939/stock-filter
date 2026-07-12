@@ -436,14 +436,42 @@
       background: var(--accent);
       box-shadow: 0 0 0 3px rgba(69, 189, 130, .14);
     }
+    .role-pill {
+      color: #c6d9ce;
+      border: 1px solid #315344;
+      background: #102018;
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      text-transform: capitalize;
+    }
+    .admin-panel { border-color: #3b6452; }
+    .admin-panel h2 { color: #b7e5c9; }
+    .admin-status { display: block; min-height: 18px; white-space: normal; }
+    .upload-progress {
+      height: 7px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #0d1411;
+      margin-top: 10px;
+    }
+    .upload-progress > span {
+      display: block;
+      width: 0%;
+      height: 100%;
+      background: var(--accent-2);
+      transition: width .15s ease;
+    }
+    .admin-actions { flex-wrap: wrap; }
     body.cloud-mode .local-data-controls { display: none; }
     body.cloud-mode .online-source { display: flex; }
     body.cloud-mode main { grid-template-columns: minmax(270px, 320px) minmax(0, 1fr); }
     body.cloud-mode aside { padding: 12px; }
     body.cloud-mode .panel { margin-bottom: 10px; }
     @media (max-width: 940px) {
-      main { grid-template-columns: 1fr; }
-      aside { border-right: 0; border-bottom: 1px solid var(--line); }
+      main, body.cloud-mode main { grid-template-columns: 1fr; }
+      aside, body.cloud-mode aside { border-right: 0; border-bottom: 1px solid var(--line); }
       .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .chart-controls { grid-template-columns: 1fr 1fr; }
     }
@@ -459,6 +487,7 @@
       .progress-grid {
         grid-template-columns: 1fr;
       }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .chart-controls { grid-template-columns: 1fr; }
       .chart-box { height: 330px; }
       main {
@@ -472,6 +501,7 @@
     <h1>Moneymaker Stock Filter</h1>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
       <span class="status-line" id="topStatus">Connecting to market data...</span>
+      <span class="role-pill" id="authRole" hidden></span>
       <input id="authEmail" type="email" placeholder="Email" autocomplete="username" style="width:180px">
       <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password" style="width:140px">
       <button id="authSignIn" type="button">Sign in</button>
@@ -631,8 +661,40 @@
           Limit scan to first N tickers
         </label>
         <div class="actions">
+          <button id="loadSharedScan" type="button">Load latest</button>
           <button class="secondary" id="runFilter">Run Filter</button>
           <span class="status-line" id="filterStatus">Ready</span>
+        </div>
+      </div>
+
+      <div class="panel admin-panel" id="adminPanel" hidden>
+        <h2>Data Operations</h2>
+        <label for="importDatabaseFile">SQLite database</label>
+        <input id="importDatabaseFile" type="file" accept=".sqlite,.sqlite3,.db,application/x-sqlite3">
+        <label class="inline-check">
+          <input id="importRebuildWeekly" type="checkbox" checked>
+          Rebuild weekly scan metrics
+        </label>
+        <div class="actions admin-actions">
+          <button class="primary" id="startImport" type="button">Upload and Import</button>
+          <span class="status-line admin-status" id="importStatus">Select a database</span>
+        </div>
+        <div class="upload-progress" aria-label="Upload progress"><span id="importUploadFill"></span></div>
+        <div class="actions admin-actions">
+          <select id="exportMarket" aria-label="Ratings export market">
+            <option value="all">All ratings</option>
+            <option value="asx">ASX ratings</option>
+            <option value="us">US ratings</option>
+          </select>
+          <select id="exportFormat" aria-label="Ratings export format">
+            <option value="csv">CSV</option>
+            <option value="json">JSON</option>
+          </select>
+        </div>
+        <div class="actions admin-actions">
+          <button id="startRatingsExport" type="button">Export Ratings</button>
+          <button id="downloadLatestExport" type="button" hidden>Download Export</button>
+          <span class="status-line admin-status" id="exportStatus">No export queued</span>
         </div>
       </div>
 
@@ -805,6 +867,7 @@
     let lastChartTicker = "";
     let lastMovingAverages = {};
     let currentScanId = null;
+    let lastExportStoragePath = null;
     const maColors = {
       "30": "#f2c14e",
       "90": "#8dd7ff",
@@ -951,6 +1014,26 @@
       }
       if (!response.ok || !payload.ok) throw new Error(payload.detail || payload.error || "Request failed");
       return payload;
+    }
+
+    async function loadCurrentUserProfile() {
+      try {
+        const payload = await api("/api/user/profile");
+        currentUserProfile = payload;
+        const user = payload.user || {};
+        const role = user.role || "viewer";
+        $("authRole").textContent = role;
+        $("authRole").hidden = false;
+        $("adminPanel").hidden = role !== "admin";
+        const canRunScans = role === "admin" || role === "analyst";
+        $("runFilter").disabled = !canRunScans;
+        $("runFilter").title = canRunScans ? "" : "An analyst account is required to run a new scan";
+        if (user.email) $("topStatus").textContent = `Signed in as ${user.email}`;
+      } catch (error) {
+        $("authRole").hidden = true;
+        $("adminPanel").hidden = true;
+        console.warn("Could not load user profile", error);
+      }
     }
 
     async function initializeAppMode() {
@@ -1252,21 +1335,26 @@
       });
     }
 
-    function updateJob(job) {
-      $("fetchStatus").textContent = job.message || "Idle";
-      $("startFetch").disabled = !!job.running;
-      $("fetchLog").textContent = job.log || "";
-      $("modalFetchLog").textContent = job.log || "";
-      $("progressStage").textContent = job.stage || "Idle";
-      $("progressDetail").textContent = job.detail || job.message || "Idle";
+    function updateProgress(job, title) {
+      $("progressTitle").textContent = title;
+      $("progressStage").textContent = job.stage || "Working";
+      $("progressDetail").textContent = job.error || job.detail || job.message || "Working...";
       const total = job.total || 0;
       $("progressCount").textContent = total ? `${job.current || 0} / ${total}` : `${job.current || 0}`;
       $("progressPercent").textContent = `${job.percent || 0}%`;
       $("progressFill").style.width = `${job.percent || 0}%`;
+      $("modalFetchLog").textContent = job.log || job.error || (job.summary && job.summary.error ? job.summary.error : "");
       $("closeProgress").disabled = !!job.running;
       if (job.running || (!$("progressModal").classList.contains("hidden") && job.success !== null)) {
         $("progressModal").classList.remove("hidden");
       }
+    }
+
+    function updateJob(job) {
+      $("fetchStatus").textContent = job.message || "Idle";
+      $("startFetch").disabled = !!job.running;
+      $("fetchLog").textContent = job.log || "";
+      updateProgress(job, "Market Refresh");
       if (job.running) {
         $("fetchStatus").className = "status-line warn";
       } else if (job.success === false) {
@@ -1295,17 +1383,7 @@
       const message = job.error || job.message || "Idle";
       $("filterStatus").textContent = message;
       $("runFilter").disabled = !!job.running;
-      $("progressStage").textContent = job.stage || "Filtering";
-      $("progressDetail").textContent = job.error || job.detail || job.message || "Filtering online market data...";
-      const total = job.total || 0;
-      $("progressCount").textContent = total ? `${job.current || 0} / ${total}` : `${job.current || 0}`;
-      $("progressPercent").textContent = `${job.percent || 0}%`;
-      $("progressFill").style.width = `${job.percent || 0}%`;
-      $("modalFetchLog").textContent = job.error || (job.summary && job.summary.error ? job.summary.error : "");
-      $("closeProgress").disabled = !!job.running;
-      if (job.running || (!$("progressModal").classList.contains("hidden") && job.success !== null)) {
-        $("progressModal").classList.remove("hidden");
-      }
+      updateProgress(job, "Market Screen");
       if (job.running) {
         $("filterStatus").className = "status-line warn";
       } else if (job.success === false) {
@@ -1341,6 +1419,124 @@
       } catch (error) {
         $("filterStatus").textContent = error.message;
         $("filterStatus").className = "status-line bad";
+      }
+    }
+
+    function updateOperationalJob(job, type) {
+      const importJob = type === "import-sqlite";
+      const status = importJob ? $("importStatus") : $("exportStatus");
+      const button = importJob ? $("startImport") : $("startRatingsExport");
+      const title = importJob ? "SQLite Import" : "Ratings Export";
+      status.textContent = job.error || job.detail || job.message || "Idle";
+      status.className = `status-line admin-status ${job.success === false ? "bad" : job.running ? "warn" : ""}`;
+      button.disabled = !!job.running;
+      updateProgress(job, title);
+      if (!job.running && job.success && type === "export-ratings") {
+        const summary = job.summary || {};
+        lastExportStoragePath = summary.storage_path || null;
+        $("downloadLatestExport").hidden = !lastExportStoragePath;
+        if (lastExportStoragePath) status.textContent = `Export ready: ${lastExportStoragePath.split("/").pop()}`;
+      }
+    }
+
+    async function pollOperationalJob(type, jobId) {
+      try {
+        const payload = await api(`/api/job?type=${encodeURIComponent(type)}&job_id=${encodeURIComponent(jobId)}`);
+        updateOperationalJob(payload.job, type);
+        if (payload.job.running) {
+          setTimeout(() => pollOperationalJob(type, jobId), 1000);
+          return;
+        }
+        if (type === "import-sqlite" && payload.job.success) await refreshStatus();
+      } catch (error) {
+        const status = type === "import-sqlite" ? $("importStatus") : $("exportStatus");
+        status.textContent = error.message;
+        status.className = "status-line admin-status bad";
+        (type === "import-sqlite" ? $("startImport") : $("startRatingsExport")).disabled = false;
+      }
+    }
+
+    function uploadImportFile(url, file) {
+      return new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open("PUT", url, true);
+        request.setRequestHeader("Content-Type", "application/x-sqlite3");
+        request.upload.addEventListener("progress", (event) => {
+          if (!event.lengthComputable) return;
+          const percent = Math.round((event.loaded / event.total) * 100);
+          $("importUploadFill").style.width = `${percent}%`;
+          $("importStatus").textContent = `Uploading ${percent}%`;
+        });
+        request.addEventListener("error", () => reject(new Error("Storage upload failed")));
+        request.addEventListener("load", () => {
+          if (request.status >= 200 && request.status < 300) resolve();
+          else reject(new Error(`Storage upload failed (${request.status})`));
+        });
+        request.send(file);
+      });
+    }
+
+    async function startImport() {
+      const file = $("importDatabaseFile").files?.[0];
+      if (!file) {
+        $("importStatus").textContent = "Choose a SQLite database first";
+        $("importStatus").className = "status-line admin-status bad";
+        return;
+      }
+      $("startImport").disabled = true;
+      $("importUploadFill").style.width = "0%";
+      $("importStatus").textContent = "Preparing secure upload...";
+      $("importStatus").className = "status-line admin-status warn";
+      try {
+        const signed = await api("/api/admin/import-upload-url", {
+          method: "POST",
+          body: JSON.stringify({market: $("marketSelect").value, file_name: file.name, size_bytes: file.size})
+        });
+        await uploadImportFile(signed.upload.url, file);
+        $("importStatus").textContent = "Starting database import...";
+        const response = await api("/api/admin/import-sqlite", {
+          method: "POST",
+          body: JSON.stringify({
+            market: $("marketSelect").value,
+            storage_path: signed.storage_path,
+            rebuild_weekly: $("importRebuildWeekly").checked
+          })
+        });
+        updateOperationalJob(response.job, "import-sqlite");
+        pollOperationalJob("import-sqlite", response.job.id);
+      } catch (error) {
+        $("importStatus").textContent = error.message;
+        $("importStatus").className = "status-line admin-status bad";
+        $("startImport").disabled = false;
+      }
+    }
+
+    async function startRatingsExport() {
+      $("startRatingsExport").disabled = true;
+      $("exportStatus").textContent = "Starting export...";
+      $("exportStatus").className = "status-line admin-status warn";
+      try {
+        const response = await api("/api/export/ratings", {
+          method: "POST",
+          body: JSON.stringify({market: $("exportMarket").value, format: $("exportFormat").value})
+        });
+        updateOperationalJob(response.job, "export-ratings");
+        pollOperationalJob("export-ratings", response.job.id);
+      } catch (error) {
+        $("exportStatus").textContent = error.message;
+        $("exportStatus").className = "status-line admin-status bad";
+        $("startRatingsExport").disabled = false;
+      }
+    }
+
+    async function downloadLatestExport() {
+      if (!lastExportStoragePath) return;
+      try {
+        const payload = await api(`/api/admin/storage-download-url?path=${encodeURIComponent(lastExportStoragePath)}`);
+        window.open(payload.download_url, "_blank", "noopener,noreferrer");
+      } catch (error) {
+        $("exportStatus").textContent = error.message;
+        $("exportStatus").className = "status-line admin-status bad";
       }
     }
 
@@ -1421,6 +1617,25 @@
       }
     }
 
+    async function loadSharedScan() {
+      $("filterStatus").textContent = "Loading shared scan...";
+      $("filterStatus").className = "status-line warn";
+      try {
+        const market = encodeURIComponent($("marketSelect").value);
+        const payload = await api(`/api/scan-results?market=${market}`);
+        currentScanId = payload.scan?.id || null;
+        renderResults(payload.results || [], currentScanId);
+        $("metricMatches").textContent = fmt.format((payload.results || []).length);
+        const created = payload.scan?.created_at_utc ? new Date(payload.scan.created_at_utc).toLocaleString() : "";
+        $("resultMeta").textContent = `shared scan ${currentScanId || ""}, ${(payload.results || []).length} matches${created ? ` from ${created}` : ""}`;
+        $("filterStatus").textContent = "Shared scan loaded";
+        $("filterStatus").className = "status-line ok";
+      } catch (error) {
+        $("filterStatus").textContent = error.message;
+        $("filterStatus").className = "status-line bad";
+      }
+    }
+
     function labelText(label) {
       if (label === "winner") return "Winner";
       if (label === "potential_winner") return "Potential Winner";
@@ -1483,17 +1698,9 @@
           })
         });
         applyRowLabel(ticker, response.label);
-        let centralMessage = response.central_ratings_file ? " - saved to central ratings DB" : "";
-        if (response.google_sheets?.sent) {
-          centralMessage += " and Google Sheets";
-        } else if (response.google_sheets?.queued) {
-          centralMessage += " - Google Sheets queued for retry";
-        } else if (response.google_sheets?.configured === false) {
-          centralMessage += " - Google Sheets not configured";
-        }
         $("resultMeta").textContent = response.label
-          ? `${ticker} marked ${labelText(response.label)} in scan ${currentScanId}${centralMessage}`
-          : `${ticker} label cleared in scan ${currentScanId}${centralMessage}`;
+          ? `${ticker} marked ${labelText(response.label)} in scan ${currentScanId}`
+          : `${ticker} label cleared in scan ${currentScanId}`;
       } catch (error) {
         $("resultMeta").textContent = error.message;
         $("resultMeta").className = "status-line bad";
@@ -1588,7 +1795,11 @@
     });
     $("downloadUsTickers").addEventListener("click", downloadUsTickers);
     $("startFetch").addEventListener("click", startFetch);
+    $("loadSharedScan").addEventListener("click", loadSharedScan);
     $("runFilter").addEventListener("click", runFilter);
+    $("startImport").addEventListener("click", startImport);
+    $("startRatingsExport").addEventListener("click", startRatingsExport);
+    $("downloadLatestExport").addEventListener("click", downloadLatestExport);
     $("loadChart").addEventListener("click", () => loadChart());
     $("toggleChartFullscreen").addEventListener("click", () => toggleChartFullscreen());
     $("chartInterval").addEventListener("change", () => loadChart());
@@ -1608,7 +1819,10 @@
       }
     });
     $("closeProgress").addEventListener("click", () => $("progressModal").classList.add("hidden"));
-    initializeAppMode().finally(() => applyMarketDefaults());
+    initializeAppMode().finally(async () => {
+      await loadCurrentUserProfile();
+      applyMarketDefaults();
+    });
   </script>
 </body>
 </html>

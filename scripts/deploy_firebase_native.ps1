@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 
 $Project = "moneymaker-aedf7"
 $Region = "australia-southeast1"
+$StorageBucket = "$Project-cache"
 $FunctionName = "api"
 $CloudSqlInstance = "$Project`:$Region`:moneymaker-db"
 $DatabaseSecret = "moneymaker-database-url"
@@ -18,7 +19,7 @@ $ApiKey = "AIzaSyA4tXcCkEv26i83WlM8k_dv-EubkjRCFRM"
 $AppId = "1:137012961005:web:4e50719b24c3bb382c76e4"
 $AppCheckSiteKey = if ($env:FIREBASE_APPCHECK_SITE_KEY) { $env:FIREBASE_APPCHECK_SITE_KEY } else { "" }
 $RequireAppCheck = if ($env:MONEYMAKER_REQUIRE_APP_CHECK) { $env:MONEYMAKER_REQUIRE_APP_CHECK } else { "false" }
-$UseDataConnect = if ($env:MONEYMAKER_USE_DATA_CONNECT) { $env:MONEYMAKER_USE_DATA_CONNECT } else { "false" }
+$UseDataConnect = if ($env:MONEYMAKER_USE_DATA_CONNECT) { $env:MONEYMAKER_USE_DATA_CONNECT } else { "true" }
 $UseTaskQueue = if ($env:MONEYMAKER_USE_TASK_QUEUE) { $env:MONEYMAKER_USE_TASK_QUEUE } else { "true" }
 $DeployTaskFunctions = if ($env:MONEYMAKER_DEPLOY_TASK_FUNCTIONS) { $env:MONEYMAKER_DEPLOY_TASK_FUNCTIONS } else { "true" }
 $Firebase = if (Get-Command firebase.cmd -ErrorAction SilentlyContinue) { "firebase.cmd" } else { "firebase" }
@@ -87,7 +88,7 @@ try {
         $env:MONEYMAKER_DEPLOY_TASK_FUNCTIONS = $DeployTaskFunctions
         Invoke-Checked $Firebase @("functions:artifacts:setpolicy", "--location", $Region, "--days", "14", "--force", "--project", $Project)
         Invoke-Checked $Firebase @("deploy", "--only", "functions", "--project", $Project)
-        $functionEnvVars = "MONEYMAKER_REQUIRE_AUTH=true,MONEYMAKER_CLOUD_MODE=true,GOOGLE_CLOUD_PROJECT=$Project,MONEYMAKER_RUN_REGION=$Region,MONEYMAKER_FETCH_JOB=moneymaker-fetch,MONEYMAKER_FILTER_JOB=moneymaker-filter,MONEYMAKER_IMPORT_JOB=moneymaker-import,MONEYMAKER_EXPORT_JOB=moneymaker-export,MONEYMAKER_SCHEDULER_AUDIENCE=$ApiUrl,MONEYMAKER_SCHEDULER_SERVICE_ACCOUNT=moneymaker-scheduler@$Project.iam.gserviceaccount.com,FIREBASE_API_KEY=$ApiKey,FIREBASE_APP_ID=$AppId,FIREBASE_AUTH_DOMAIN=$Project.firebaseapp.com,FIREBASE_STORAGE_BUCKET=$Project.firebasestorage.app,MONEYMAKER_STORAGE_BUCKET=$Project.firebasestorage.app,FIREBASE_APPCHECK_SITE_KEY=$AppCheckSiteKey,MONEYMAKER_REQUIRE_APP_CHECK=$RequireAppCheck,MONEYMAKER_USE_DATA_CONNECT=$UseDataConnect,MONEYMAKER_DATACONNECT_SERVICE=moneymaker,MONEYMAKER_DATACONNECT_LOCATION=$Region,MONEYMAKER_USE_TASK_QUEUE=$UseTaskQueue"
+        $functionEnvVars = "MONEYMAKER_REQUIRE_AUTH=true,MONEYMAKER_CLOUD_MODE=true,GOOGLE_CLOUD_PROJECT=$Project,MONEYMAKER_RUN_REGION=$Region,MONEYMAKER_FETCH_JOB=moneymaker-fetch,MONEYMAKER_FILTER_JOB=moneymaker-filter,MONEYMAKER_IMPORT_JOB=moneymaker-import,MONEYMAKER_EXPORT_JOB=moneymaker-export,MONEYMAKER_SCHEDULER_AUDIENCE=$ApiUrl,MONEYMAKER_SCHEDULER_SERVICE_ACCOUNT=moneymaker-scheduler@$Project.iam.gserviceaccount.com,FIREBASE_API_KEY=$ApiKey,FIREBASE_APP_ID=$AppId,FIREBASE_AUTH_DOMAIN=$Project.firebaseapp.com,FIREBASE_STORAGE_BUCKET=$StorageBucket,MONEYMAKER_STORAGE_BUCKET=$StorageBucket,FIREBASE_APPCHECK_SITE_KEY=$AppCheckSiteKey,MONEYMAKER_REQUIRE_APP_CHECK=$RequireAppCheck,MONEYMAKER_USE_DATA_CONNECT=$UseDataConnect,MONEYMAKER_DATACONNECT_SERVICE=moneymaker,MONEYMAKER_DATACONNECT_LOCATION=$Region,MONEYMAKER_USE_TASK_QUEUE=$UseTaskQueue"
         Invoke-Checked $Gcloud @(
             "run", "services", "update", $FunctionName,
             "--region", $Region,
@@ -121,10 +122,23 @@ try {
                 "--set-secrets", "MONEYMAKER_DATABASE_URL=$DatabaseSecret`:latest"
             )
         }
+        $projectNumber = (& $Gcloud projects describe $Project --format="value(projectNumber)").Trim()
+        $runtimeServiceAccount = "$projectNumber-compute@developer.gserviceaccount.com"
+        Invoke-Checked $Gcloud @(
+            "iam", "service-accounts", "add-iam-policy-binding", $runtimeServiceAccount,
+            "--member=serviceAccount:$runtimeServiceAccount",
+            "--role=roles/iam.serviceAccountTokenCreator",
+            "--project", $Project
+        )
     }
 
     if ($Hosting) {
         Invoke-Checked $Firebase @("deploy", "--only", "hosting", "--project", $Project)
+        Invoke-Checked $Gcloud @(
+            "storage", "buckets", "update", "gs://$StorageBucket",
+            "--cors-file=firebase/storage-cors.json",
+            "--project", $Project
+        )
     }
 } finally {
     Pop-Location
