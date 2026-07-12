@@ -142,7 +142,8 @@ function movingAverage(values: Array<number | null>, period: number): Array<numb
 
 async function createJob(jobType: string, payload: Record<string, unknown>) {
   const jobId = crypto.randomUUID();
-  const market = currentMarket(payload.market);
+  const requestedMarket = String(payload.market ?? "").trim().toLowerCase();
+  const market = requestedMarket === "all" ? null : currentMarket(payload.market);
   const started = new Date();
   await db().query(
     `
@@ -180,6 +181,41 @@ async function createJob(jobType: string, payload: Record<string, unknown>) {
       result_json: []
     })
   };
+}
+
+function storageObjectPath(value: unknown, allowedPrefixes: string[]): string {
+  const path = String(value ?? "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!path || path.includes("..") || path.endsWith("/")) {
+    throw new ApiError(400, "A valid Storage object path is required");
+  }
+  if (!allowedPrefixes.some((prefix) => path.startsWith(prefix))) {
+    throw new ApiError(400, `Storage path must start with one of: ${allowedPrefixes.join(", ")}`);
+  }
+  return path;
+}
+
+function optionalStorageObjectPath(value: unknown, allowedPrefixes: string[]): string | undefined {
+  if (value === undefined || value === null || String(value).trim() === "") return undefined;
+  return storageObjectPath(value, allowedPrefixes);
+}
+
+function booleanValue(value: unknown, defaultValue: boolean): boolean {
+  if (value === undefined || value === null || value === "") return defaultValue;
+  if (typeof value === "boolean") return value;
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
+function positiveInt(value: unknown, defaultValue: number, min: number, max: number): number {
+  const parsed = Number(value ?? defaultValue);
+  if (!Number.isFinite(parsed)) return defaultValue;
+  return Math.min(Math.max(Math.trunc(parsed), min), max);
+}
+
+function strictMarket(value: unknown, allowAll = false): "asx" | "us" | "all" {
+  const market = String(value ?? "").trim().toLowerCase();
+  if (market === "asx" || market === "us") return market;
+  if (allowAll && (!market || market === "all")) return "all";
+  throw new ApiError(400, allowAll ? "Market must be asx, us, or all" : "Market must be asx or us");
 }
 
 async function createQueuedRefreshJob(
@@ -544,7 +580,10 @@ apiApp.get("/api/status", asyncRoute(async (req, res) => {
 
 apiApp.get("/api/job", asyncRoute(async (req, res) => {
   await requireAuth(req, db());
-  res.json({ok: true, job: jobPayload(await latestJob("fetch"))});
+  const jobType = String(req.query.type ?? "fetch").trim().toLowerCase();
+  const allowed = new Set(["fetch", "filter", "import-sqlite", "export-ratings"]);
+  if (!allowed.has(jobType)) throw new ApiError(400, "Unsupported job type");
+  res.json({ok: true, job: jobPayload(await latestJob(jobType, String(req.query.job_id ?? "") || undefined))});
 }));
 
 apiApp.get("/api/filter/job", asyncRoute(async (req, res) => {
@@ -851,7 +890,30 @@ apiApp.post("/api/admin/refresh-market", asyncRoute(async (req, res) => {
 apiApp.post("/api/admin/import-sqlite", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   requireAdmin(user);
-  throw new ApiError(501, "SQLite imports must be uploaded to Storage and run through the admin migration worker");
+  const body = req.body ?? {};
+  const storagePath = storageObjectPath(body.storage_path ?? body.storagePath, ["imports/"]);
+  if (!/\.(sqlite|sqlite3|db)$/i.test(storagePath)) {
+    throw new ApiError(400, "Storage import must point to a .sqlite, .sqlite3, or .db file");
+  }
+  const ratingsPath = optionalStorageObjectPath(body.ratings_storage_path ?? body.ratingsStoragePath, ["imports/"]);
+  if (ratingsPath && !/\.(sqlite|sqlite3|db)$/i.test(ratingsPath)) {
+    throw new ApiError(400, "Ratings import must point to a .sqlite, .sqlite3, or .db file");
+  }
+  const market = strictMarket(body.market);
+  const payload = {
+    market,
+    storage_path: storagePath,
+    ratings_storage_path: ratingsPath,
+    chunk_size: positiveInt(body.chunk_size ?? body.chunkSize, 5000, 100, 50000),
+    price_since: body.price_since ? String(body.price_since).trim() : undefined,
+    full_tickers: booleanValue(body.full_tickers ?? body.fullTickers, true),
+    resume: booleanValue(body.resume, true),
+    bulk_prices: booleanValue(body.bulk_prices ?? body.bulkPrices, true),
+    rebuild_weekly: booleanValue(body.rebuild_weekly ?? body.rebuildWeekly, true),
+    requested_by_uid: user.uid,
+    requested_by_email: user.email
+  };
+  res.json(await createJob("import-sqlite", payload));
 }));
 
 apiApp.post("/api/scheduled-fetch", asyncRoute(async (req, res) => {
@@ -907,6 +969,22 @@ apiApp.get("/api/export/ratings", asyncRoute(async (req, res) => {
     [market, limit]
   );
   res.json({ok: true, ratings: result.rows});
+}));
+
+apiApp.post("/api/export/ratings", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  const body = req.body ?? {};
+  const market = strictMarket(body.market, true);
+  const payload = {
+    market,
+    limit: positiveInt(body.limit, 25000, 1, 250000),
+    format: String(body.format ?? "csv").trim().toLowerCase() === "json" ? "json" : "csv",
+    storage_path: optionalStorageObjectPath(body.storage_path ?? body.storagePath, ["exports/"]),
+    requested_by_uid: user.uid,
+    requested_by_email: user.email
+  };
+  res.json(await createJob("export-ratings", payload));
 }));
 
 apiApp.use((_req, res) => {

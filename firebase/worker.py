@@ -8,6 +8,7 @@ to the online schema.
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import sys
@@ -27,7 +28,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from moneymaker import fetcher
-from firebase.migrate_sqlite_to_postgres import import_cache
+from firebase.migrate_sqlite_to_postgres import import_cache, import_ratings, sqlite_connection
 from cloud_backend.market_status import refresh_market_status
 from cloud_backend.postgres_screener import run_postgres_filter
 from cloud_backend.weekly_cache import sync_weekly_history
@@ -191,6 +192,43 @@ def upload_checkpoint(market: str, path: Path) -> None:
         return
     object_name = f"sqlite/{market}/stock_cache.sqlite"
     storage.Client().bucket(bucket_name).blob(object_name).upload_from_filename(str(path))
+
+
+def storage_bucket_name() -> str:
+    bucket_name = (
+        os.environ.get("MONEYMAKER_STORAGE_BUCKET", "").strip()
+        or os.environ.get("FIREBASE_STORAGE_BUCKET", "").strip()
+        or os.environ.get("MONEYMAKER_CACHE_BUCKET", "").strip()
+    )
+    if not bucket_name:
+        raise RuntimeError("MONEYMAKER_STORAGE_BUCKET or FIREBASE_STORAGE_BUCKET is required")
+    return bucket_name
+
+
+def storage_object_path(value: Any, allowed_prefixes: tuple[str, ...]) -> str:
+    object_name = str(value or "").strip().replace("\\", "/").lstrip("/")
+    if not object_name or ".." in object_name or object_name.endswith("/"):
+        raise RuntimeError("A valid Storage object path is required")
+    if not object_name.startswith(allowed_prefixes):
+        raise RuntimeError(f"Storage object must start with one of: {', '.join(allowed_prefixes)}")
+    return object_name
+
+
+def download_storage_object(object_name: str, local_path: Path) -> None:
+    storage.Client().bucket(storage_bucket_name()).blob(object_name).download_to_filename(str(local_path))
+
+
+def upload_storage_file(local_path: Path, object_name: str) -> None:
+    storage.Client().bucket(storage_bucket_name()).blob(object_name).upload_from_filename(str(local_path))
+
+
+def sqlite_price_tickers(cache: Path) -> set[str]:
+    with sqlite_connection(cache) as source:
+        return {
+            str(row[0]).strip().upper()
+            for row in source.execute("SELECT DISTINCT ticker FROM price_history")
+            if row[0]
+        }
 
 
 def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
@@ -393,12 +431,136 @@ def run_filter(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def run_import_sqlite(data: dict[str, Any]) -> dict[str, Any]:
+    market = str(data.get("market") or "asx").lower()
+    if market not in {"asx", "us"}:
+        raise RuntimeError("Import market must be asx or us")
+    provider = str(data.get("provider") or "yfinance").strip() or "yfinance"
+    storage_path = storage_object_path(data.get("storage_path"), ("imports/",))
+    ratings_storage_path = data.get("ratings_storage_path")
+    chunk_size = max(int(data.get("chunk_size") or 5000), 100)
+    price_since = str(data.get("price_since") or "").strip() or None
+    rebuild_weekly = bool(data.get("rebuild_weekly", True))
+
+    cache = Path("/tmp") / f"import_{market}.sqlite"
+    ratings_db = Path("/tmp") / f"ratings_{market}.sqlite"
+    update_job(status="running", stage="Downloading", current_count=0, total_count=4, percent=0,
+               detail=f"Downloading {storage_path}")
+    download_storage_object(storage_path, cache)
+
+    source_tickers = sqlite_price_tickers(cache)
+    full_tickers = source_tickers if bool(data.get("full_tickers", True)) else None
+    if ratings_storage_path:
+        ratings_object = storage_object_path(ratings_storage_path, ("imports/",))
+        download_storage_object(ratings_object, ratings_db)
+
+    update_job(status="running", stage="Importing", current_count=1, total_count=4, percent=25,
+               detail=f"Importing {len(source_tickers)} source tickers from SQLite")
+    with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
+        ensure_schema(conn)
+        counts = import_cache(
+            conn,
+            cache,
+            market,
+            chunk_size,
+            False,
+            price_since=price_since,
+            full_tickers=full_tickers,
+            resume=bool(data.get("resume", True)),
+            bulk_prices=bool(data.get("bulk_prices", True)),
+        )
+        rating_count = 0
+        if ratings_storage_path and ratings_db.exists():
+            update_job(status="running", stage="Importing ratings", current_count=2, total_count=4, percent=50,
+                       detail=f"Importing ratings from {ratings_storage_path}")
+            rating_count = import_ratings(conn, ratings_db, chunk_size, False)
+
+        weekly_rows = 0
+        weekly_metric_rows = 0
+        if rebuild_weekly and source_tickers:
+            update_job(status="running", stage="Rebuilding weekly cache", current_count=3, total_count=4, percent=75,
+                       detail=f"Rebuilding weekly candles and metrics for {len(source_tickers)} tickers")
+            weekly_rows = sync_weekly_history(conn, market, provider, sorted(source_tickers), price_since)
+            weekly_metric_rows = sync_weekly_metrics(conn, market, provider, sorted(source_tickers), price_since)
+        refresh_market_status(conn, market, provider)
+
+    return {
+        "market": market,
+        "storage_path": storage_path,
+        "source_tickers": len(source_tickers),
+        **counts,
+        "ratings": rating_count,
+        "weekly_rows": weekly_rows,
+        "weekly_metric_rows": weekly_metric_rows,
+    }
+
+
+def run_export_ratings(data: dict[str, Any]) -> dict[str, Any]:
+    requested_market = str(data.get("market") or "all").strip().lower()
+    market = requested_market if requested_market in {"asx", "us"} else None
+    limit = min(max(int(data.get("limit") or 25000), 1), 250000)
+    output_format = "json" if str(data.get("format") or "csv").strip().lower() == "json" else "csv"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    default_path = f"exports/ratings/ratings_{requested_market or 'all'}_{timestamp}.{output_format}"
+    object_name = storage_object_path(data.get("storage_path") or default_path, ("exports/",))
+    local_path = Path("/tmp") / Path(object_name).name
+
+    update_job(status="running", stage="Exporting", current_count=0, total_count=2, percent=0,
+               detail=f"Exporting latest {limit} rating events")
+    with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, event_at_utc, action, rated_by, user_email, firebase_uid,
+                       market, scan_id, ticker, label, note, rank, signal_date,
+                       close_price, market_cap, avg_volume, volume_ratio, sector,
+                       industry, yahoo_url
+                FROM rating_events
+                WHERE (%s::text IS NULL OR market = %s)
+                ORDER BY event_at_utc DESC
+                LIMIT %s
+                """,
+                (market, market, limit),
+            )
+            columns = [desc.name for desc in cur.description]
+            rows = cur.fetchall()
+
+    if output_format == "json":
+        payload_rows = [dict(zip(columns, [str(value) if isinstance(value, (datetime, date)) else value for value in row])) for row in rows]
+        local_path.write_text(json.dumps(payload_rows, indent=2), encoding="utf-8")
+    else:
+        with local_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(columns)
+            writer.writerows(rows)
+
+    update_job(status="running", stage="Uploading", current_count=1, total_count=2, percent=50,
+               detail=f"Uploading {object_name}")
+    upload_storage_file(local_path, object_name)
+    return {
+        "market": requested_market,
+        "format": output_format,
+        "row_count": len(rows),
+        "storage_bucket": storage_bucket_name(),
+        "storage_path": object_name,
+    }
+
+
 def main() -> None:
     kind = os.environ.get("MONEYMAKER_JOB_TYPE", "").strip().lower()
     data = payload()
     try:
         update_job(status="running", stage="Starting", detail=f"Starting {kind} job")
-        result = run_fetch(data) if kind == "fetch" else run_filter(data)
+        if kind == "fetch":
+            result = run_fetch(data)
+        elif kind == "filter":
+            result = run_filter(data)
+        elif kind == "import-sqlite":
+            result = run_import_sqlite(data)
+        elif kind == "export-ratings":
+            result = run_export_ratings(data)
+        else:
+            raise RuntimeError(f"Unknown worker job type: {kind}")
         update_job(status="succeeded", stage="Complete", current_count=1, total_count=1,
                    percent=100, detail=json.dumps(result)[:4000],
                    parameters_json=Jsonb(result.get("filter", result)),
