@@ -2,6 +2,7 @@ param(
     [switch]$Functions,
     [switch]$Hosting,
     [switch]$DataConnect,
+    [switch]$AllowDataConnectMigrations,
     [switch]$All
 )
 
@@ -40,12 +41,27 @@ function Invoke-Checked([string]$Command, [string[]]$Arguments) {
     }
 }
 
+function Invoke-Captured([string]$Command, [string[]]$Arguments) {
+    $output = & $Command @Arguments 2>&1
+    $code = $LASTEXITCODE
+    $output | ForEach-Object { Write-Host $_ }
+    if ($code -ne 0) {
+        throw "Command failed: $Command $($Arguments -join ' ')"
+    }
+    return ($output -join [Environment]::NewLine)
+}
+
 Push-Location (Resolve-Path "$PSScriptRoot\..")
 try {
     if ($DataConnect) {
-        Invoke-Checked $Firebase @("dataconnect:sql:diff", "--project", $Project)
-        Write-Host "Review the SQL diff before running dataconnect:sql:migrate." -ForegroundColor Yellow
-        Invoke-Checked $Firebase @("deploy", "--only", "dataconnect", "--project", $Project)
+        $dryRunOutput = Invoke-Captured $Firebase @("deploy", "--only", "dataconnect", "--project", $Project, "--dry-run", "--non-interactive")
+        $hasUnsafeMigration = $dryRunOutput -match "Destructive:" -or $dryRunOutput -match "PostgreSQL schema is incompatible"
+        if ($hasUnsafeMigration -and -not $AllowDataConnectMigrations) {
+            throw "Data Connect dry-run found SQL migrations against the brownfield database. Review the output and rerun with -AllowDataConnectMigrations only if those SQL changes are intentional."
+        }
+        if ($AllowDataConnectMigrations) {
+            Invoke-Checked $Firebase @("deploy", "--only", "dataconnect", "--project", $Project, "--non-interactive")
+        }
     }
 
     if ($Functions) {

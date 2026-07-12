@@ -359,5 +359,79 @@ CREATE TABLE IF NOT EXISTS job_runs (
     result_json JSONB NOT NULL DEFAULT '[]'::jsonb
 );
 
+-- Firebase SQL Connect brownfield grants. SQL Connect owns its service and
+-- connector layer, while this migration remains the source of truth for the
+-- existing PostgreSQL tables. Grant only when the Firebase-created roles exist
+-- so local/non-Firebase databases can still apply this schema.
+DO $$
+DECLARE
+    reader_role text := 'firebasereader_moneymaker_public';
+    writer_role text := 'firebasewriter_moneymaker_public';
+    owner_role text := 'firebaseowner_moneymaker_public';
+    read_tables text[] := ARRAY[
+        'app_user_invites',
+        'companies',
+        'fetch_errors',
+        'job_runs',
+        'price_history',
+        'rating_events',
+        'rating_outcomes',
+        'refresh_batches',
+        'refresh_jobs',
+        'scan_results',
+        'scan_runs',
+        'user_appraisals',
+        'user_notes',
+        'user_picks',
+        'user_profiles',
+        'weekly_metrics',
+        'weekly_price_history'
+    ];
+    write_tables text[] := ARRAY[
+        'rating_events',
+        'user_appraisals',
+        'user_notes',
+        'user_picks',
+        'user_profiles'
+    ];
+    role_name text;
+    table_name text;
+BEGIN
+    FOREACH role_name IN ARRAY ARRAY[reader_role, writer_role, owner_role]
+    LOOP
+        IF to_regrole(role_name) IS NOT NULL THEN
+            EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', role_name);
+            EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I', role_name);
+        END IF;
+    END LOOP;
+
+    FOREACH table_name IN ARRAY read_tables
+    LOOP
+        IF to_regclass(format('public.%I', table_name)) IS NOT NULL THEN
+            IF to_regrole(reader_role) IS NOT NULL THEN
+                EXECUTE format('GRANT SELECT ON TABLE public.%I TO %I', table_name, reader_role);
+            END IF;
+            IF to_regrole(writer_role) IS NOT NULL THEN
+                EXECUTE format('GRANT SELECT ON TABLE public.%I TO %I', table_name, writer_role);
+            END IF;
+            IF to_regrole(owner_role) IS NOT NULL THEN
+                EXECUTE format('GRANT SELECT ON TABLE public.%I TO %I', table_name, owner_role);
+            END IF;
+        END IF;
+    END LOOP;
+
+    FOREACH table_name IN ARRAY write_tables
+    LOOP
+        IF to_regclass(format('public.%I', table_name)) IS NOT NULL THEN
+            IF to_regrole(writer_role) IS NOT NULL THEN
+                EXECUTE format('GRANT INSERT, UPDATE, DELETE ON TABLE public.%I TO %I', table_name, writer_role);
+            END IF;
+            IF to_regrole(owner_role) IS NOT NULL THEN
+                EXECUTE format('GRANT INSERT, UPDATE, DELETE ON TABLE public.%I TO %I', table_name, owner_role);
+            END IF;
+        END IF;
+    END LOOP;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_job_runs_recent
     ON job_runs (started_at_utc DESC);
