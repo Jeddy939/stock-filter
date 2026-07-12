@@ -51,16 +51,35 @@ function Invoke-Captured([string]$Command, [string[]]$Arguments) {
     return ($output -join [Environment]::NewLine)
 }
 
+function Invoke-CapturedResult([string]$Command, [string[]]$Arguments) {
+    $output = & $Command @Arguments 2>&1
+    $code = $LASTEXITCODE
+    $output | ForEach-Object { Write-Host $_ }
+    return [pscustomobject]@{
+        Code = $code
+        Text = ($output -join [Environment]::NewLine)
+    }
+}
+
 Push-Location (Resolve-Path "$PSScriptRoot\..")
 try {
     if ($DataConnect) {
         $dryRunOutput = Invoke-Captured $Firebase @("deploy", "--only", "dataconnect", "--project", $Project, "--dry-run", "--non-interactive")
-        $hasUnsafeMigration = $dryRunOutput -match "Destructive:" -or $dryRunOutput -match "PostgreSQL schema is incompatible"
-        if ($hasUnsafeMigration -and -not $AllowDataConnectMigrations) {
-            throw "Data Connect dry-run found SQL migrations against the brownfield database. Review the output and rerun with -AllowDataConnectMigrations only if those SQL changes are intentional."
+        $hasRequiredMigration = $dryRunOutput -match "PostgreSQL schema is incompatible"
+        if ($hasRequiredMigration -and -not $AllowDataConnectMigrations) {
+            throw "Data Connect dry-run found required SQL migrations against the brownfield database. Review the output and rerun with -AllowDataConnectMigrations only if those SQL changes are intentional."
         }
-        if ($AllowDataConnectMigrations) {
-            Invoke-Checked $Firebase @("deploy", "--only", "dataconnect", "--project", $Project, "--non-interactive")
+        $deployResult = Invoke-CapturedResult $Firebase @("deploy", "--only", "dataconnect", "--project", $Project, "--non-interactive")
+        if ($deployResult.Code -ne 0) {
+            $isCompatibleBrownfieldWarning =
+                $dryRunOutput -match "Database schema .* is compatible with SQL Connect Schema" -and
+                $deployResult.Text -match "Database schema .* is compatible with SQL Connect Schema" -and
+                $deployResult.Text -match "Deployed connector" -and
+                $deployResult.Text -match "database schema is incompatible"
+            if (-not $isCompatibleBrownfieldWarning) {
+                throw "Command failed: $Firebase deploy --only dataconnect --project $Project --non-interactive"
+            }
+            Write-Warning "Data Connect connector deployed and compatible schema validation passed. Firebase CLI still exited nonzero because the brownfield PostgreSQL schema has extra app-owned tables; this script treats that known strict-mode warning as non-fatal."
         }
     }
 

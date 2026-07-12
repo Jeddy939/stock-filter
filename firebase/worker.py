@@ -28,6 +28,7 @@ if str(SRC) not in sys.path:
 
 from moneymaker import fetcher
 from firebase.migrate_sqlite_to_postgres import import_cache
+from cloud_backend.market_status import refresh_market_status
 from cloud_backend.postgres_screener import run_postgres_filter
 from cloud_backend.weekly_cache import sync_weekly_history
 from cloud_backend.weekly_metrics import sync_weekly_metrics
@@ -288,8 +289,10 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
             incremental_tickers,
             start_date=(date.today() - timedelta(days=overlap_days + 7)),
         )
+        refresh_market_status(conn, market, provider)
         counts["weekly_prices"] = weekly_rows
         counts["weekly_metrics"] = metric_rows
+        counts["market_status_refreshed"] = True
     upload_checkpoint(market, cache)
     if refresh_batch_id:
         with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:

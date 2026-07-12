@@ -452,9 +452,20 @@ apiApp.get("/api/status", asyncRoute(async (req, res) => {
   if (!status) {
     const statusResult = await db().query(
       `
+      SELECT ticker_count, history_rows, latest_date::text AS latest_date
+      FROM market_status
+      WHERE market = $1 AND provider = 'yfinance'
+      `,
+      [market]
+    );
+    status = statusResult.rows[0] ?? null;
+  }
+  if (!status) {
+    const statusResult = await db().query(
+      `
       SELECT COUNT(DISTINCT ticker) AS ticker_count, COUNT(*) AS history_rows,
-             MAX(price_date)::text AS latest_date
-      FROM price_history WHERE market = $1
+             MAX(week_date)::text AS latest_date
+      FROM weekly_metrics WHERE market = $1 AND provider = 'yfinance'
       `,
       [market]
     );

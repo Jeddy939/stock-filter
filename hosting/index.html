@@ -645,8 +645,8 @@
     <section class="workspace">
       <div class="metrics">
         <div class="metric"><span>Covered stocks</span><strong id="metricTickers">0</strong></div>
-        <div class="metric"><span>History rows</span><strong id="metricRows">0</strong></div>
-        <div class="metric"><span>Latest bar</span><strong id="metricLatest">-</strong></div>
+        <div class="metric"><span>Weekly metric rows</span><strong id="metricRows">0</strong></div>
+        <div class="metric"><span>Latest weekly bar</span><strong id="metricLatest">-</strong></div>
         <div class="metric"><span>Matches</span><strong id="metricMatches">0</strong></div>
       </div>
       <div class="panel" id="chartPanel">
@@ -997,7 +997,7 @@
       $("cachePill").textContent = s.exists ? `${s.size_mb} MB` : "No cache";
       $("cachePill").className = `pill ${s.exists ? "ok" : "warn"}`;
       $("topStatus").textContent = s.exists
-        ? `${fmt.format(s.ticker_count || 0)} stocks online, ${fmt.format(s.history_rows || 0)} price rows, latest ${s.latest_date || "-"}`
+        ? `${fmt.format(s.ticker_count || 0)} stocks online, ${fmt.format(s.history_rows || 0)} weekly metric rows, latest ${s.latest_date || "-"}`
         : "No online market data found";
       if (s.tickers && s.tickers.length && !$("chartTicker").value.trim()) {
         $("chartTicker").value = s.tickers[0];

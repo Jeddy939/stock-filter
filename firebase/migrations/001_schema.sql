@@ -26,6 +26,17 @@ CREATE TABLE IF NOT EXISTS price_history (
 CREATE INDEX IF NOT EXISTS idx_price_history_lookup
     ON price_history (market, provider, ticker, price_date DESC);
 
+CREATE TABLE IF NOT EXISTS market_status (
+    market TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'yfinance',
+    ticker_count BIGINT NOT NULL DEFAULT 0,
+    history_rows BIGINT NOT NULL DEFAULT 0,
+    weekly_rows BIGINT NOT NULL DEFAULT 0,
+    latest_date DATE,
+    refreshed_at_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (market, provider)
+);
+
 -- Derived weekly candles used by the screener. Daily price_history remains the
 -- authoritative source for charting and can rebuild this table at any time.
 CREATE TABLE IF NOT EXISTS weekly_price_history (
@@ -373,6 +384,7 @@ DECLARE
         'companies',
         'fetch_errors',
         'job_runs',
+        'market_status',
         'price_history',
         'rating_events',
         'rating_outcomes',

@@ -396,13 +396,23 @@ async def status(
     with db() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            SELECT COUNT(DISTINCT ticker) AS ticker_count, COUNT(*) AS history_rows,
-                   MAX(price_date)::text AS latest_date
-            FROM price_history WHERE market = %s
+            SELECT ticker_count, history_rows, latest_date::text AS latest_date
+            FROM market_status
+            WHERE market = %s AND provider = 'yfinance'
             """,
             (market,),
         )
-        cache = cur.fetchone() or {}
+        cache = cur.fetchone()
+        if not cache:
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT ticker) AS ticker_count, COUNT(*) AS history_rows,
+                       MAX(week_date)::text AS latest_date
+                FROM weekly_metrics WHERE market = %s AND provider = 'yfinance'
+                """,
+                (market,),
+            )
+            cache = cur.fetchone() or {}
         cache["exists"] = bool(cache.get("ticker_count"))
         cache["size_mb"] = 0
         cur.execute(

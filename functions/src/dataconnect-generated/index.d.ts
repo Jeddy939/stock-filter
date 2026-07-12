@@ -10,9 +10,9 @@ export type DateString = string;
 
 
 
-export interface AppUserInvite_Key {
-  email: string;
-  __typename?: 'AppUserInvite_Key';
+export interface BackendMetadata_Key {
+  key: string;
+  __typename?: 'BackendMetadata_Key';
 }
 
 export interface ClearMyAppraisalData {
@@ -23,17 +23,6 @@ export interface ClearMyAppraisalVariables {
   scanId: Int64String;
   sourceId: Int64String;
   ticker: string;
-}
-
-export interface Company_Key {
-  market: string;
-  ticker: string;
-  __typename?: 'Company_Key';
-}
-
-export interface FetchError_Key {
-  id: Int64String;
-  __typename?: 'FetchError_Key';
 }
 
 export interface GetChartBarsData {
@@ -128,11 +117,6 @@ export interface GetWeeklyMetricSnapshotVariables {
   limit: number;
 }
 
-export interface JobRun_Key {
-  id: UUIDString;
-  __typename?: 'JobRun_Key';
-}
-
 export interface ListRecentScansData {
   scans?: unknown[] | null;
 }
@@ -140,45 +124,6 @@ export interface ListRecentScansData {
 export interface ListRecentScansVariables {
   market: string;
   limit: number;
-}
-
-export interface PriceHistory_Key {
-  market: string;
-  provider: string;
-  ticker: string;
-  priceDate: DateString;
-  __typename?: 'PriceHistory_Key';
-}
-
-export interface RatingEvent_Key {
-  id: Int64String;
-  __typename?: 'RatingEvent_Key';
-}
-
-export interface RatingOutcome_Key {
-  ratingEventId: Int64String;
-  horizonDays: number;
-  __typename?: 'RatingOutcome_Key';
-}
-
-export interface RefreshBatch_Key {
-  id: UUIDString;
-  __typename?: 'RefreshBatch_Key';
-}
-
-export interface RefreshJob_Key {
-  id: UUIDString;
-  __typename?: 'RefreshJob_Key';
-}
-
-export interface ScanResult_Key {
-  id: Int64String;
-  __typename?: 'ScanResult_Key';
-}
-
-export interface ScanRun_Key {
-  id: Int64String;
-  __typename?: 'ScanRun_Key';
 }
 
 export interface UpsertMyAppraisalData {
@@ -204,48 +149,6 @@ export interface UpsertMyNoteVariables {
   market: string;
   ticker: string;
   note: string;
-}
-
-export interface UserAppraisal_Key {
-  firebaseUid: string;
-  scanId: Int64String;
-  sourceId: Int64String;
-  ticker: string;
-  __typename?: 'UserAppraisal_Key';
-}
-
-export interface UserNote_Key {
-  id: Int64String;
-  __typename?: 'UserNote_Key';
-}
-
-export interface UserPick_Key {
-  firebaseUid: string;
-  scanId: Int64String;
-  sourceId: Int64String;
-  ticker: string;
-  __typename?: 'UserPick_Key';
-}
-
-export interface UserProfile_Key {
-  firebaseUid: string;
-  __typename?: 'UserProfile_Key';
-}
-
-export interface WeeklyMetric_Key {
-  market: string;
-  provider: string;
-  ticker: string;
-  weekDate: DateString;
-  __typename?: 'WeeklyMetric_Key';
-}
-
-export interface WeeklyPriceHistory_Key {
-  market: string;
-  provider: string;
-  ticker: string;
-  weekDate: DateString;
-  __typename?: 'WeeklyPriceHistory_Key';
 }
 
 interface UpsertMyAppraisalRef {
