@@ -1172,6 +1172,136 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
   res.json({ok: true, market: requestedMarket, horizon_days: horizon, picks: result.rows});
 }));
 
+apiApp.get("/api/analysis/insights", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  const requestedMarket = strictMarket(req.query.market, true);
+  const market = requestedMarket === "all" ? null : requestedMarket;
+  const horizon = analysisHorizon(req.query.horizon);
+  const underperformerLimit = Math.min(Math.max(Number(req.query.underperformer_limit ?? 25), 1), 100);
+  const patternLimit = Math.min(Math.max(Number(req.query.pattern_limit ?? 40), 1), 100);
+
+  const commonCte = `
+    WITH latest_labels AS (
+      SELECT DISTINCT ON (firebase_uid, market, ticker)
+        id, firebase_uid, user_email, market, ticker, label, event_at_utc, signal_date,
+        close_price AS signal_price, market_cap, avg_volume, volume_ratio, sector, industry
+      FROM rating_events
+      WHERE action = 'label'
+        AND label IS NOT NULL
+        AND ($1::text IS NULL OR market = $1)
+      ORDER BY firebase_uid, market, ticker, event_at_utc DESC, id DESC
+    ), performance AS (
+      SELECT
+        labelled.*,
+        CASE WHEN $2::int = 0 THEN latest.close_price ELSE outcome.price_at_horizon END AS latest_price,
+        CASE WHEN $2::int = 0 THEN latest.price_date ELSE NULL END AS latest_date,
+        outcome.measured_at_utc,
+        CASE
+          WHEN $2::int = 0 AND labelled.signal_price > 0 AND latest.close_price IS NOT NULL
+          THEN ((latest.close_price - labelled.signal_price) / labelled.signal_price) * 100
+          WHEN $2::int <> 0 THEN outcome.return_percent
+          ELSE NULL
+        END AS return_percent,
+        CASE
+          WHEN labelled.market_cap IS NULL OR labelled.market_cap <= 0 THEN 'Unknown'
+          WHEN labelled.market_cap < 300000000 THEN 'Micro cap'
+          WHEN labelled.market_cap < 2000000000 THEN 'Small cap'
+          WHEN labelled.market_cap < 10000000000 THEN 'Mid cap'
+          ELSE 'Large cap'
+        END AS market_cap_bucket
+      FROM latest_labels labelled
+      LEFT JOIN LATERAL (
+        SELECT close_price, price_date
+        FROM price_history
+        WHERE market = labelled.market
+          AND ticker = labelled.ticker
+          AND provider = 'yfinance'
+          AND close_price IS NOT NULL
+        ORDER BY price_date DESC
+        LIMIT 1
+      ) latest ON TRUE
+      LEFT JOIN rating_outcomes outcome
+        ON outcome.rating_event_id = labelled.id
+       AND outcome.horizon_days = $2::int
+    )
+  `;
+
+  const underperformers = await db().query(
+    `
+    ${commonCte}
+    SELECT market, ticker, label, user_email, event_at_utc, signal_date,
+           signal_price, latest_price, latest_date, measured_at_utc,
+           ROUND(return_percent::numeric, 2) AS return_percent,
+           sector, industry, market_cap, avg_volume, volume_ratio
+    FROM performance
+    WHERE label IN ('winner', 'potential_winner')
+      AND return_percent < 0
+    ORDER BY return_percent ASC, event_at_utc DESC
+    LIMIT $3
+    `,
+    [market, horizon, underperformerLimit]
+  );
+
+  const patterns = await db().query(
+    `
+    ${commonCte},
+    grouped AS (
+      SELECT 'Sector' AS dimension, COALESCE(NULLIF(sector, ''), 'Unknown') AS group_name, label,
+             COUNT(*)::int AS pick_count,
+             COUNT(*) FILTER (WHERE return_percent IS NOT NULL)::int AS priced_count,
+             COUNT(*) FILTER (WHERE return_percent > 0)::int AS positive_count,
+             ROUND(AVG(return_percent)::numeric, 2) AS average_return_percent,
+             ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY return_percent)::numeric, 2) AS median_return_percent,
+             ROUND(AVG(market_cap)::numeric, 0) AS average_market_cap,
+             ROUND(AVG(volume_ratio)::numeric, 2) AS average_volume_ratio
+      FROM performance
+      WHERE label IN ('winner', 'potential_winner')
+      GROUP BY COALESCE(NULLIF(sector, ''), 'Unknown'), label
+      UNION ALL
+      SELECT 'Industry' AS dimension, COALESCE(NULLIF(industry, ''), 'Unknown') AS group_name, label,
+             COUNT(*)::int AS pick_count,
+             COUNT(*) FILTER (WHERE return_percent IS NOT NULL)::int AS priced_count,
+             COUNT(*) FILTER (WHERE return_percent > 0)::int AS positive_count,
+             ROUND(AVG(return_percent)::numeric, 2) AS average_return_percent,
+             ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY return_percent)::numeric, 2) AS median_return_percent,
+             ROUND(AVG(market_cap)::numeric, 0) AS average_market_cap,
+             ROUND(AVG(volume_ratio)::numeric, 2) AS average_volume_ratio
+      FROM performance
+      WHERE label IN ('winner', 'potential_winner')
+      GROUP BY COALESCE(NULLIF(industry, ''), 'Unknown'), label
+      UNION ALL
+      SELECT 'Market Cap' AS dimension, market_cap_bucket AS group_name, label,
+             COUNT(*)::int AS pick_count,
+             COUNT(*) FILTER (WHERE return_percent IS NOT NULL)::int AS priced_count,
+             COUNT(*) FILTER (WHERE return_percent > 0)::int AS positive_count,
+             ROUND(AVG(return_percent)::numeric, 2) AS average_return_percent,
+             ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY return_percent)::numeric, 2) AS median_return_percent,
+             ROUND(AVG(market_cap)::numeric, 0) AS average_market_cap,
+             ROUND(AVG(volume_ratio)::numeric, 2) AS average_volume_ratio
+      FROM performance
+      WHERE label IN ('winner', 'potential_winner')
+      GROUP BY market_cap_bucket, label
+    )
+    SELECT *,
+           CASE WHEN priced_count > 0 THEN ROUND(((positive_count::numeric / priced_count) * 100), 1) ELSE NULL END AS hit_rate_percent
+    FROM grouped
+    WHERE pick_count > 0
+    ORDER BY priced_count DESC, average_return_percent DESC NULLS LAST, pick_count DESC
+    LIMIT $3
+    `,
+    [market, horizon, patternLimit]
+  );
+
+  res.json({
+    ok: true,
+    market: requestedMarket,
+    horizon_days: horizon,
+    underperformers: underperformers.rows,
+    patterns: patterns.rows
+  });
+}));
+
 apiApp.get("/api/chart", asyncRoute(async (req, res) => {
   await requireAuth(req, db());
   const ticker = String(req.query.ticker ?? "").trim().toUpperCase();

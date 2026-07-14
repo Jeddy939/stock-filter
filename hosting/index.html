@@ -500,9 +500,20 @@
     .analysis-tools select { width: 150px; }
     .analysis-summary { margin-bottom: 14px; }
     .analysis-summary table td, .analysis-summary table th { text-align: left; }
+    .analysis-insight-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+      gap: 12px;
+      margin-bottom: 14px;
+    }
     .analysis-picks table td:nth-child(5), .analysis-picks table td:nth-child(6),
     .analysis-picks table td:nth-child(7), .analysis-picks table th:nth-child(5),
     .analysis-picks table th:nth-child(6), .analysis-picks table th:nth-child(7) { text-align: right; }
+    .analysis-review table td:nth-child(5), .analysis-review table td:nth-child(6),
+    .analysis-review table th:nth-child(5), .analysis-review table th:nth-child(6),
+    .analysis-patterns table td:nth-child(5), .analysis-patterns table td:nth-child(6),
+    .analysis-patterns table td:nth-child(7), .analysis-patterns table th:nth-child(5),
+    .analysis-patterns table th:nth-child(6), .analysis-patterns table th:nth-child(7) { text-align: right; }
     .return-positive { color: var(--accent); }
     .return-negative { color: var(--bad); }
     .return-neutral { color: var(--muted); }
@@ -516,6 +527,7 @@
       aside, body.cloud-mode aside { border-right: 0; border-bottom: 1px solid var(--line); }
       .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .chart-controls { grid-template-columns: 1fr 1fr; }
+      .analysis-insight-grid { grid-template-columns: 1fr; }
       .analysis-page { padding: 12px; }
     }
     @media (max-width: 520px) {
@@ -876,6 +888,32 @@
         </table>
       </div>
     </div>
+    <div class="analysis-insight-grid">
+      <div class="panel analysis-review">
+        <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
+          <h2 style="margin:0">Needs Review</h2>
+          <span class="status-line" id="analysisReviewMeta"></span>
+        </div>
+        <div class="results-wrap">
+          <table>
+            <thead><tr><th>Market</th><th>Ticker</th><th>Appraisal</th><th>Sector</th><th>Return</th><th>Date</th></tr></thead>
+            <tbody id="analysisReviewBody"><tr><td colspan="6" style="text-align:left;color:var(--muted)">No underperformers loaded.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel analysis-patterns">
+        <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
+          <h2 style="margin:0">Common Patterns</h2>
+          <span class="status-line" id="analysisPatternMeta"></span>
+        </div>
+        <div class="results-wrap">
+          <table>
+            <thead><tr><th>Type</th><th>Group</th><th>Appraisal</th><th>Picks</th><th>Hit Rate</th><th>Avg Return</th><th>Avg Cap</th></tr></thead>
+            <tbody id="analysisPatternBody"><tr><td colspan="7" style="text-align:left;color:var(--muted)">No pattern data loaded.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
     <div class="panel analysis-picks">
       <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
         <h2 style="margin:0">Current Appraisals</h2>
@@ -1162,7 +1200,26 @@
       return number > 0 ? "return-positive" : number < 0 ? "return-negative" : "return-neutral";
     }
 
-    function renderAnalysis(summary, picks) {
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+
+    function shortMoney(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number) || number <= 0) return "-";
+      if (number >= 1e12) return `$${(number / 1e12).toFixed(1)}T`;
+      if (number >= 1e9) return `$${(number / 1e9).toFixed(1)}B`;
+      if (number >= 1e6) return `$${(number / 1e6).toFixed(0)}M`;
+      return `$${fmt.format(Math.round(number))}`;
+    }
+
+    function renderAnalysis(summary, picks, insights = {}) {
       const horizon = Number($("analysisHorizon").value || 0);
       const horizonText = horizon ? `${horizon} day measured performance` : "Current price performance";
       const totalPicks = summary.reduce((total, row) => total + Number(row.pick_count || 0), 0);
@@ -1189,6 +1246,32 @@
           <td>${Number(row.average_age_days || 0).toFixed(0)}d</td>
         </tr>`;
       }).join("") : '<tr><td colspan="8" style="text-align:left;color:var(--muted)">No current appraisals with price history.</td></tr>';
+
+      const underperformers = insights.underperformers || [];
+      $("analysisReviewBody").innerHTML = underperformers.length ? underperformers.map((row) => `<tr>
+        <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
+        <td><a class="ticker analysis-chart-link" href="#" data-market="${escapeHtml(row.market)}" data-ticker="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</a></td>
+        <td>${labelText(row.label)}</td>
+        <td>${escapeHtml(row.sector || row.industry || "Unknown")}</td>
+        <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
+        <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
+      </tr>`).join("") : '<tr><td colspan="6" style="text-align:left;color:var(--muted)">No winner or potential-winner picks are underperforming for this view.</td></tr>';
+      $("analysisReviewMeta").textContent = `${fmt.format(underperformers.length)} weak high-conviction picks`;
+
+      const patterns = insights.patterns || [];
+      $("analysisPatternBody").innerHTML = patterns.length ? patterns.map((row) => {
+        const hitRate = Number.isFinite(Number(row.hit_rate_percent)) ? `${Number(row.hit_rate_percent).toFixed(1)}%` : "-";
+        return `<tr>
+          <td>${escapeHtml(row.dimension)}</td>
+          <td>${escapeHtml(row.group_name)}</td>
+          <td>${labelText(row.label)}</td>
+          <td>${fmt.format(Number(row.pick_count || 0))}</td>
+          <td>${hitRate}</td>
+          <td class="${returnClass(row.average_return_percent)}">${returnText(row.average_return_percent)}</td>
+          <td>${shortMoney(row.average_market_cap)}</td>
+        </tr>`;
+      }).join("") : '<tr><td colspan="7" style="text-align:left;color:var(--muted)">No winner or potential-winner pattern groups found.</td></tr>';
+      $("analysisPatternMeta").textContent = `${fmt.format(patterns.length)} grouped signals`;
 
       $("analysisPicksBody").innerHTML = picks.length ? picks.map((row) => `<tr>
         <td>${String(row.market || "").toUpperCase()}</td>
@@ -1218,11 +1301,12 @@
       const market = encodeURIComponent($("analysisMarket").value);
       const horizon = encodeURIComponent($("analysisHorizon").value);
       try {
-        const [summaryPayload, picksPayload] = await Promise.all([
+        const [summaryPayload, picksPayload, insightsPayload] = await Promise.all([
           api(`/api/analysis/summary?market=${market}&horizon=${horizon}`),
-          api(`/api/analysis/picks?market=${market}&horizon=${horizon}&limit=250`)
+          api(`/api/analysis/picks?market=${market}&horizon=${horizon}&limit=250`),
+          api(`/api/analysis/insights?market=${market}&horizon=${horizon}`)
         ]);
-        renderAnalysis(summaryPayload.summary || [], picksPayload.picks || []);
+        renderAnalysis(summaryPayload.summary || [], picksPayload.picks || [], insightsPayload);
         $("analysisStatus").textContent = Number($("analysisHorizon").value || 0)
           ? `${$("analysisHorizon").value} day measured performance`
           : "Current price performance";
