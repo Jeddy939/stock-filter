@@ -24,3 +24,8 @@ ratings/*.sqlite-shm
 ratings/*.sqlite-wal
 ratings/google_sheets_pending_ratings.jsonl
 !ratings/README.md
+google_client_secret.json
+client_secret_*.json
+google_docs_token.json
+moneymaker_shared_google.json
+web_app_*.log

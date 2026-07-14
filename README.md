@@ -243,6 +243,151 @@ The web UI reads `stock_cache.sqlite` directly for cache status and filter
 scans. Fetches run in the background and update the cache before exporting a
 JSON compatibility file.
 
+To send saved Winner / Potential / Maybe / Bad labels to Google Docs, place
+your Google OAuth desktop credential JSON in this folder as:
+
+```text
+google_client_secret.json
+```
+
+Google's original downloaded `client_secret_*.json` filename also works.
+
+Then double-click:
+
+```text
+SEND_LABELS_TO_GOOGLE_DOCS.bat
+```
+
+The first run opens a Google approval flow and then creates a Google Doc from
+the labels saved in `stock_cache.sqlite`. The same export is also available
+inside the browser UI from **Send Labels to Google Docs**.
+
+Saved picks are also kept in a permanent list in the browser UI. The categories
+are colour coded:
+
+```text
+Winner              -> green
+Potential Winner    -> blue
+Needs Confirmation  -> orange
+Maybe               -> yellow
+Bad                 -> red
+```
+
+The **Needs Confirmation** list stays visible above the chart whenever the app
+opens. The full saved-picks table shows the ticker, category, market, added
+date, updated date, source user, signal date, close, and market cap. Use the
+market, category, and ticker filters above the table to narrow the list.
+
+### Shared picks between computers/users
+
+Shared picks use one central Google Sheet. Each computer keeps a local copy in
+SQLite. Once a shared Sheet is linked, the app syncs when it opens and after a
+pick is marked. The same saved ratings are applied to new filter results, so a
+stock that was already rated appears with its category button highlighted.
+
+In Google Cloud, enable both APIs for the same OAuth app:
+
+```text
+Google Docs API
+Google Sheets API
+```
+
+The first run after this change may ask for Google approval again because the
+app now needs Sheets access as well as Docs access.
+
+Use this one file for setup and syncing:
+
+```text
+SEND_PICKS_TO_GOOGLE_SHEETS.bat
+```
+
+First computer:
+
+```text
+1. Run SEND_PICKS_TO_GOOGLE_SHEETS.bat.
+2. Enter your display name.
+3. Type CREATE when asked for the Sheet.
+4. Copy the Google Sheet link printed by the batch file.
+5. Share that Sheet with the other Google account as Editor.
+```
+
+Second computer:
+
+```text
+1. Run SEND_PICKS_TO_GOOGLE_SHEETS.bat.
+2. Enter the other user's display name.
+3. Paste the real shared Google Sheet link.
+```
+
+After the Sheet is linked, future app starts sync automatically. You can also
+run `SEND_PICKS_TO_GOOGLE_SHEETS.bat` any time to force a send/receive sync.
+Do not paste the local Moneymaker browser URL, and do not paste anything from
+the Google secret JSON.
+
+If the Google app is still in Testing mode, every Google account that syncs the
+shared list must also be added as a Google Cloud test user.
+
+The shared Sheet setting is stored locally in:
+
+```text
+moneymaker_shared_google.json
+```
+
+That file is ignored by Git. Do not copy `google_docs_token.json` between users;
+each user should approve Google access with their own account.
+
+To export an existing user's old saved picks from their local cache, copy their
+old `stock_cache.sqlite` into this folder and double-click:
+
+```text
+SEND_EXISTING_PICKS_TO_GOOGLE_DOCS.bat
+```
+
+If the cache file has a different name, drag the `.sqlite` file onto
+`SEND_EXISTING_PICKS_TO_GOOGLE_DOCS.bat`. This exports every saved Winner /
+Potential Winner / Maybe / Bad label in that cache.
+
+### Fresh computer setup for Google Docs exports
+
+On a new computer, clone the repo:
+
+```bash
+git clone https://github.com/Jeddy939/stock-filter.git
+cd stock-filter
+```
+
+If the repo is already there, update it instead:
+
+```bash
+git pull
+```
+
+Then copy these local files into the `stock-filter` folder:
+
+```text
+google_client_secret.json
+```
+
+or Google's original downloaded file:
+
+```text
+client_secret_*.json
+```
+
+To export old saved picks, also copy the user's old cache:
+
+```text
+stock_cache.sqlite
+```
+
+Do not copy `google_docs_token.json` between users. That file is created after
+the Google login and belongs to the signed-in Google account. If the wrong
+Google account is being used, delete `google_docs_token.json` and run the export
+batch file again.
+
+If the Google app is still in Testing mode, add the user's Google email address
+as a test user in Google Cloud before they sign in.
+
 The UI has separate market defaults:
 
 ```text
