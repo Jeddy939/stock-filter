@@ -3,6 +3,8 @@ import {apiApp} from "./api";
 export {
   scheduledDefaultScanAsx,
   scheduledDefaultScanUs,
+  scheduledJobReconciliation,
+  scheduledRatingOutcomes,
   scheduledRefreshAsx,
   scheduledRefreshUs
 } from "./scheduled";

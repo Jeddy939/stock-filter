@@ -219,48 +219,40 @@ def _run_metric_filter(
         for offset, ticker in enumerate(chunk, 1):
             current = chunk_start + offset
             match = None
-            for row in rows_by_ticker.get(ticker, []):
+            metric_rows = rows_by_ticker.get(ticker, [])
+            for row in metric_rows:
                 match = _result_from_metric(row, config)
                 if match:
                     break
             if match:
                 results.append(match)
-            else:
+            elif not metric_rows:
                 skipped += 1
             if progress and (current == total or current % 100 == 0):
                 progress("Filtering", current, total, f"Screened {current:,}/{total:,}: {ticker}")
     return results, skipped
 
 
-def _has_weekly_metrics(
+def _has_recent_weekly_metrics(
     conn: psycopg.Connection,
     market: str,
     provider: str,
-    tickers: list[str],
 ) -> bool:
-    if not tickers:
-        return True
     with conn.cursor() as cur:
         cur.execute(
             """
-            WITH weekly_tickers AS (
-                SELECT DISTINCT ticker
-                FROM weekly_price_history
-                WHERE market = %s AND provider = %s AND ticker = ANY(%s)
-            ),
-            metric_tickers AS (
-                SELECT DISTINCT ticker
+            SELECT EXISTS (
+                SELECT 1
                 FROM weekly_metrics
-                WHERE market = %s AND provider = %s AND ticker = ANY(%s)
+                WHERE market = %s
+                  AND provider = %s
+                  AND week_date >= CURRENT_DATE - 14
+                LIMIT 1
             )
-            SELECT
-                (SELECT COUNT(*) FROM weekly_tickers),
-                (SELECT COUNT(*) FROM metric_tickers)
             """,
-            (market, provider, tickers, market, provider, tickers),
+            (market, provider),
         )
-        weekly_count, metric_count = cur.fetchone()
-        return int(metric_count or 0) >= int(weekly_count or 0)
+        return bool(cur.fetchone()[0])
 
 
 def run_postgres_filter(
@@ -294,7 +286,7 @@ def run_postgres_filter(
     skipped = 0
     total = len(tickers)
     scan_source = "postgresql://weekly_price_history"
-    if _metric_config_supported(config) and _has_weekly_metrics(conn, market, provider, tickers):
+    if _metric_config_supported(config) and _has_recent_weekly_metrics(conn, market, provider):
         scan_source = "postgresql://weekly_metrics"
         results, skipped = _run_metric_filter(conn, market, provider, tickers, config, progress)
     else:

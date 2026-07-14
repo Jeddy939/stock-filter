@@ -34,6 +34,8 @@ from cloud_backend.postgres_screener import run_postgres_filter
 from cloud_backend.weekly_cache import sync_weekly_history
 from cloud_backend.weekly_metrics import sync_weekly_metrics
 
+OUTCOME_HORIZONS = (30, 90, 180, 360)
+
 
 def job_id() -> str:
     value = os.environ.get("MONEYMAKER_JOB_ID", "").strip()
@@ -231,32 +233,46 @@ def sqlite_price_tickers(cache: Path) -> set[str]:
         }
 
 
+def remove_sqlite_checkpoint(path: Path) -> None:
+    for candidate in (path, path.with_name(path.name + "-wal"), path.with_name(path.name + "-shm")):
+        try:
+            candidate.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
     market = str(data.get("market") or "asx").lower()
     provider = fetcher.normalize_provider(data.get("provider") or fetcher.DEFAULT_PROVIDER)
     refresh_job_id = str(data.get("refresh_job_id") or "").strip()
     refresh_batch_id = str(data.get("refresh_batch_id") or "").strip()
     parent_job_id = str(data.get("parent_job_id") or "").strip()
-    cache = checkpoint_path(market)
-    download_checkpoint(market, cache)
     explicit_tickers = [
         str(ticker).strip().upper()
         for ticker in (data.get("tickers") or [])
         if str(ticker).strip()
     ]
+    batch_refresh = bool(refresh_batch_id and explicit_tickers)
+    cache = checkpoint_path(market)
+    if batch_refresh:
+        remove_sqlite_checkpoint(cache)
+    else:
+        download_checkpoint(market, cache)
     ticker_file = str(data.get("ticker_file") or (
         "us_tickers_nasdaqtrader.txt" if market == "us" else "asx_yfinance_valid_stocks_2026-05-11.txt"
     ))
     ticker_path = ROOT / ticker_file if not Path(ticker_file).is_absolute() else Path(ticker_file)
     requested_tickers = explicit_tickers or fetcher.get_tickers_from_file(str(ticker_path))
     requested_tickers = fetcher.apply_ticker_limit(requested_tickers, data.get("limit"))
-    update_refresh_job(
-        refresh_job_id,
-        status="running",
-        stage="Fetching",
-        total_tickers=len(requested_tickers),
-    )
-    mark_refresh_batches(refresh_job_id, "running")
+    refresh_updates: dict[str, Any] = {
+        "status": "running",
+        "stage": "Fetching",
+    }
+    if not refresh_batch_id:
+        refresh_updates["total_tickers"] = len(requested_tickers)
+    update_refresh_job(refresh_job_id, **refresh_updates)
+    if not refresh_batch_id:
+        mark_refresh_batches(refresh_job_id, "running")
     with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT DISTINCT ticker FROM price_history WHERE market = %s", (market,))
@@ -331,7 +347,8 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
         counts["weekly_prices"] = weekly_rows
         counts["weekly_metrics"] = metric_rows
         counts["market_status_refreshed"] = True
-    upload_checkpoint(market, cache)
+    if not batch_refresh:
+        upload_checkpoint(market, cache)
     if refresh_batch_id:
         with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
             with conn.cursor() as cur:
@@ -546,6 +563,153 @@ def run_export_ratings(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _rating_outcome_horizons(raw_value: Any) -> list[int]:
+    raw_items = raw_value if isinstance(raw_value, list) else OUTCOME_HORIZONS
+    horizons: list[int] = []
+    for item in raw_items:
+        try:
+            value = int(item)
+        except (TypeError, ValueError):
+            continue
+        if value in OUTCOME_HORIZONS and value not in horizons:
+            horizons.append(value)
+    return horizons or list(OUTCOME_HORIZONS)
+
+
+def run_rating_outcomes(data: dict[str, Any]) -> dict[str, Any]:
+    requested_market = str(data.get("market") or "all").strip().lower()
+    market = requested_market if requested_market in {"asx", "us"} else None
+    horizons = _rating_outcome_horizons(data.get("horizons"))
+    limit = min(max(int(data.get("limit") or 100000), 1), 500000)
+    per_horizon: list[dict[str, Any]] = []
+
+    update_job(
+        status="running",
+        stage="Preparing outcomes",
+        current_count=0,
+        total_count=len(horizons),
+        percent=0,
+        detail=f"Preparing rating outcomes for {requested_market.upper() if market else 'all markets'}",
+    )
+    with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*)::int
+                FROM rating_events
+                WHERE action = 'label'
+                  AND label IS NOT NULL
+                  AND market IS NOT NULL
+                  AND ticker IS NOT NULL
+                  AND (%s::text IS NULL OR market = %s)
+                """,
+                (market, market),
+            )
+            candidate_count = int(cur.fetchone()[0] or 0)
+
+            for index, horizon in enumerate(horizons, 1):
+                update_job(
+                    status="running",
+                    stage=f"Measuring {horizon} day outcomes",
+                    current_count=index - 1,
+                    total_count=len(horizons),
+                    percent=round(((index - 1) / len(horizons)) * 100, 2),
+                    detail=f"Calculating {horizon} day outcomes from saved ratings",
+                )
+                cur.execute(
+                    """
+                    WITH candidates AS (
+                        SELECT
+                            id,
+                            market,
+                            COALESCE(NULLIF(provider, ''), 'yfinance') AS provider,
+                            ticker,
+                            COALESCE(signal_date, event_at_utc::date) AS signal_day,
+                            close_price
+                        FROM rating_events
+                        WHERE action = 'label'
+                          AND label IS NOT NULL
+                          AND market IS NOT NULL
+                          AND ticker IS NOT NULL
+                          AND (%s::text IS NULL OR market = %s)
+                        ORDER BY event_at_utc DESC, id DESC
+                        LIMIT %s
+                    ),
+                    measured AS (
+                        SELECT
+                            c.id AS rating_event_id,
+                            %s::int AS horizon_days,
+                            NOW() AS measured_at_utc,
+                            COALESCE(NULLIF(c.close_price, 0), signal.close_price) AS price_at_signal,
+                            horizon.close_price AS price_at_horizon
+                        FROM candidates c
+                        LEFT JOIN LATERAL (
+                            SELECT close_price
+                            FROM price_history ph
+                            WHERE ph.market = c.market
+                              AND ph.provider = c.provider
+                              AND ph.ticker = c.ticker
+                              AND ph.price_date <= c.signal_day
+                              AND ph.close_price IS NOT NULL
+                            ORDER BY ph.price_date DESC
+                            LIMIT 1
+                        ) signal ON TRUE
+                        JOIN LATERAL (
+                            SELECT close_price
+                            FROM price_history ph
+                            WHERE ph.market = c.market
+                              AND ph.provider = c.provider
+                              AND ph.ticker = c.ticker
+                              AND ph.price_date >= c.signal_day + %s::int
+                              AND ph.close_price IS NOT NULL
+                            ORDER BY ph.price_date ASC
+                            LIMIT 1
+                        ) horizon ON TRUE
+                    ),
+                    upserted AS (
+                        INSERT INTO rating_outcomes (
+                            rating_event_id,
+                            horizon_days,
+                            measured_at_utc,
+                            price_at_signal,
+                            price_at_horizon,
+                            return_percent
+                        )
+                        SELECT
+                            rating_event_id,
+                            horizon_days,
+                            measured_at_utc,
+                            price_at_signal,
+                            price_at_horizon,
+                            ((price_at_horizon - price_at_signal) / price_at_signal) * 100
+                        FROM measured
+                        WHERE price_at_signal > 0
+                          AND price_at_horizon IS NOT NULL
+                        ON CONFLICT (rating_event_id, horizon_days) DO UPDATE SET
+                            measured_at_utc = EXCLUDED.measured_at_utc,
+                            price_at_signal = EXCLUDED.price_at_signal,
+                            price_at_horizon = EXCLUDED.price_at_horizon,
+                            return_percent = EXCLUDED.return_percent
+                        RETURNING 1
+                    )
+                    SELECT COUNT(*)::int FROM upserted
+                    """,
+                    (market, market, limit, horizon, horizon),
+                )
+                measured_count = int(cur.fetchone()[0] or 0)
+                per_horizon.append({"horizon_days": horizon, "measured_count": measured_count})
+            conn.commit()
+
+    total_measured = sum(row["measured_count"] for row in per_horizon)
+    return {
+        "market": requested_market,
+        "candidate_count": candidate_count,
+        "limit": limit,
+        "horizons": per_horizon,
+        "measured_count": total_measured,
+    }
+
+
 def main() -> None:
     kind = os.environ.get("MONEYMAKER_JOB_TYPE", "").strip().lower()
     data = payload()
@@ -559,6 +723,8 @@ def main() -> None:
             result = run_import_sqlite(data)
         elif kind == "export-ratings":
             result = run_export_ratings(data)
+        elif kind == "rating-outcomes":
+            result = run_rating_outcomes(data)
         else:
             raise RuntimeError(f"Unknown worker job type: {kind}")
         update_job(status="succeeded", stage="Complete", current_count=1, total_count=1,

@@ -847,6 +847,14 @@
           <option value="asx">ASX</option>
           <option value="us">US</option>
         </select>
+        <select id="analysisHorizon" aria-label="Analysis horizon">
+          <option value="0">Current</option>
+          <option value="30">30 days</option>
+          <option value="90">90 days</option>
+          <option value="180">180 days</option>
+          <option value="360">360 days</option>
+        </select>
+        <button id="recalculateOutcomes" type="button">Recalculate</button>
         <button id="refreshAnalysis" type="button">Refresh</button>
       </div>
     </div>
@@ -875,7 +883,7 @@
       </div>
       <div class="results-wrap">
         <table>
-          <thead><tr><th>Market</th><th>Ticker</th><th>Appraisal</th><th>Selected</th><th>Signal</th><th>Latest</th><th>Return</th><th>Latest Bar</th></tr></thead>
+          <thead><tr><th>Market</th><th>Ticker</th><th>Appraisal</th><th>Selected</th><th>Signal</th><th>Price</th><th>Return</th><th>Date</th></tr></thead>
           <tbody id="analysisPicksBody"><tr><td colspan="8" style="text-align:left;color:var(--muted)">No appraisals loaded.</td></tr></tbody>
         </table>
       </div>
@@ -1155,6 +1163,8 @@
     }
 
     function renderAnalysis(summary, picks) {
+      const horizon = Number($("analysisHorizon").value || 0);
+      const horizonText = horizon ? `${horizon} day measured performance` : "Current price performance";
       const totalPicks = summary.reduce((total, row) => total + Number(row.pick_count || 0), 0);
       const pricedPicks = summary.reduce((total, row) => total + Number(row.priced_count || 0), 0);
       const positivePicks = summary.reduce((total, row) => total + Number(row.positive_count || 0), 0);
@@ -1188,9 +1198,9 @@
         <td>${Number.isFinite(Number(row.signal_price)) ? Number(row.signal_price).toFixed(2) : "-"}</td>
         <td>${Number.isFinite(Number(row.latest_price)) ? Number(row.latest_price).toFixed(2) : "-"}</td>
         <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
-        <td>${row.latest_date || "-"}</td>
+        <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
       </tr>`).join("") : '<tr><td colspan="8" style="text-align:left;color:var(--muted)">No active appraisals found.</td></tr>';
-      $("analysisPickMeta").textContent = `${fmt.format(picks.length)} active appraisals`;
+      $("analysisPickMeta").textContent = `${fmt.format(picks.length)} active appraisals - ${horizonText}`;
       document.querySelectorAll(".analysis-chart-link").forEach((link) => {
         link.addEventListener("click", (event) => {
           event.preventDefault();
@@ -1206,17 +1216,58 @@
       $("analysisStatus").textContent = "Loading online appraisal outcomes...";
       $("analysisStatus").className = "status-line warn";
       const market = encodeURIComponent($("analysisMarket").value);
+      const horizon = encodeURIComponent($("analysisHorizon").value);
       try {
         const [summaryPayload, picksPayload] = await Promise.all([
-          api(`/api/analysis/summary?market=${market}`),
-          api(`/api/analysis/picks?market=${market}&limit=250`)
+          api(`/api/analysis/summary?market=${market}&horizon=${horizon}`),
+          api(`/api/analysis/picks?market=${market}&horizon=${horizon}&limit=250`)
         ]);
         renderAnalysis(summaryPayload.summary || [], picksPayload.picks || []);
-        $("analysisStatus").textContent = "Current price performance";
+        $("analysisStatus").textContent = Number($("analysisHorizon").value || 0)
+          ? `${$("analysisHorizon").value} day measured performance`
+          : "Current price performance";
         $("analysisStatus").className = "status-line ok";
       } catch (error) {
         $("analysisStatus").textContent = error.message;
         $("analysisStatus").className = "status-line bad";
+      }
+    }
+
+    async function pollOutcomeJob(jobId) {
+      try {
+        const payload = await api(`/api/job?type=rating-outcomes&job_id=${encodeURIComponent(jobId)}`);
+        const job = payload.job || {};
+        $("analysisStatus").textContent = job.error || job.detail || job.message || "Recalculating outcomes...";
+        $("analysisStatus").className = `status-line ${job.success === false ? "bad" : job.running ? "warn" : "ok"}`;
+        if (job.running) {
+          setTimeout(() => pollOutcomeJob(jobId), 3500);
+          return;
+        }
+        $("recalculateOutcomes").disabled = false;
+        if (job.success) loadAnalysis();
+      } catch (error) {
+        $("analysisStatus").textContent = error.message;
+        $("analysisStatus").className = "status-line bad";
+        $("recalculateOutcomes").disabled = false;
+      }
+    }
+
+    async function recalculateOutcomes() {
+      $("recalculateOutcomes").disabled = true;
+      $("analysisStatus").textContent = "Starting outcome recalculation...";
+      $("analysisStatus").className = "status-line warn";
+      try {
+        const response = await api("/api/admin/recalculate-rating-outcomes", {
+          method: "POST",
+          body: JSON.stringify({market: $("analysisMarket").value, horizons: [30, 90, 180, 360]})
+        });
+        const job = response.job || {};
+        $("analysisStatus").textContent = job.detail || "Outcome recalculation queued.";
+        pollOutcomeJob(job.id);
+      } catch (error) {
+        $("analysisStatus").textContent = error.message;
+        $("analysisStatus").className = "status-line bad";
+        $("recalculateOutcomes").disabled = false;
       }
     }
 
@@ -1263,13 +1314,20 @@
       $("metricLatest").textContent = s.latest_date || "-";
       $("cachePill").textContent = s.exists ? `${s.size_mb} MB` : "No cache";
       $("cachePill").className = `pill ${s.exists ? "ok" : "warn"}`;
-      $("topStatus").textContent = s.exists
-        ? `${fmt.format(s.ticker_count || 0)} stocks online, ${fmt.format(s.history_rows || 0)} weekly metric rows, latest ${s.latest_date || "-"}`
-        : "No online market data found";
+      const refresh = payload.refresh || null;
+      if (refresh && refresh.running) {
+        $("topStatus").textContent = `${String(refresh.market || $("marketSelect").value).toUpperCase()} refresh running: ${fmt.format(refresh.current || 0)} / ${fmt.format(refresh.total || 0)} tickers, ${refresh.log || ""}`.trim();
+        $("topStatus").className = "status-line warn";
+      } else {
+        $("topStatus").textContent = s.exists
+          ? `${fmt.format(s.ticker_count || 0)} stocks online, ${fmt.format(s.history_rows || 0)} weekly metric rows, latest ${s.latest_date || "-"}`
+          : "No online market data found";
+        $("topStatus").className = `status-line ${s.exists ? "ok" : "warn"}`;
+      }
       if (s.tickers && s.tickers.length && !$("chartTicker").value.trim()) {
         $("chartTicker").value = s.tickers[0];
       }
-      updateJob(payload.job);
+      updateJob(refresh && refresh.running ? refresh : payload.job);
     }
 
     async function loadTickerFiles() {
@@ -1973,7 +2031,9 @@
     $("marketTab").addEventListener("click", () => activateView("market"));
     $("analysisTab").addEventListener("click", () => activateView("analysis"));
     $("refreshAnalysis").addEventListener("click", loadAnalysis);
+    $("recalculateOutcomes").addEventListener("click", recalculateOutcomes);
     $("analysisMarket").addEventListener("change", loadAnalysis);
+    $("analysisHorizon").addEventListener("change", loadAnalysis);
     $("marketSelect").addEventListener("change", applyMarketDefaults);
     $("refreshStatus").addEventListener("click", refreshStatus);
     bindLimitToggle("useFetchLimit", "fetchLimit");

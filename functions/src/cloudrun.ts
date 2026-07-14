@@ -11,7 +11,8 @@ export async function dispatchCloudRunJob(
     fetch: "MONEYMAKER_FETCH_JOB",
     filter: "MONEYMAKER_FILTER_JOB",
     "import-sqlite": "MONEYMAKER_IMPORT_JOB",
-    "export-ratings": "MONEYMAKER_EXPORT_JOB"
+    "export-ratings": "MONEYMAKER_EXPORT_JOB",
+    "rating-outcomes": "MONEYMAKER_OUTCOMES_JOB"
   };
   const jobName = process.env[jobEnvByType[jobType] ?? ""] ?? `moneymaker-${jobType}`;
   const url = `https://run.googleapis.com/v2/projects/${project}/locations/${region}/jobs/${jobName}:run`;

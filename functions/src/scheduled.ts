@@ -3,21 +3,23 @@ import {onSchedule} from "firebase-functions/v2/scheduler";
 import {
   defaultScanPayload,
   defaultScheduledFetchPayload,
+  reconcileStaleJobs,
   startFilterJob,
-  startMarketRefresh
+  startMarketRefresh,
+  startRatingOutcomesJob
 } from "./api";
 
 const region = "australia-southeast1";
 const timeZone = "Australia/Brisbane";
 
-async function refreshMarket(market: "asx" | "us") {
-  const result = await startMarketRefresh(defaultScheduledFetchPayload(market));
-  logger.info("Scheduled market refresh queued", {market, result});
+async function rebuildRatingOutcomes() {
+  const result = await startRatingOutcomesJob({market: "all", horizons: [30, 90, 180, 360]});
+  logger.info("Scheduled rating outcome rebuild queued", {result});
 }
 
-async function rebuildDefaultScan(market: "asx" | "us") {
-  const result = await startFilterJob(defaultScanPayload(market));
-  logger.info("Scheduled default scan queued", {market, result});
+async function reconcileJobs() {
+  const result = await reconcileStaleJobs();
+  logger.info("Scheduled job reconciliation complete", {result});
 }
 
 export const scheduledRefreshAsx = onSchedule(
@@ -28,7 +30,10 @@ export const scheduledRefreshAsx = onSchedule(
     timeoutSeconds: 540,
     memory: "512MiB"
   },
-  async () => refreshMarket("asx")
+  async () => {
+    const result = await startMarketRefresh(defaultScheduledFetchPayload("asx"));
+    logger.info("Scheduled ASX market refresh queued", {market: "asx", result});
+  }
 );
 
 export const scheduledRefreshUs = onSchedule(
@@ -39,7 +44,10 @@ export const scheduledRefreshUs = onSchedule(
     timeoutSeconds: 540,
     memory: "512MiB"
   },
-  async () => refreshMarket("us")
+  async () => {
+    const result = await startMarketRefresh(defaultScheduledFetchPayload("us"));
+    logger.info("Scheduled US market refresh queued", {market: "us", result});
+  }
 );
 
 export const scheduledDefaultScanAsx = onSchedule(
@@ -50,7 +58,10 @@ export const scheduledDefaultScanAsx = onSchedule(
     timeoutSeconds: 540,
     memory: "512MiB"
   },
-  async () => rebuildDefaultScan("asx")
+  async () => {
+    const result = await startFilterJob(defaultScanPayload("asx"));
+    logger.info("Scheduled ASX default scan queued", {market: "asx", result});
+  }
 );
 
 export const scheduledDefaultScanUs = onSchedule(
@@ -61,5 +72,30 @@ export const scheduledDefaultScanUs = onSchedule(
     timeoutSeconds: 540,
     memory: "512MiB"
   },
-  async () => rebuildDefaultScan("us")
+  async () => {
+    const result = await startFilterJob(defaultScanPayload("us"));
+    logger.info("Scheduled US default scan queued", {market: "us", result});
+  }
+);
+
+export const scheduledRatingOutcomes = onSchedule(
+  {
+    region,
+    schedule: "30 9 * * *",
+    timeZone,
+    timeoutSeconds: 540,
+    memory: "512MiB"
+  },
+  async () => rebuildRatingOutcomes()
+);
+
+export const scheduledJobReconciliation = onSchedule(
+  {
+    region,
+    schedule: "*/30 * * * *",
+    timeZone,
+    timeoutSeconds: 300,
+    memory: "256MiB"
+  },
+  async () => reconcileJobs()
 );

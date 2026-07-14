@@ -242,6 +242,12 @@ function strictMarket(value: unknown, allowAll = false): "asx" | "us" | "all" {
   throw new ApiError(400, allowAll ? "Market must be asx, us, or all" : "Market must be asx or us");
 }
 
+function analysisHorizon(value: unknown): number {
+  const horizon = Number(value ?? 0);
+  if ([0, 30, 90, 180, 360].includes(horizon)) return horizon;
+  throw new ApiError(400, "Analysis horizon must be current, 30, 90, 180, or 360 days");
+}
+
 async function createQueuedRefreshJob(
   payload: Record<string, unknown>,
   refresh: RefreshTracking
@@ -402,7 +408,8 @@ export function defaultScheduledFetchPayload(marketInput: unknown): Record<strin
     workers: 1,
     info_refresh_days: 30,
     history_refresh_days: 5,
-    history_chunk_size: 50,
+    batch_size: 50,
+    history_chunk_size: 25,
     history_pause_seconds: 5,
     info_pause_seconds: 1,
     rate_limit_pause_seconds: 900,
@@ -418,6 +425,38 @@ export async function startMarketRefresh(
 ): Promise<Record<string, unknown>> {
   const refresh = await createRefreshTracking(payload, user);
   return createFetchJob(payload, refresh);
+}
+
+export async function startScheduledMarketRefresh(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const market = currentMarket(payload.market);
+  const active = await db().query(
+    `
+    SELECT id, status, stage, total_tickers, completed_tickers, failed_tickers, started_at_utc
+    FROM refresh_jobs
+    WHERE market = $1
+      AND status IN ('queued', 'running')
+      AND started_at_utc > NOW() - INTERVAL '12 hours'
+    ORDER BY started_at_utc DESC
+    LIMIT 1
+    `,
+    [market]
+  );
+  const row = active.rows[0];
+  if (row) {
+    return {
+      skipped: true,
+      reason: "refresh_already_running",
+      refresh_job_id: row.id,
+      market,
+      status: row.status,
+      stage: row.stage,
+      total_tickers: row.total_tickers,
+      completed_tickers: row.completed_tickers,
+      failed_tickers: row.failed_tickers,
+      started_at_utc: row.started_at_utc
+    };
+  }
+  return startMarketRefresh(payload);
 }
 
 export function defaultScanPayload(marketInput: unknown): Record<string, unknown> {
@@ -446,6 +485,187 @@ export async function startFilterJob(payload: Record<string, unknown>): Promise<
   return createJob("filter", payload);
 }
 
+export async function startRatingOutcomesJob(payload: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  return createJob("rating-outcomes", payload);
+}
+
+export async function reconcileStaleJobs(): Promise<Record<string, number>> {
+  const client = await db().connect();
+  try {
+    await client.query("BEGIN");
+    const expiredRefreshes = await client.query(
+      `
+      WITH expired AS (
+        SELECT id
+        FROM refresh_jobs
+        WHERE status IN ('queued', 'running')
+          AND started_at_utc < NOW() - INTERVAL '48 hours'
+      ),
+      failed_batches AS (
+        UPDATE refresh_batches rb
+        SET status = 'failed',
+            finished_at_utc = COALESCE(finished_at_utc, NOW()),
+            error = COALESCE(error, 'Refresh batch expired before completion')
+        FROM expired
+        WHERE rb.refresh_job_id = expired.id
+          AND rb.status IN ('queued', 'running')
+        RETURNING rb.id
+      ),
+      failed_refreshes AS (
+        UPDATE refresh_jobs r
+        SET status = 'failed',
+            stage = 'Expired',
+            finished_at_utc = COALESCE(finished_at_utc, NOW()),
+            error = COALESCE(error, 'Refresh job expired before completion')
+        FROM expired
+        WHERE r.id = expired.id
+        RETURNING r.id
+      )
+      SELECT
+        (SELECT COUNT(*)::int FROM failed_batches) AS batches,
+        (SELECT COUNT(*)::int FROM failed_refreshes) AS refreshes
+      `
+    );
+    const expiredRefreshCounts = expiredRefreshes.rows[0] ?? {};
+
+    const expiredJobRuns = await client.query(
+      `
+      WITH expired AS (
+        SELECT id, job_type, parameters_json
+        FROM job_runs
+        WHERE status IN ('queued', 'running')
+          AND (
+            (job_type = 'fetch'
+             AND parameters_json ? 'refresh_batch_id'
+             AND started_at_utc < NOW() - INTERVAL '5 hours')
+            OR (job_type = 'fetch'
+                AND NOT (parameters_json ? 'refresh_batch_id')
+                AND started_at_utc < NOW() - INTERVAL '48 hours')
+            OR (job_type = 'filter'
+                AND started_at_utc < NOW() - INTERVAL '2 hours')
+            OR (job_type IN ('export-ratings', 'rating-outcomes')
+                AND started_at_utc < NOW() - INTERVAL '2 hours')
+            OR (job_type = 'import-sqlite'
+                AND started_at_utc < NOW() - INTERVAL '6 hours')
+            OR (job_type NOT IN ('fetch', 'filter', 'export-ratings', 'rating-outcomes', 'import-sqlite')
+                AND started_at_utc < NOW() - INTERVAL '6 hours')
+          )
+      ),
+      failed_jobs AS (
+        UPDATE job_runs jr
+        SET status = 'failed',
+            stage = 'Expired',
+            finished_at_utc = COALESCE(finished_at_utc, NOW()),
+            error = COALESCE(error, 'Job expired before completion'),
+            detail = COALESCE(NULLIF(detail, ''), 'Job expired before completion')
+        FROM expired
+        WHERE jr.id = expired.id
+        RETURNING jr.id, jr.parameters_json
+      ),
+      failed_batches AS (
+        UPDATE refresh_batches rb
+        SET status = 'failed',
+            finished_at_utc = COALESCE(finished_at_utc, NOW()),
+            error = COALESCE(error, 'Child fetch job expired before completion')
+        FROM failed_jobs fj
+        WHERE rb.id::text = fj.parameters_json ->> 'refresh_batch_id'
+          AND rb.refresh_job_id::text = fj.parameters_json ->> 'refresh_job_id'
+          AND rb.status IN ('queued', 'running')
+        RETURNING rb.id
+      )
+      SELECT
+        (SELECT COUNT(*)::int FROM failed_jobs) AS jobs,
+        (SELECT COUNT(*)::int FROM failed_batches) AS batches
+      `
+    );
+    const expiredJobCounts = expiredJobRuns.rows[0] ?? {};
+
+    const finalizedRefreshes = await client.query(
+      `
+      WITH ready AS (
+        SELECT
+          r.id,
+          COUNT(*)::int AS total_batches,
+          COUNT(*) FILTER (WHERE rb.status = 'succeeded')::int AS succeeded_batches,
+          COUNT(*) FILTER (WHERE rb.status = 'failed')::int AS failed_batches,
+          COALESCE(SUM(CASE WHEN rb.status = 'succeeded' THEN jsonb_array_length(rb.tickers_json) ELSE 0 END), 0)::int AS succeeded_tickers,
+          COALESCE(SUM(CASE WHEN rb.status = 'failed' THEN jsonb_array_length(rb.tickers_json) ELSE 0 END), 0)::int AS failed_tickers
+        FROM refresh_jobs r
+        JOIN refresh_batches rb ON rb.refresh_job_id = r.id
+        WHERE r.status IN ('queued', 'running')
+        GROUP BY r.id
+        HAVING COUNT(*) FILTER (WHERE rb.status IN ('queued', 'running')) = 0
+      ),
+      updated_refreshes AS (
+        UPDATE refresh_jobs r
+        SET status = CASE WHEN ready.failed_batches > 0 THEN 'failed' ELSE 'succeeded' END,
+            stage = CASE WHEN ready.failed_batches > 0 THEN 'Failed' ELSE 'Complete' END,
+            completed_tickers = ready.succeeded_tickers,
+            failed_tickers = ready.failed_tickers,
+            finished_at_utc = COALESCE(r.finished_at_utc, NOW()),
+            error = CASE
+              WHEN ready.failed_batches > 0
+              THEN COALESCE(r.error, ready.failed_batches || ' refresh batches failed')
+              ELSE r.error
+            END
+        FROM ready
+        WHERE r.id = ready.id
+        RETURNING r.id, r.status, ready.total_batches, ready.succeeded_batches, ready.failed_batches
+      ),
+      updated_jobs AS (
+        UPDATE job_runs jr
+        SET status = ur.status,
+            stage = CASE WHEN ur.status = 'failed' THEN 'Failed' ELSE 'Complete' END,
+            current_count = ur.succeeded_batches + ur.failed_batches,
+            total_count = ur.total_batches,
+            percent = 100,
+            finished_at_utc = COALESCE(jr.finished_at_utc, NOW()),
+            error = CASE
+              WHEN ur.status = 'failed'
+              THEN COALESCE(jr.error, ur.failed_batches || ' refresh batches failed')
+              ELSE jr.error
+            END,
+            detail = CASE
+              WHEN ur.status = 'failed'
+              THEN ur.failed_batches || ' refresh batches failed'
+              ELSE 'All refresh batches complete'
+            END
+        FROM updated_refreshes ur
+        WHERE jr.job_type = 'fetch'
+          AND jr.parameters_json ->> 'refresh_job_id' = ur.id::text
+          AND jr.status IN ('queued', 'running')
+        RETURNING jr.id
+      )
+      SELECT
+        (SELECT COUNT(*)::int FROM updated_refreshes) AS refreshes,
+        (SELECT COUNT(*)::int FROM updated_jobs) AS jobs
+      `
+    );
+    const finalizedCounts = finalizedRefreshes.rows[0] ?? {};
+    await client.query("COMMIT");
+    return {
+      expired_refresh_jobs: Number(expiredRefreshCounts.refreshes ?? 0),
+      expired_refresh_batches: Number(expiredRefreshCounts.batches ?? 0) + Number(expiredJobCounts.batches ?? 0),
+      expired_job_runs: Number(expiredJobCounts.jobs ?? 0),
+      finalized_refresh_jobs: Number(finalizedCounts.refreshes ?? 0),
+      finalized_parent_job_runs: Number(finalizedCounts.jobs ?? 0)
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function reconcileStaleJobsSafe(): Promise<void> {
+  try {
+    await reconcileStaleJobs();
+  } catch (error) {
+    console.warn("Stale job reconciliation failed", error);
+  }
+}
+
 async function requireScheduler(req: Request): Promise<void> {
   const audience = String(process.env.MONEYMAKER_SCHEDULER_AUDIENCE ?? "").trim();
   const expectedEmail = String(process.env.MONEYMAKER_SCHEDULER_SERVICE_ACCOUNT ?? "").trim();
@@ -461,6 +681,7 @@ async function requireScheduler(req: Request): Promise<void> {
 }
 
 async function latestJob(jobType: string, jobId?: string): Promise<JobRow | null> {
+  await reconcileStaleJobsSafe();
   const result = jobId
     ? await db().query("SELECT * FROM job_runs WHERE id = $1 AND job_type = $2", [jobId, jobType])
     : await db().query("SELECT * FROM job_runs WHERE job_type = $1 ORDER BY started_at_utc DESC LIMIT 1", [jobType]);
@@ -586,6 +807,61 @@ apiApp.get("/api/status", asyncRoute(async (req, res) => {
     status = statusResult.rows[0] ?? {};
   }
   const marketStatus = status ?? {};
+  const refreshResult = await db().query(
+    `
+    WITH latest_refresh AS (
+      SELECT *
+      FROM refresh_jobs
+      WHERE market = $1
+      ORDER BY started_at_utc DESC
+      LIMIT 1
+    ),
+    batch_counts AS (
+      SELECT
+        refresh_job_id,
+        COUNT(*)::int AS total_batches,
+        COUNT(*) FILTER (WHERE status = 'succeeded')::int AS succeeded_batches,
+        COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_batches,
+        COUNT(*) FILTER (WHERE status IN ('queued', 'running'))::int AS active_batches
+      FROM refresh_batches
+      WHERE refresh_job_id = (SELECT id FROM latest_refresh)
+      GROUP BY refresh_job_id
+    )
+    SELECT
+      r.id,
+      r.market,
+      r.status,
+      r.stage,
+      r.total_tickers,
+      r.completed_tickers,
+      r.failed_tickers,
+      r.started_at_utc,
+      r.finished_at_utc,
+      r.error,
+      COALESCE(b.total_batches, 0) AS total_batches,
+      COALESCE(b.succeeded_batches, 0) AS succeeded_batches,
+      COALESCE(b.failed_batches, 0) AS failed_batches,
+      COALESCE(b.active_batches, 0) AS active_batches
+    FROM latest_refresh r
+    LEFT JOIN batch_counts b ON b.refresh_job_id = r.id
+    `,
+    [market]
+  );
+  const latestRefresh = refreshResult.rows[0] ?? null;
+  const refreshPercent = latestRefresh && Number(latestRefresh.total_tickers)
+    ? Math.min(100, Math.round((Number(latestRefresh.completed_tickers ?? 0) / Number(latestRefresh.total_tickers)) * 10000) / 100)
+    : 0;
+  const refreshPayload = latestRefresh ? {
+    ...latestRefresh,
+    running: ["queued", "running"].includes(String(latestRefresh.status)),
+    success: latestRefresh.status === "succeeded" ? true : latestRefresh.status === "failed" ? false : null,
+    message: latestRefresh.error || `${String(latestRefresh.market).toUpperCase()} refresh ${latestRefresh.status}`,
+    detail: `${latestRefresh.succeeded_batches}/${latestRefresh.total_batches} batches complete, ${latestRefresh.completed_tickers}/${latestRefresh.total_tickers} tickers processed`,
+    current: latestRefresh.completed_tickers ?? 0,
+    total: latestRefresh.total_tickers ?? null,
+    percent: refreshPercent,
+    log: `${latestRefresh.succeeded_batches}/${latestRefresh.total_batches} batches complete. ${latestRefresh.active_batches} queued/running, ${latestRefresh.failed_batches} failed.`
+  } : null;
   const tickerResult = await db().query(
     "SELECT DISTINCT ticker FROM price_history WHERE market = $1 ORDER BY ticker LIMIT 500",
     [market]
@@ -598,6 +874,7 @@ apiApp.get("/api/status", asyncRoute(async (req, res) => {
       size_mb: 0,
       tickers: tickerResult.rows.map((row) => row.ticker)
     },
+    refresh: refreshPayload,
     job: jobPayload(await latestJob("fetch"))
   });
 }));
@@ -605,7 +882,7 @@ apiApp.get("/api/status", asyncRoute(async (req, res) => {
 apiApp.get("/api/job", asyncRoute(async (req, res) => {
   await requireAuth(req, db());
   const jobType = String(req.query.type ?? "fetch").trim().toLowerCase();
-  const allowed = new Set(["fetch", "filter", "import-sqlite", "export-ratings"]);
+  const allowed = new Set(["fetch", "filter", "import-sqlite", "export-ratings", "rating-outcomes"]);
   if (!allowed.has(jobType)) throw new ApiError(400, "Unsupported job type");
   res.json({ok: true, job: jobPayload(await latestJob(jobType, String(req.query.job_id ?? "") || undefined))});
 }));
@@ -778,11 +1055,12 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
   requireAdmin(user);
   const requestedMarket = strictMarket(req.query.market, true);
   const market = requestedMarket === "all" ? null : requestedMarket;
+  const horizon = analysisHorizon(req.query.horizon);
   const result = await db().query(
     `
     WITH latest_labels AS (
       SELECT DISTINCT ON (firebase_uid, market, ticker)
-        firebase_uid, user_email, market, ticker, label, event_at_utc, signal_date,
+        id, firebase_uid, user_email, market, ticker, label, event_at_utc, signal_date,
         close_price AS signal_price
       FROM rating_events
       WHERE action = 'label'
@@ -792,11 +1070,12 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
     ), performance AS (
       SELECT
         labelled.*,
-        latest.close_price AS latest_price,
-        latest.price_date AS latest_date,
+        CASE WHEN $2::int = 0 THEN latest.close_price ELSE outcome.price_at_horizon END AS latest_price,
+        CASE WHEN $2::int = 0 THEN latest.price_date ELSE NULL END AS latest_date,
         CASE
-          WHEN labelled.signal_price > 0 AND latest.close_price IS NOT NULL
+          WHEN $2::int = 0 AND labelled.signal_price > 0 AND latest.close_price IS NOT NULL
           THEN ((latest.close_price - labelled.signal_price) / labelled.signal_price) * 100
+          WHEN $2::int <> 0 THEN outcome.return_percent
           ELSE NULL
         END AS return_percent
       FROM latest_labels labelled
@@ -810,6 +1089,9 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
         ORDER BY price_date DESC
         LIMIT 1
       ) latest ON TRUE
+      LEFT JOIN rating_outcomes outcome
+        ON outcome.rating_event_id = labelled.id
+       AND outcome.horizon_days = $2::int
     )
     SELECT
       label,
@@ -829,9 +1111,9 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
       ELSE 5
     END
     `,
-    [market]
+    [market, horizon]
   );
-  res.json({ok: true, market: requestedMarket, summary: result.rows});
+  res.json({ok: true, market: requestedMarket, horizon_days: horizon, summary: result.rows});
 }));
 
 apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
@@ -839,6 +1121,7 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
   requireAdmin(user);
   const requestedMarket = strictMarket(req.query.market, true);
   const market = requestedMarket === "all" ? null : requestedMarket;
+  const horizon = analysisHorizon(req.query.horizon);
   const requestedLabel = String(req.query.label ?? "").trim().toLowerCase().replace(/\s+/g, "_");
   if (requestedLabel && !VALID_LABELS.has(requestedLabel)) throw new ApiError(400, "Invalid rating label");
   const limit = Math.min(Math.max(Number(req.query.limit ?? 250), 1), 1000);
@@ -846,7 +1129,7 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
     `
     WITH latest_labels AS (
       SELECT DISTINCT ON (firebase_uid, market, ticker)
-        firebase_uid, user_email, market, ticker, label, event_at_utc, signal_date,
+        id, firebase_uid, user_email, market, ticker, label, event_at_utc, signal_date,
         close_price AS signal_price
       FROM rating_events
       WHERE action = 'label'
@@ -858,10 +1141,13 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
     SELECT
       labelled.market, labelled.ticker, labelled.label, labelled.user_email,
       labelled.event_at_utc, labelled.signal_date, labelled.signal_price,
-      latest.close_price AS latest_price, latest.price_date AS latest_date,
+      CASE WHEN $3::int = 0 THEN latest.close_price ELSE outcome.price_at_horizon END AS latest_price,
+      CASE WHEN $3::int = 0 THEN latest.price_date ELSE NULL END AS latest_date,
+      outcome.measured_at_utc,
       CASE
-        WHEN labelled.signal_price > 0 AND latest.close_price IS NOT NULL
+        WHEN $3::int = 0 AND labelled.signal_price > 0 AND latest.close_price IS NOT NULL
         THEN ROUND((((latest.close_price - labelled.signal_price) / labelled.signal_price) * 100)::numeric, 2)
+        WHEN $3::int <> 0 THEN ROUND(outcome.return_percent::numeric, 2)
         ELSE NULL
       END AS return_percent
     FROM latest_labels labelled
@@ -875,12 +1161,15 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
       ORDER BY price_date DESC
       LIMIT 1
     ) latest ON TRUE
+    LEFT JOIN rating_outcomes outcome
+      ON outcome.rating_event_id = labelled.id
+     AND outcome.horizon_days = $3::int
     ORDER BY return_percent ASC NULLS LAST, labelled.event_at_utc DESC
-    LIMIT $3
+    LIMIT $4
     `,
-    [market, requestedLabel || null, limit]
+    [market, requestedLabel || null, horizon, limit]
   );
-  res.json({ok: true, market: requestedMarket, picks: result.rows});
+  res.json({ok: true, market: requestedMarket, horizon_days: horizon, picks: result.rows});
 }));
 
 apiApp.get("/api/chart", asyncRoute(async (req, res) => {
@@ -1155,7 +1444,7 @@ apiApp.post("/api/scheduled-fetch", asyncRoute(async (req, res) => {
     ...(req.body ?? {}),
     market
   };
-  res.json(await startMarketRefresh(scheduledPayload));
+  res.json(await startScheduledMarketRefresh(scheduledPayload));
 }));
 
 apiApp.post("/api/filter/start", asyncRoute(async (req, res) => {
@@ -1216,6 +1505,27 @@ apiApp.post("/api/export/ratings", asyncRoute(async (req, res) => {
     requested_by_email: user.email
   };
   res.json(await createJob("export-ratings", payload));
+}));
+
+apiApp.post("/api/admin/reconcile-jobs", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  res.json({ok: true, reconciled: await reconcileStaleJobs()});
+}));
+
+apiApp.post("/api/admin/recalculate-rating-outcomes", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  const body = req.body ?? {};
+  const market = strictMarket(body.market, true);
+  const payload = {
+    market,
+    horizons: Array.isArray(body.horizons) ? body.horizons : [30, 90, 180, 360],
+    limit: positiveInt(body.limit, 100000, 1, 500000),
+    requested_by_uid: user.uid,
+    requested_by_email: user.email
+  };
+  res.json(await startRatingOutcomesJob(payload));
 }));
 
 apiApp.use((_req, res) => {

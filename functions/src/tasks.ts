@@ -13,6 +13,37 @@ interface RefreshTickerBatchPayload {
   fetchPayload?: Record<string, unknown>;
 }
 
+const childJobPollMs = Math.max(Number(process.env.MONEYMAKER_CHILD_JOB_POLL_MS ?? 30000), 5000);
+const childJobWaitMs = Math.max(Number(process.env.MONEYMAKER_CHILD_JOB_WAIT_MS ?? 1_700_000), childJobPollMs);
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForChildFetchJob(jobId: string): Promise<void> {
+  const deadline = Date.now() + childJobWaitMs;
+  let lastStatus = "queued";
+  let lastDetail = "";
+  while (Date.now() < deadline) {
+    const result = await db().query(
+      "SELECT status, detail, error FROM job_runs WHERE id = $1",
+      [jobId]
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new Error(`Child fetch job ${jobId} disappeared from job_runs`);
+    }
+    lastStatus = String(row.status ?? "");
+    lastDetail = String(row.error ?? row.detail ?? "");
+    if (lastStatus === "succeeded") return;
+    if (["failed", "cancelled"].includes(lastStatus)) {
+      throw new Error(`Child fetch job ${jobId} ${lastStatus}: ${lastDetail.slice(0, 1000)}`);
+    }
+    await sleep(childJobPollMs);
+  }
+  throw new Error(`Timed out waiting for child fetch job ${jobId}; last status ${lastStatus}: ${lastDetail.slice(0, 1000)}`);
+}
+
 export const refreshTickerBatch = onTaskDispatched<RefreshTickerBatchPayload>(
   {
     region: "australia-southeast1",
@@ -40,6 +71,20 @@ export const refreshTickerBatch = onTaskDispatched<RefreshTickerBatchPayload>(
       `,
       [data.refreshBatchId, data.refreshJobId]
     );
+
+    const existingDispatch = await db().query(
+      `
+      SELECT result_json #>> '{cloud_run_dispatch,job_id}' AS child_job_id
+      FROM refresh_batches
+      WHERE id = $1 AND refresh_job_id = $2
+      `,
+      [data.refreshBatchId, data.refreshJobId]
+    );
+    const existingChildJobId = String(existingDispatch.rows[0]?.child_job_id ?? "").trim();
+    if (existingChildJobId) {
+      await waitForChildFetchJob(existingChildJobId);
+      return;
+    }
 
     const jobId = crypto.randomUUID();
     const payload = {
@@ -80,5 +125,6 @@ export const refreshTickerBatch = onTaskDispatched<RefreshTickerBatchPayload>(
       `,
       [JSON.stringify({job_id: jobId, cloud_run_job: cloudRunJob}), data.refreshBatchId, data.refreshJobId]
     );
+    await waitForChildFetchJob(jobId);
   }
 );

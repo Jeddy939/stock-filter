@@ -88,7 +88,7 @@ try {
         $env:MONEYMAKER_DEPLOY_TASK_FUNCTIONS = $DeployTaskFunctions
         Invoke-Checked $Firebase @("functions:artifacts:setpolicy", "--location", $Region, "--days", "14", "--force", "--project", $Project)
         Invoke-Checked $Firebase @("deploy", "--only", "functions", "--project", $Project)
-        $functionEnvVars = "MONEYMAKER_REQUIRE_AUTH=true,MONEYMAKER_CLOUD_MODE=true,GOOGLE_CLOUD_PROJECT=$Project,MONEYMAKER_RUN_REGION=$Region,MONEYMAKER_FETCH_JOB=moneymaker-fetch,MONEYMAKER_FILTER_JOB=moneymaker-filter,MONEYMAKER_IMPORT_JOB=moneymaker-import,MONEYMAKER_EXPORT_JOB=moneymaker-export,MONEYMAKER_SCHEDULER_AUDIENCE=$ApiUrl,MONEYMAKER_SCHEDULER_SERVICE_ACCOUNT=moneymaker-scheduler@$Project.iam.gserviceaccount.com,FIREBASE_API_KEY=$ApiKey,FIREBASE_APP_ID=$AppId,FIREBASE_AUTH_DOMAIN=$Project.firebaseapp.com,FIREBASE_STORAGE_BUCKET=$StorageBucket,MONEYMAKER_STORAGE_BUCKET=$StorageBucket,FIREBASE_APPCHECK_SITE_KEY=$AppCheckSiteKey,MONEYMAKER_REQUIRE_APP_CHECK=$RequireAppCheck,MONEYMAKER_USE_DATA_CONNECT=$UseDataConnect,MONEYMAKER_DATACONNECT_SERVICE=moneymaker,MONEYMAKER_DATACONNECT_LOCATION=$Region,MONEYMAKER_USE_TASK_QUEUE=$UseTaskQueue"
+        $functionEnvVars = "MONEYMAKER_REQUIRE_AUTH=true,MONEYMAKER_CLOUD_MODE=true,GOOGLE_CLOUD_PROJECT=$Project,MONEYMAKER_RUN_REGION=$Region,MONEYMAKER_FETCH_JOB=moneymaker-fetch,MONEYMAKER_FILTER_JOB=moneymaker-filter,MONEYMAKER_IMPORT_JOB=moneymaker-import,MONEYMAKER_EXPORT_JOB=moneymaker-export,MONEYMAKER_OUTCOMES_JOB=moneymaker-rating-outcomes,MONEYMAKER_SCHEDULER_AUDIENCE=$ApiUrl,MONEYMAKER_SCHEDULER_SERVICE_ACCOUNT=moneymaker-scheduler@$Project.iam.gserviceaccount.com,FIREBASE_API_KEY=$ApiKey,FIREBASE_APP_ID=$AppId,FIREBASE_AUTH_DOMAIN=$Project.firebaseapp.com,FIREBASE_STORAGE_BUCKET=$StorageBucket,MONEYMAKER_STORAGE_BUCKET=$StorageBucket,FIREBASE_APPCHECK_SITE_KEY=$AppCheckSiteKey,MONEYMAKER_REQUIRE_APP_CHECK=$RequireAppCheck,MONEYMAKER_USE_DATA_CONNECT=$UseDataConnect,MONEYMAKER_DATACONNECT_SERVICE=moneymaker,MONEYMAKER_DATACONNECT_LOCATION=$Region,MONEYMAKER_USE_TASK_QUEUE=$UseTaskQueue"
         Invoke-Checked $Gcloud @(
             "run", "services", "update", $FunctionName,
             "--region", $Region,
@@ -101,7 +101,9 @@ try {
             "scheduledrefreshasx",
             "scheduledrefreshus",
             "scheduleddefaultscanasx",
-            "scheduleddefaultscanus"
+            "scheduleddefaultscanus",
+            "scheduledratingoutcomes",
+            "scheduledjobreconciliation"
         )) {
             Invoke-Checked $Gcloud @(
                 "run", "services", "update", $scheduledService,
@@ -122,6 +124,13 @@ try {
                 "--set-secrets", "MONEYMAKER_DATABASE_URL=$DatabaseSecret`:latest"
             )
         }
+        Invoke-Checked $Gcloud @(
+            "run", "jobs", "update", "moneymaker-fetch",
+            "--region", $Region,
+            "--project", $Project,
+            "--memory", "4Gi",
+            "--cpu", "2"
+        )
         $projectNumber = (& $Gcloud projects describe $Project --format="value(projectNumber)").Trim()
         $runtimeServiceAccount = "$projectNumber-compute@developer.gserviceaccount.com"
         Invoke-Checked $Gcloud @(
