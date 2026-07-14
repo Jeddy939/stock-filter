@@ -61,14 +61,18 @@ export async function requireAuth(req: Request, pool: Pool): Promise<UserContext
         email = EXCLUDED.email,
         display_name = EXCLUDED.display_name,
         role = EXCLUDED.role,
-        status = EXCLUDED.status,
+        status = user_profiles.status,
         last_seen_at_utc = NOW()
       RETURNING role, status
       `,
       [uid, email, displayName, role]
     );
     const profile = profileResult.rows[0] as {role?: string; status?: string} | undefined;
-    return {uid, email, display_name: displayName, role: normalizeRole(profile?.role ?? role), status: profile?.status ?? "active"};
+    const status = String(profile?.status ?? "active").toLowerCase();
+    if (status !== "active") {
+      throw new ApiError(403, "This account is disabled");
+    }
+    return {uid, email, display_name: displayName, role: normalizeRole(profile?.role ?? role), status};
   } catch (error) {
     if (error instanceof ApiError) throw error;
     throw new ApiError(401, "Invalid Firebase ID token");

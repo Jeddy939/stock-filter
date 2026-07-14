@@ -688,6 +688,19 @@ async function latestJob(jobType: string, jobId?: string): Promise<JobRow | null
   return result.rows[0] ?? null;
 }
 
+function requireJobVisibility(user: UserContext, jobType: string, row: JobRow | null): void {
+  if (user.role === "admin") return;
+  if (jobType === "filter") {
+    requireAnalyst(user);
+    return;
+  }
+  const parameters = row?.parameters_json && typeof row.parameters_json === "object" && !Array.isArray(row.parameters_json)
+    ? row.parameters_json as Record<string, unknown>
+    : {};
+  if (String(parameters.requested_by_uid ?? "") === user.uid) return;
+  throw new ApiError(403, "admin access required");
+}
+
 async function overlayUserAppraisals(user: UserContext, scanId: number, results: Array<Record<string, unknown>>) {
   if (!scanId || results.length === 0) return results;
   const tickers = results.map((row) => String(row.ticker ?? "").toUpperCase()).filter(Boolean);
@@ -880,16 +893,20 @@ apiApp.get("/api/status", asyncRoute(async (req, res) => {
 }));
 
 apiApp.get("/api/job", asyncRoute(async (req, res) => {
-  await requireAuth(req, db());
+  const user = await requireAuth(req, db());
   const jobType = String(req.query.type ?? "fetch").trim().toLowerCase();
   const allowed = new Set(["fetch", "filter", "import-sqlite", "export-ratings", "rating-outcomes"]);
   if (!allowed.has(jobType)) throw new ApiError(400, "Unsupported job type");
-  res.json({ok: true, job: jobPayload(await latestJob(jobType, String(req.query.job_id ?? "") || undefined))});
+  const job = await latestJob(jobType, String(req.query.job_id ?? "") || undefined);
+  requireJobVisibility(user, jobType, job);
+  res.json({ok: true, job: jobPayload(job)});
 }));
 
 apiApp.get("/api/filter/job", asyncRoute(async (req, res) => {
-  await requireAuth(req, db());
-  res.json({ok: true, job: jobPayload(await latestJob("filter", String(req.query.job_id ?? "") || undefined))});
+  const user = await requireAuth(req, db());
+  const job = await latestJob("filter", String(req.query.job_id ?? "") || undefined);
+  requireJobVisibility(user, "filter", job);
+  res.json({ok: true, job: jobPayload(job)});
 }));
 
 apiApp.get("/api/scans", asyncRoute(async (req, res) => {
