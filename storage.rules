@@ -1,0 +1,11 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Raw SQLite checkpoints and exports are server-side artifacts. Cloud Run
+    // uses its service account, which bypasses client Storage Rules.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,12 @@
+# SQL Connect service-owned schema.
+#
+# MoneyMaker's production stock tables are a brownfield PostgreSQL schema owned
+# by firebase/migrations/001_schema.sql. The connector uses native SQL
+# operations to read/write those tables so SQL Connect does not try to remove
+# app-owned defaults, foreign keys, check constraints, or performance indexes.
+
+type BackendMetadata @table(name: "backend_metadata", key: "key") {
+  key: String!
+  value: Any
+  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
+}

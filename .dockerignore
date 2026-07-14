@@ -1,0 +1,15 @@
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.json
+!default filter settings.json
+legacy/
+exports/
+firebase_public/
+stock_data_*.json
+rate_limit_calibration*.json
+rate_limit_calibration*.sqlite*

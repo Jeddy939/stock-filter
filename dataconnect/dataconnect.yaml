@@ -1,0 +1,13 @@
+specVersion: v1
+serviceId: moneymaker
+location: australia-southeast1
+schema:
+  source: ./schema
+  datasource:
+    postgresql:
+      database: moneymaker
+      cloudSql:
+        instanceId: moneymaker-db
+        schemaValidation: COMPATIBLE
+connectorDirs:
+  - ./connector
