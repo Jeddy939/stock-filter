@@ -47,6 +47,12 @@ export async function requireAuth(req: Request, pool: Pool): Promise<UserContext
       [email]
     );
     const invite = inviteResult.rows[0] as {role?: string; status?: string} | undefined;
+    if (!email) {
+      throw new ApiError(403, "Invited email account required");
+    }
+    if (!invite) {
+      throw new ApiError(403, "This app is invite-only");
+    }
     if (invite?.status === "disabled") {
       throw new ApiError(403, "This account is disabled");
     }
