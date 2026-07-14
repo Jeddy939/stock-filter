@@ -986,17 +986,22 @@
           if (user) {
             $("authEmail").value = user.email || "";
             $("authSignOut").hidden = false;
-            const anonymous = Boolean(user.isAnonymous);
-            $("authSignIn").hidden = !anonymous;
-            $("authCreate").hidden = !anonymous;
-            $("authPassword").hidden = !anonymous;
+            $("authSignIn").hidden = true;
+            $("authCreate").hidden = true;
+            $("authPassword").hidden = true;
             if (currentUserProfile?.user) $("topStatus").textContent = `Signed in as ${currentUserProfile.user.email || "anonymous"}`;
-            else $("topStatus").textContent = anonymous ? "Anonymous session" : `Signed in as ${user.email || "user"}`;
+            else $("topStatus").textContent = `Signed in as ${user.email || "user"}`;
+          } else {
+            $("authSignOut").hidden = true;
+            $("authSignIn").hidden = false;
+            $("authCreate").hidden = false;
+            $("authPassword").hidden = false;
+            $("topStatus").textContent = "Sign in with an invited email account";
           }
         });
         await auth.authStateReady();
-        const result = auth.currentUser ? { user: auth.currentUser } : await authModule.signInAnonymously(auth);
-        return () => authModule.getIdToken(result.user, true);
+        if (!auth.currentUser) return null;
+        return () => authModule.getIdToken(auth.currentUser, true);
       } catch (error) {
         console.warn("Firebase authentication is unavailable", error);
         return null;
