@@ -567,7 +567,7 @@
       <input id="authEmail" type="email" placeholder="Email" autocomplete="username" style="width:180px">
       <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password" style="width:140px">
       <button id="authSignIn" type="button">Sign in</button>
-      <button id="authCreate" type="button">Create account</button>
+      <button id="authCreate" type="button">Set/reset password</button>
       <button id="authSignOut" type="button" hidden>Sign out</button>
     </div>
   </header>
@@ -2108,8 +2108,10 @@
     $("authCreate").addEventListener("click", async () => {
       try {
         await authReady;
-        await firebaseAuthMethods.createUserWithEmailAndPassword(firebaseAuth, $("authEmail").value.trim(), $("authPassword").value);
-        window.location.reload();
+        const email = $("authEmail").value.trim();
+        if (!email) throw new Error("Enter your invited email address first");
+        await firebaseAuthMethods.sendPasswordResetEmail(firebaseAuth, email);
+        $("topStatus").textContent = `Password setup email sent to ${email}`;
       } catch (error) { $("topStatus").textContent = error.message; }
     });
     $("authSignOut").addEventListener("click", async () => {
