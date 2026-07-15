@@ -594,11 +594,12 @@
     }
     section.workspace {
       display: grid;
-      grid-template-columns: minmax(410px, .85fr) minmax(520px, 1.15fr);
+      grid-template-columns: minmax(0, 1fr);
       grid-template-areas:
-        "strip strip"
-        "metrics metrics"
-        "results chart";
+        "strip"
+        "metrics"
+        "chart"
+        "results";
       gap: 12px;
       padding: 12px 14px;
       overflow: visible;
@@ -645,18 +646,41 @@
       gap: 10px;
     }
     .market-data-card {
+      position: relative;
       border: 1px solid var(--line);
       border-radius: 6px;
       background: var(--panel);
-      padding: 8px;
-      display: grid;
-      grid-template-columns: 74px repeat(5, minmax(0, 1fr));
-      gap: 8px;
-      align-items: start;
+      padding: 6px 9px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 38px;
+      cursor: help;
     }
-    .market-data-card strong { font-size: 13px; }
-    .market-data-card span { color: var(--muted); font-size: 11px; display: block; }
-    .market-data-card b { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; }
+    .market-data-card strong { font-size: 12px; letter-spacing: .04em; }
+    .market-last-run { color: var(--muted); font-size: 11px; }
+    .market-last-run b { color: var(--text); margin-left: 5px; font-size: 12px; font-weight: 600; }
+    .market-data-tooltip {
+      position: absolute;
+      left: 0;
+      top: calc(100% + 5px);
+      z-index: 8;
+      display: none;
+      width: max-content;
+      max-width: min(460px, calc(100vw - 28px));
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #10151a;
+      box-shadow: 0 8px 22px var(--shadow);
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+      white-space: normal;
+      pointer-events: none;
+    }
+    .market-data-card:hover .market-data-tooltip,
+    .market-data-card:focus .market-data-tooltip { display: block; }
     .metrics { grid-area: metrics; margin-bottom: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); }
     #resultsPanel {
       grid-area: results;
@@ -762,14 +786,13 @@
       section.workspace {
         grid-template-columns: 1fr;
         grid-template-areas:
-          "results"
-          "chart"
           "strip"
-          "metrics";
+          "metrics"
+          "chart"
+          "results";
       }
       .screen-panel { grid-template-columns: 1fr 1fr; }
       .market-data-strip { grid-template-columns: 1fr; }
-      .market-data-card { grid-template-columns: 60px repeat(2, minmax(0, 1fr)); }
       .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .chart-controls { grid-template-columns: 1fr 1fr; }
       .analysis-insight-grid { grid-template-columns: 1fr; }
@@ -796,8 +819,6 @@
       .screen-panel .status-line { white-space: normal; }
       .market-segment { width: 100%; }
       .advanced-grid { grid-template-columns: 1fr 1fr; }
-      .market-data-card { grid-template-columns: 1fr 1fr; }
-      .market-data-card strong { grid-column: 1 / -1; }
       .results-wrap { max-height: none; }
       .modal { align-items: flex-end; justify-content: stretch; }
       .progress-window {
@@ -1044,8 +1065,14 @@
 
     <section class="workspace">
       <div class="market-data-strip" id="marketDataStrip" aria-live="polite">
-        <div class="market-data-card"><strong>ASX</strong><span>Latest bar<b>-</b></span><span>Refresh Brisbane<b>-</b></span><span>Tickers<b>-</b></span><span>Weekly rows<b>-</b></span><span>Next refresh<b>-</b></span></div>
-        <div class="market-data-card"><strong>US</strong><span>Latest bar<b>-</b></span><span>Refresh Brisbane<b>-</b></span><span>Tickers<b>-</b></span><span>Weekly rows<b>-</b></span><span>Next refresh<b>-</b></span></div>
+        <div class="market-data-card" tabindex="0" aria-label="ASX market status">
+          <strong>ASX</strong><span class="market-last-run">Last run<b>-</b></span>
+          <div class="market-data-tooltip" role="tooltip">Latest bar: -<br>Tickers: -<br>Weekly rows: -<br>Next refresh: -</div>
+        </div>
+        <div class="market-data-card" tabindex="0" aria-label="US market status">
+          <strong>US</strong><span class="market-last-run">Last run<b>-</b></span>
+          <div class="market-data-tooltip" role="tooltip">Latest bar: -<br>Tickers: -<br>Weekly rows: -<br>Next refresh: -</div>
+        </div>
       </div>
       <div class="metrics">
         <div class="metric"><span>Covered stocks</span><strong id="metricTickers">0</strong></div>
@@ -1479,17 +1506,26 @@
       strip.innerHTML = ["asx", "us"].map((market) => {
         const item = markets?.[market] || {};
         const refresh = item.latest_refresh || {};
-        const failure = refresh.status === "failed" ? `<span>Latest failure<b>${escapeHtml(refresh.error || "Refresh failed")}</b></span>` : "";
+        const refreshTimestamp = item.last_successful_refresh_at_utc || item.database_refreshed_at_utc;
+        const lastRun = formatBrisbane(refreshTimestamp, false);
+        const details = [
+          `Last run: ${formatBrisbane(refreshTimestamp)}`,
+          `Latest bar: ${item.latest_bar_date || "-"}`,
+          `Tickers: ${fmt.format(Number(item.covered_tickers || 0))}`,
+          `Weekly rows: ${fmt.format(Number(item.weekly_metric_rows || 0))}`,
+          `Next refresh: ${formatBrisbane(item.next_scheduled_refresh_at_utc)}`
+        ];
+        if (refresh.status === "failed") details.push(`Latest failure: ${refresh.error || "Refresh failed"}`);
         return `<div class="market-data-card" data-market-card="${market}">
           <strong>${market.toUpperCase()}</strong>
-          <span>Latest bar<b>${escapeHtml(item.latest_bar_date || "-")}</b></span>
-          <span>Refresh Brisbane<b>${escapeHtml(formatBrisbane(item.last_successful_refresh_at_utc || item.database_refreshed_at_utc))}</b></span>
-          <span>Tickers<b>${fmt.format(Number(item.covered_tickers || 0))}</b></span>
-          <span>Weekly rows<b>${fmt.format(Number(item.weekly_metric_rows || 0))}</b></span>
-          <span>Next refresh<b>${escapeHtml(formatBrisbane(item.next_scheduled_refresh_at_utc))}</b></span>
-          ${failure}
+          <span class="market-last-run">Last run<b>${escapeHtml(lastRun)}</b></span>
+          <div class="market-data-tooltip" role="tooltip">${details.map(escapeHtml).join("<br>")}</div>
         </div>`;
       }).join("");
+      strip.querySelectorAll(".market-data-card").forEach((card) => {
+        card.tabIndex = 0;
+        card.setAttribute("aria-label", `${card.dataset.marketCard.toUpperCase()} market status. Hover or focus for details.`);
+      });
     }
 
     async function api(path, options = {}) {
@@ -1770,10 +1806,10 @@
         $("topStatus").textContent = `${market.toUpperCase()} refresh ${refresh.status}: ${fmt.format(refresh.completed_tickers || 0)} / ${fmt.format(refresh.total_tickers || 0)} tickers`;
         $("topStatus").className = "status-line warn";
       } else if (refresh && refresh.status === "failed") {
-        $("topStatus").textContent = `${market.toUpperCase()} latest refresh failed at ${formatBrisbane(refresh.finished_at_utc || refresh.started_at_utc)}: ${refresh.error || "unknown error"}`;
+        $("topStatus").textContent = `${market.toUpperCase()} refresh failed; hover market status for details`;
         $("topStatus").className = "status-line bad";
       } else {
-        $("topStatus").textContent = `${market.toUpperCase()} data latest bar ${s.latest_bar_date || "-"}, last successful refresh ${formatBrisbane(s.last_successful_refresh_at_utc || s.database_refreshed_at_utc)}`;
+        $("topStatus").textContent = `${market.toUpperCase()} last run ${formatBrisbane(s.last_successful_refresh_at_utc || s.database_refreshed_at_utc, false)}`;
         $("topStatus").className = "status-line ok";
       }
     }
