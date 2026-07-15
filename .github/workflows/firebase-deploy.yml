@@ -28,21 +28,15 @@ jobs:
       github.event.workflow_run.conclusion == 'success')
     permissions:
       contents: read
+      id-token: write
     env:
       FIREBASE_PROJECT_ID: moneymaker-aedf7
       FIREBASE_DEPLOY_TARGETS: ${{ github.event.inputs.targets || vars.FIREBASE_DEPLOY_TARGETS || 'hosting,functions' }}
-      HAS_FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MONEYMAKER_AEDF7 != '' }}
     steps:
-      - name: Skip until Firebase service account secret exists
-        if: env.HAS_FIREBASE_SERVICE_ACCOUNT != 'true'
-        run: echo "Skipping deploy because FIREBASE_SERVICE_ACCOUNT_MONEYMAKER_AEDF7 is not configured."
-
       - name: Check out repository
-        if: env.HAS_FIREBASE_SERVICE_ACCOUNT == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Node
-        if: env.HAS_FIREBASE_SERVICE_ACCOUNT == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -50,21 +44,18 @@ jobs:
           cache-dependency-path: functions/package-lock.json
 
       - name: Install Functions dependencies
-        if: env.HAS_FIREBASE_SERVICE_ACCOUNT == 'true'
         run: npm ci
         working-directory: functions
 
       - name: Build Functions
-        if: env.HAS_FIREBASE_SERVICE_ACCOUNT == 'true'
         run: npm run build
         working-directory: functions
 
       - name: Authenticate to Google Cloud
-        if: env.HAS_FIREBASE_SERVICE_ACCOUNT == 'true'
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MONEYMAKER_AEDF7 }}
+          workload_identity_provider: projects/137012961005/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: github-firebase-deploy@moneymaker-aedf7.iam.gserviceaccount.com
 
       - name: Deploy Firebase targets
-        if: env.HAS_FIREBASE_SERVICE_ACCOUNT == 'true'
         run: npx firebase-tools@latest deploy --project "$FIREBASE_PROJECT_ID" --only "$FIREBASE_DEPLOY_TARGETS" --non-interactive
