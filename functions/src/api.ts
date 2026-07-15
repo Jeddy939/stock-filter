@@ -612,10 +612,22 @@ export async function reconcileStaleJobs(): Promise<Record<string, number>> {
     const expiredRefreshes = await client.query(
       `
       WITH expired AS (
-        SELECT id
+        SELECT id, status
         FROM refresh_jobs
         WHERE status IN ('queued', 'running')
-          AND started_at_utc < NOW() - INTERVAL '48 hours'
+          AND (
+            started_at_utc < NOW() - INTERVAL '48 hours'
+            OR (
+              status = 'queued'
+              AND started_at_utc < NOW() - INTERVAL '30 minutes'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM refresh_batches active
+                WHERE active.refresh_job_id = refresh_jobs.id
+                  AND active.status IN ('running', 'succeeded')
+              )
+            )
+          )
       ),
       failed_batches AS (
         UPDATE refresh_batches rb
@@ -632,7 +644,14 @@ export async function reconcileStaleJobs(): Promise<Record<string, number>> {
         SET status = 'failed',
             stage = 'Expired',
             finished_at_utc = COALESCE(finished_at_utc, NOW()),
-            error = COALESCE(error, 'Refresh job expired before completion')
+            error = COALESCE(
+              error,
+              CASE
+                WHEN expired.status = 'queued'
+                THEN 'Refresh remained queued without a started batch'
+                ELSE 'Refresh job expired before completion'
+              END
+            )
         FROM expired
         WHERE r.id = expired.id
         RETURNING r.id
@@ -1073,6 +1092,7 @@ apiApp.get("/api/status", asyncRoute(async (req, res) => {
 
 apiApp.get("/api/markets/status", asyncRoute(async (req, res) => {
   await requireAuth(req, db());
+  await reconcileStaleJobsSafe();
   const [asx, us] = await Promise.all([marketFreshness("asx"), marketFreshness("us")]);
   res.json({ok: true, generated_at_utc: new Date().toISOString(), markets: {asx, us}});
 }));
