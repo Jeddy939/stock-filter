@@ -658,9 +658,19 @@
     .market-data-card span { color: var(--muted); font-size: 11px; display: block; }
     .market-data-card b { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; }
     .metrics { grid-area: metrics; margin-bottom: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    #resultsPanel { grid-area: results; min-width: 0; }
+    #resultsPanel {
+      grid-area: results;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
     #chartPanel { grid-area: chart; min-width: 0; }
-    .results-wrap { max-height: calc(100vh - 340px); }
+    #resultsPanel .results-wrap {
+      flex: 1 1 auto;
+      min-height: 0;
+      max-height: none;
+    }
     .advanced-settings {
       grid-column: 1 / -1;
       border-top: 1px solid var(--line);
