@@ -9,6 +9,7 @@ import {dispatchCloudRunJob} from "./cloudrun";
 import {db} from "./db";
 import {readMarketStatusViaDataConnect, type MarketStatusRow} from "./dataconnect";
 import {currentMarket, MARKET_DEFAULTS, rangeDays, VALID_LABELS, yahooUrl} from "./market";
+import {requiresAppCheck} from "./request-policy";
 import {normalizeScreenConfig, screenConfigHash} from "./screen-config";
 
 interface JobRow {
@@ -955,6 +956,10 @@ apiApp.get("/api/auth-config", asyncRoute(async (_req, res) => {
 }));
 
 apiApp.use("/api", (req: Request, res: Response, next: NextFunction) => {
+  if (!requiresAppCheck(req.path)) {
+    next();
+    return;
+  }
   requireAppCheck(req)
     .then(() => next())
     .catch((error) => {
