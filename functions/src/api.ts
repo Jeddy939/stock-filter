@@ -9,6 +9,7 @@ import {dispatchCloudRunJob} from "./cloudrun";
 import {db} from "./db";
 import {readMarketStatusViaDataConnect, type MarketStatusRow} from "./dataconnect";
 import {currentMarket, MARKET_DEFAULTS, rangeDays, VALID_LABELS, yahooUrl} from "./market";
+import {normalizeScreenConfig, screenConfigHash} from "./screen-config";
 
 interface JobRow {
   id?: string;
@@ -22,6 +23,11 @@ interface JobRow {
   parameters_json?: unknown;
   result_json?: unknown;
   error?: string | null;
+  started_at_utc?: string | Date;
+  finished_at_utc?: string | Date | null;
+  updated_at_utc?: string | Date;
+  config_hash?: string | null;
+  dedupe_key?: string | null;
   [key: string]: unknown;
 }
 
@@ -87,6 +93,11 @@ function jobPayload(row?: JobRow | null): Record<string, unknown> {
     return {running: false, success: null, message: "Idle", stage: "Idle", percent: 0};
   }
   const status = String(row.status ?? "queued");
+  const startedAt = row.started_at_utc ? new Date(row.started_at_utc) : null;
+  const finishedAt = row.finished_at_utc ? new Date(row.finished_at_utc) : null;
+  const elapsedSeconds = startedAt && !Number.isNaN(startedAt.getTime())
+    ? Math.max(0, Math.round(((finishedAt?.getTime() ?? Date.now()) - startedAt.getTime()) / 1000))
+    : null;
   return {
     ...row,
     running: status === "queued" || status === "running",
@@ -95,8 +106,61 @@ function jobPayload(row?: JobRow | null): Record<string, unknown> {
     current: row.current_count ?? 0,
     total: row.total_count ?? null,
     summary: row.parameters_json ?? {},
-    results: row.result_json ?? []
+    results: row.result_json ?? [],
+    elapsed_seconds: elapsedSeconds
   };
+}
+
+function nextScheduledRefresh(market: "asx" | "us", now = new Date()): string {
+  const brisbaneOffsetMs = 10 * 60 * 60 * 1000;
+  const localNow = new Date(now.getTime() + brisbaneOffsetMs);
+  const allowedDays = market === "asx" ? new Set([1, 2, 3, 4, 5]) : new Set([2, 3, 4, 5, 6]);
+  const hour = market === "asx" ? 6 : 7;
+  for (let dayOffset = 0; dayOffset < 8; dayOffset += 1) {
+    const localCandidate = new Date(Date.UTC(
+      localNow.getUTCFullYear(),
+      localNow.getUTCMonth(),
+      localNow.getUTCDate() + dayOffset,
+      hour,
+      30
+    ));
+    if (!allowedDays.has(localCandidate.getUTCDay())) continue;
+    const utcCandidate = new Date(localCandidate.getTime() - brisbaneOffsetMs);
+    if (utcCandidate.getTime() > now.getTime()) return utcCandidate.toISOString();
+  }
+  throw new Error(`Could not determine next ${market.toUpperCase()} refresh`);
+}
+
+function defaultConfigHash(market: "asx" | "us"): string {
+  return screenConfigHash(defaultScanPayload(market));
+}
+
+function stageCode(value: unknown): string {
+  return String(value ?? "working")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "working";
+}
+
+async function recordJobEvent(
+  jobId: string,
+  stage: string,
+  status: string,
+  message: string,
+  current = 0,
+  total: number | null = null,
+  percent: number | null = null,
+  metadata: Record<string, unknown> = {}
+): Promise<void> {
+  await db().query(
+    `
+    INSERT INTO job_events
+      (job_id, stage_code, stage, status, message, current_count, total_count, percent, metadata_json)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+    `,
+    [jobId, stageCode(stage), stage, status, message, current, total, percent, JSON.stringify(metadata)]
+  );
 }
 
 function intervalKey(date: string, interval: string): string {
@@ -142,28 +206,76 @@ function movingAverage(values: Array<number | null>, period: number): Array<numb
 }
 
 async function createJob(jobType: string, payload: Record<string, unknown>) {
-  const jobId = crypto.randomUUID();
-  const requestedMarket = String(payload.market ?? "").trim().toLowerCase();
+  const screenConfig = jobType === "filter" ? normalizeScreenConfig(payload) : null;
+  const configHash = screenConfig ? screenConfigHash(payload) : null;
+  const effectivePayload = screenConfig
+    ? {...payload, ...screenConfig, config_hash: configHash}
+    : payload;
+  const requestedMarket = String(effectivePayload.market ?? "").trim().toLowerCase();
   const market = requestedMarket === "all" ? null : currentMarket(payload.market);
+  const dedupeKey = jobType === "filter" && market && configHash ? `${market}:${configHash}` : null;
+  if (dedupeKey) {
+    const active = await db().query(
+      `
+      SELECT * FROM job_runs
+      WHERE job_type = $1 AND market = $2 AND dedupe_key = $3
+        AND status IN ('queued', 'running')
+      ORDER BY started_at_utc DESC
+      LIMIT 1
+      `,
+      [jobType, market, dedupeKey]
+    );
+    if (active.rows[0]) {
+      return {ok: true, deduplicated: true, job: jobPayload(active.rows[0])};
+    }
+  }
+
+  const jobId = crypto.randomUUID();
   const started = new Date();
-  await db().query(
-    `
-    INSERT INTO job_runs
-      (id, job_type, market, status, stage, detail, started_at_utc, parameters_json)
-    VALUES ($1, $2, $3, 'queued', 'Queued', $4, $5, $6::jsonb)
-    `,
-    [jobId, jobType, market, "Queued Cloud Run Job", started, JSON.stringify(payload)]
-  );
+  try {
+    await db().query(
+      `
+      INSERT INTO job_runs
+        (id, job_type, market, status, stage, detail, started_at_utc, updated_at_utc,
+         parameters_json, dedupe_key, config_hash)
+      VALUES ($1, $2, $3, 'queued', 'Queued', $4, $5, $5, $6::jsonb, $7, $8)
+      `,
+      [jobId, jobType, market, "Waiting for a worker", started, JSON.stringify(effectivePayload), dedupeKey, configHash]
+    );
+  } catch (error) {
+    if ((error as {code?: string}).code === "23505" && dedupeKey) {
+      const active = await db().query(
+        `SELECT * FROM job_runs
+         WHERE job_type = $1 AND market = $2 AND dedupe_key = $3
+           AND status IN ('queued', 'running')
+         ORDER BY started_at_utc DESC LIMIT 1`,
+        [jobType, market, dedupeKey]
+      );
+      if (active.rows[0]) return {ok: true, deduplicated: true, job: jobPayload(active.rows[0])};
+    }
+    throw error;
+  }
+  await recordJobEvent(jobId, "Queued", "queued", "Waiting for a worker", 0, null, null, {
+    market,
+    config_hash: configHash
+  });
 
   try {
-    const cloudRunJob = await dispatchCloudRunJob(jobType, payload, jobId);
-    await db().query("UPDATE job_runs SET detail = $1 WHERE id = $2", [`Queued Cloud Run Job ${cloudRunJob}`, jobId]);
+    const cloudRunJob = await dispatchCloudRunJob(jobType, effectivePayload, jobId);
+    await db().query(
+      "UPDATE job_runs SET detail = $1, updated_at_utc = NOW() WHERE id = $2",
+      [`Worker ${cloudRunJob} requested`, jobId]
+    );
+    await recordJobEvent(jobId, "Starting worker", "queued", "Cloud worker requested", 0, null, null, {
+      cloud_run_execution: cloudRunJob
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await db().query(
-      "UPDATE job_runs SET status = 'failed', stage = 'Failed', error = $1, detail = $2 WHERE id = $3",
+      "UPDATE job_runs SET status = 'failed', stage = 'Failed', error = $1, detail = $2, updated_at_utc = NOW(), finished_at_utc = NOW() WHERE id = $3",
       [message, "Could not dispatch Cloud Run Job", jobId]
     );
+    await recordJobEvent(jobId, "Failed", "failed", message);
     throw new ApiError(502, `Could not queue ${jobType} job: ${message}`);
   }
 
@@ -174,12 +286,16 @@ async function createJob(jobType: string, payload: Record<string, unknown>) {
       job_type: jobType,
       status: "queued",
       stage: "Queued",
-      detail: "Cloud Run Job queued",
+      detail: "Waiting for a worker",
       current_count: 0,
       total_count: null,
       percent: 0,
-      parameters_json: payload,
-      result_json: []
+      parameters_json: effectivePayload,
+      result_json: [],
+      started_at_utc: started,
+      updated_at_utc: started,
+      config_hash: configHash,
+      dedupe_key: dedupeKey
     })
   };
 }
@@ -555,6 +671,7 @@ export async function reconcileStaleJobs(): Promise<Record<string, number>> {
         UPDATE job_runs jr
         SET status = 'failed',
             stage = 'Expired',
+            updated_at_utc = NOW(),
             finished_at_utc = COALESCE(finished_at_utc, NOW()),
             error = COALESCE(error, 'Job expired before completion'),
             detail = COALESCE(NULLIF(detail, ''), 'Job expired before completion')
@@ -616,6 +733,7 @@ export async function reconcileStaleJobs(): Promise<Record<string, number>> {
         UPDATE job_runs jr
         SET status = ur.status,
             stage = CASE WHEN ur.status = 'failed' THEN 'Failed' ELSE 'Complete' END,
+            updated_at_utc = NOW(),
             current_count = ur.succeeded_batches + ur.failed_batches,
             total_count = ur.total_batches,
             percent = 100,
@@ -642,13 +760,17 @@ export async function reconcileStaleJobs(): Promise<Record<string, number>> {
       `
     );
     const finalizedCounts = finalizedRefreshes.rows[0] ?? {};
+    const deletedEvents = await client.query(
+      "DELETE FROM job_events WHERE created_at_utc < NOW() - INTERVAL '30 days' RETURNING id"
+    );
     await client.query("COMMIT");
     return {
       expired_refresh_jobs: Number(expiredRefreshCounts.refreshes ?? 0),
       expired_refresh_batches: Number(expiredRefreshCounts.batches ?? 0) + Number(expiredJobCounts.batches ?? 0),
       expired_job_runs: Number(expiredJobCounts.jobs ?? 0),
       finalized_refresh_jobs: Number(finalizedCounts.refreshes ?? 0),
-      finalized_parent_job_runs: Number(finalizedCounts.jobs ?? 0)
+      finalized_parent_job_runs: Number(finalizedCounts.jobs ?? 0),
+      deleted_job_events: deletedEvents.rowCount ?? 0
     };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -728,6 +850,63 @@ async function overlayUserAppraisals(user: UserContext, scanId: number, results:
       appraised_at_utc: appraisal?.appraised_at_utc ?? null
     };
   });
+}
+
+async function marketFreshness(market: "asx" | "us") {
+  const configHash = defaultConfigHash(market);
+  const [statusResult, latestRefreshResult, successfulRefreshResult, scanResult] = await Promise.all([
+    db().query(
+      `SELECT market, provider, ticker_count, history_rows, weekly_rows,
+              latest_date::text AS latest_bar_date, refreshed_at_utc
+       FROM market_status
+       WHERE market = $1 AND provider = 'yfinance'`,
+      [market]
+    ),
+    db().query(
+      `SELECT id, status, stage, total_tickers, completed_tickers, failed_tickers,
+              started_at_utc, finished_at_utc, error
+       FROM refresh_jobs
+       WHERE market = $1
+       ORDER BY started_at_utc DESC
+       LIMIT 1`,
+      [market]
+    ),
+    db().query(
+      `SELECT id, finished_at_utc
+       FROM refresh_jobs
+       WHERE market = $1 AND status = 'succeeded'
+       ORDER BY finished_at_utc DESC NULLS LAST
+       LIMIT 1`,
+      [market]
+    ),
+    db().query(
+      `SELECT id, created_at_utc, market_snapshot_date::text AS market_snapshot_date,
+              scanned_count, result_count, skipped_no_history, config_hash, config_json
+       FROM scan_runs
+       WHERE market = $1
+         AND (config_hash = $2 OR config_hash IS NULL)
+       ORDER BY (config_hash = $2) DESC, created_at_utc DESC
+       LIMIT 1`,
+      [market, configHash]
+    )
+  ]);
+  const status = statusResult.rows[0] ?? {};
+  const latestRefresh = latestRefreshResult.rows[0] ?? null;
+  const successfulRefresh = successfulRefreshResult.rows[0] ?? null;
+  return {
+    market,
+    provider: status.provider ?? "yfinance",
+    latest_bar_date: status.latest_bar_date ?? null,
+    database_refreshed_at_utc: status.refreshed_at_utc ?? null,
+    last_successful_refresh_at_utc: successfulRefresh?.finished_at_utc ?? null,
+    covered_tickers: Number(status.ticker_count ?? 0),
+    history_rows: Number(status.history_rows ?? 0),
+    weekly_metric_rows: Number(status.weekly_rows ?? 0),
+    next_scheduled_refresh_at_utc: nextScheduledRefresh(market),
+    latest_refresh: latestRefresh,
+    latest_default_scan: scanResult.rows[0] ?? null,
+    default_config_hash: configHash
+  };
 }
 
 apiApp.get("/api/health", asyncRoute(async (_req, res) => {
@@ -892,6 +1071,12 @@ apiApp.get("/api/status", asyncRoute(async (req, res) => {
   });
 }));
 
+apiApp.get("/api/markets/status", asyncRoute(async (req, res) => {
+  await requireAuth(req, db());
+  const [asx, us] = await Promise.all([marketFreshness("asx"), marketFreshness("us")]);
+  res.json({ok: true, generated_at_utc: new Date().toISOString(), markets: {asx, us}});
+}));
+
 apiApp.get("/api/job", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   const jobType = String(req.query.type ?? "fetch").trim().toLowerCase();
@@ -906,19 +1091,41 @@ apiApp.get("/api/filter/job", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   const job = await latestJob("filter", String(req.query.job_id ?? "") || undefined);
   requireJobVisibility(user, "filter", job);
-  res.json({ok: true, job: jobPayload(job)});
+  const afterEventId = Math.max(Number(req.query.after_event_id ?? 0), 0);
+  const events = job?.id
+    ? await db().query(
+      `SELECT id, job_id, stage_code, stage, status, message, current_count,
+              total_count, percent, metadata_json, created_at_utc
+       FROM job_events
+       WHERE job_id = $1 AND id > $2
+       ORDER BY id ASC
+       LIMIT 200`,
+      [job.id, afterEventId]
+    )
+    : {rows: []};
+  const nextEventId = events.rows.length ? Number(events.rows.at(-1)?.id ?? afterEventId) : afterEventId;
+  res.json({ok: true, job: jobPayload(job), events: events.rows, next_event_id: nextEventId});
 }));
 
 apiApp.get("/api/scans", asyncRoute(async (req, res) => {
   await requireAuth(req, db());
   const market = currentMarket(req.query.market);
+  const defaultOnly = String(req.query.config ?? "").toLowerCase() === "default";
+  const configHash = defaultConfigHash(market);
   const result = await db().query(
     `
     SELECT id, source_id, created_at_utc, provider, query, scanned_count,
-           result_count, skipped_no_history, config_json
-    FROM scan_runs WHERE market = $1 ORDER BY created_at_utc DESC LIMIT 100
+           result_count, skipped_no_history, config_json, config_hash,
+           market_snapshot_date::text AS market_snapshot_date
+    FROM scan_runs
+    WHERE market = $1
+      AND ($2::boolean = false OR config_hash = $3 OR config_hash IS NULL)
+    ORDER BY
+      CASE WHEN $2::boolean AND config_hash = $3 THEN 0 ELSE 1 END,
+      created_at_utc DESC
+    LIMIT 100
     `,
-    [market]
+    [market, defaultOnly, configHash]
   );
   res.json({ok: true, scans: result.rows});
 }));
@@ -927,18 +1134,28 @@ apiApp.get("/api/scan-results", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   const market = currentMarket(req.query.market);
   const requestedScanId = Number(req.query.scan_id ?? 0);
+  const defaultOnly = String(req.query.config ?? "").toLowerCase() === "default";
+  const configHash = defaultConfigHash(market);
   const scanResult = requestedScanId
     ? await db().query(
       `SELECT id, source_id, created_at_utc, provider, query, scanned_count, result_count,
-              skipped_no_history, config_json
+               skipped_no_history, config_json, config_hash,
+               market_snapshot_date::text AS market_snapshot_date
        FROM scan_runs WHERE id = $1 AND market = $2`,
       [requestedScanId, market]
     )
     : await db().query(
       `SELECT id, source_id, created_at_utc, provider, query, scanned_count, result_count,
-              skipped_no_history, config_json
-       FROM scan_runs WHERE market = $1 ORDER BY created_at_utc DESC LIMIT 1`,
-      [market]
+               skipped_no_history, config_json, config_hash,
+               market_snapshot_date::text AS market_snapshot_date
+       FROM scan_runs
+       WHERE market = $1
+         AND ($2::boolean = false OR config_hash = $3 OR config_hash IS NULL)
+       ORDER BY
+         CASE WHEN $2::boolean AND config_hash = $3 THEN 0 ELSE 1 END,
+         created_at_utc DESC
+       LIMIT 1`,
+      [market, defaultOnly, configHash]
     );
   const scan = scanResult.rows[0];
   if (!scan) throw new ApiError(404, "No shared scan is available for this market yet");

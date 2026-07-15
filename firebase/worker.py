@@ -29,6 +29,7 @@ if str(SRC) not in sys.path:
 
 from moneymaker import fetcher
 from firebase.migrate_sqlite_to_postgres import import_cache, import_ratings, sqlite_connection
+from firebase.schema import apply_migrations
 from cloud_backend.market_status import refresh_market_status
 from cloud_backend.postgres_screener import run_postgres_filter
 from cloud_backend.weekly_cache import sync_weekly_history
@@ -55,12 +56,48 @@ def update_job(**values: Any) -> None:
 def update_job_id(target_job_id: str, **values: Any) -> None:
     if not target_job_id:
         return
+    event_metadata = values.pop("event_metadata", {}) or {}
     values.setdefault("log_tail", "")
     assignments = ", ".join(f"{key} = %s" for key in values)
     with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
         with conn.cursor() as cur:
-            cur.execute(f"UPDATE job_runs SET {assignments} WHERE id = %s", (*values.values(), target_job_id))
+            cur.execute(
+                f"UPDATE job_runs SET {assignments}, updated_at_utc = now() WHERE id = %s",
+                (*values.values(), target_job_id),
+            )
+            stage = str(values.get("stage") or "Working")
+            status = str(values.get("status") or "running")
+            current = int(values.get("current_count") or 0)
+            total = values.get("total_count")
+            percent = values.get("percent")
+            message = str(values.get("error") or values.get("detail") or status)
+            cur.execute(
+                """
+                INSERT INTO job_events (
+                    job_id, stage_code, stage, status, message,
+                    current_count, total_count, percent, metadata_json
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    target_job_id,
+                    _stage_code(stage),
+                    stage,
+                    status,
+                    message,
+                    current,
+                    total,
+                    percent,
+                    Jsonb(event_metadata),
+                ),
+            )
         conn.commit()
+
+
+def _stage_code(value: str) -> str:
+    normalized = "_".join(part for part in "".join(
+        character.lower() if character.isalnum() else " " for character in value
+    ).split() if part)
+    return normalized or "working"
 
 
 def update_refresh_job(refresh_job_id: str, **values: Any) -> None:
@@ -163,9 +200,7 @@ def update_parent_fetch_job(parent_job_id: str, refresh_job_id: str, detail: str
 
 
 def ensure_schema(conn: psycopg.Connection) -> None:
-    schema = (ROOT / "firebase" / "migrations" / "001_schema.sql").read_text(encoding="utf-8")
-    conn.execute(schema)
-    conn.commit()
+    apply_migrations(conn)
 
 
 def checkpoint_path(market: str) -> Path:
@@ -714,7 +749,7 @@ def main() -> None:
     kind = os.environ.get("MONEYMAKER_JOB_TYPE", "").strip().lower()
     data = payload()
     try:
-        update_job(status="running", stage="Starting", detail=f"Starting {kind} job")
+        update_job(status="running", stage="Starting worker", detail=f"Starting {kind} worker")
         if kind == "fetch":
             result = run_fetch(data)
         elif kind == "filter":
@@ -728,12 +763,15 @@ def main() -> None:
         else:
             raise RuntimeError(f"Unknown worker job type: {kind}")
         update_job(status="succeeded", stage="Complete", current_count=1, total_count=1,
-                   percent=100, detail=json.dumps(result)[:4000],
+                   percent=100, detail="Screen complete" if kind == "filter" else json.dumps(result)[:4000],
+                   finished_at_utc=datetime.now(timezone.utc),
+                   event_metadata=result.get("performance", {}),
                    parameters_json=Jsonb(result.get("filter", result)),
                    result_json=Jsonb(result.get("results", [])))
     except Exception as exc:
         update_job(status="failed", stage="Failed", error=str(exc),
-                   detail="".join(traceback.format_exception(exc))[-4000:])
+                   detail="".join(traceback.format_exception(exc))[-4000:],
+                   finished_at_utc=datetime.now(timezone.utc))
         refresh_job_id = str(data.get("refresh_job_id") or "").strip()
         refresh_batch_id = str(data.get("refresh_batch_id") or "").strip()
         parent_job_id = str(data.get("parent_job_id") or "").strip()

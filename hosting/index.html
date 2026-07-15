@@ -31,16 +31,14 @@
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      padding: 14px 20px;
+      padding: 8px 14px;
       border-bottom: 1px solid var(--line);
       background: #12161b;
-      position: sticky;
-      top: 0;
-      z-index: 2;
+      position: static;
     }
     h1 {
       margin: 0;
-      font-size: 18px;
+      font-size: 17px;
       font-weight: 650;
       letter-spacing: 0;
     }
@@ -71,10 +69,10 @@
       border-radius: 6px;
       box-shadow: 0 3px 12px var(--shadow);
     }
-    .metric { padding: 12px; min-height: 78px; }
+    .metric { padding: 8px 10px; min-height: 58px; }
     .metric span { color: var(--muted); display: block; font-size: 12px; }
-    .metric strong { display: block; font-size: 22px; margin-top: 6px; }
-    .panel { padding: 14px; margin-bottom: 14px; }
+    .metric strong { display: block; font-size: 18px; margin-top: 3px; }
+    .panel { padding: 10px; margin-bottom: 10px; }
     .panel h2 {
       margin: 0 0 12px;
       font-size: 14px;
@@ -117,7 +115,7 @@
       background: var(--panel-2);
       color: var(--text);
       border-radius: 5px;
-      min-height: 36px;
+      min-height: 32px;
       padding: 7px 12px;
       font: inherit;
       cursor: pointer;
@@ -387,6 +385,18 @@
       background: var(--accent);
       transition: width .2s ease;
     }
+    .progress-fill.indeterminate {
+      width: 35%;
+      animation: progressSlide 1.4s ease-in-out infinite;
+    }
+    @keyframes progressSlide {
+      0% { transform: translateX(-100%); }
+      50% { transform: translateX(120%); }
+      100% { transform: translateX(260%); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .progress-fill.indeterminate { animation: none; transform: none; }
+    }
     .progress-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -517,14 +527,239 @@
     .return-positive { color: var(--accent); }
     .return-negative { color: var(--bad); }
     .return-neutral { color: var(--muted); }
+    body.auth-pending header,
+    body.auth-pending main,
+    body.auth-pending .analysis-page,
+    body.signed-out header,
+    body.signed-out main,
+    body.signed-out .analysis-page {
+      display: none;
+    }
+    body.authenticated #loginScreen { display: none; }
+    .login-screen {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: #0b0f12;
+    }
+    .login-card {
+      width: min(420px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #12171c;
+      padding: 22px;
+    }
+    .login-card h1 { font-size: 22px; margin-bottom: 8px; }
+    .login-card p { color: var(--muted); margin: 0 0 16px; }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .icon-button {
+      width: 38px;
+      min-width: 38px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+    }
+    .app-tabs { display: flex; gap: 4px; border: 1px solid var(--line); border-radius: 6px; padding: 3px; background: #0f1318; }
+    .app-tabs button { border: 0; min-height: 30px; padding: 5px 10px; background: transparent; }
+    .app-tabs button.active { background: #213126; color: #dff5e8; }
+    .role-pill, .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 8px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    body.cloud-mode .local-data-controls,
+    body.authenticated .local-data-controls {
+      display: none !important;
+    }
+    main {
+      display: block;
+      min-height: calc(100vh - 58px);
+    }
+    aside {
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+      padding: 10px 14px;
+      overflow: visible;
+      background: #101419;
+    }
+    section.workspace {
+      display: grid;
+      grid-template-columns: minmax(410px, .85fr) minmax(520px, 1.15fr);
+      grid-template-areas:
+        "strip strip"
+        "metrics metrics"
+        "results chart";
+      gap: 12px;
+      padding: 12px 14px;
+      overflow: visible;
+    }
+    aside .panel { margin-bottom: 0; }
+    .screen-panel {
+      display: grid;
+      grid-template-columns: auto minmax(180px, 1fr) auto auto auto;
+      align-items: end;
+      gap: 10px;
+      padding: 8px;
+    }
+    .screen-panel h2,
+    .screen-panel label {
+      margin: 0;
+    }
+    .screen-toolbar {
+      display: contents;
+    }
+    .market-segment {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3px;
+      width: 144px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 3px;
+      background: #0e1217;
+    }
+    .market-segment button {
+      min-height: 30px;
+      border: 0;
+      padding: 4px 8px;
+      background: transparent;
+    }
+    .market-segment button.active {
+      background: #1f382a;
+      color: #dff5e8;
+    }
+    .market-data-strip {
+      grid-area: strip;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .market-data-card {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      padding: 8px;
+      display: grid;
+      grid-template-columns: 74px repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      align-items: start;
+    }
+    .market-data-card strong { font-size: 13px; }
+    .market-data-card span { color: var(--muted); font-size: 11px; display: block; }
+    .market-data-card b { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; }
+    .metrics { grid-area: metrics; margin-bottom: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    #resultsPanel { grid-area: results; min-width: 0; }
+    #chartPanel { grid-area: chart; min-width: 0; }
+    .results-wrap { max-height: calc(100vh - 340px); }
+    .advanced-settings {
+      grid-column: 1 / -1;
+      border-top: 1px solid var(--line);
+      padding-top: 8px;
+    }
+    .advanced-settings summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12px;
+      list-style: none;
+    }
+    .advanced-settings summary::-webkit-details-marker { display: none; }
+    .advanced-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(90px, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .ma-period-toggles {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .ma-period-toggles .ma-toggle { margin: 0; }
+    .modal {
+      align-items: stretch;
+      justify-content: flex-end;
+      background: rgba(0, 0, 0, .18);
+    }
+    .progress-window {
+      width: 360px;
+      max-height: 100vh;
+      height: 100vh;
+      border-radius: 0;
+      border-top: 0;
+      border-bottom: 0;
+      border-right: 0;
+    }
+    .progress-steps {
+      display: grid;
+      gap: 6px;
+      margin: 12px 0;
+    }
+    .progress-step {
+      display: grid;
+      grid-template-columns: 20px 1fr;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .progress-step.active { color: var(--text); }
+    .progress-step.done { color: var(--accent); }
+    .progress-step-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+    }
+    .progress-events {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .progress-event {
+      border-left: 2px solid var(--line);
+      padding-left: 8px;
+      color: var(--muted);
+    }
+    .progress-event strong { color: var(--text); display: block; }
+    details.technical-details {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
     body.cloud-mode .local-data-controls { display: none; }
     body.cloud-mode .online-source { display: flex; }
-    body.cloud-mode main { grid-template-columns: minmax(270px, 320px) minmax(0, 1fr); }
-    body.cloud-mode aside { padding: 12px; }
+    body.cloud-mode main { display: block; }
+    body.cloud-mode aside { padding: 10px 14px; }
     body.cloud-mode .panel { margin-bottom: 10px; }
     @media (max-width: 940px) {
-      main, body.cloud-mode main { grid-template-columns: 1fr; }
+      main, body.cloud-mode main { display: block; }
       aside, body.cloud-mode aside { border-right: 0; border-bottom: 1px solid var(--line); }
+      section.workspace {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+          "results"
+          "chart"
+          "strip"
+          "metrics";
+      }
+      .screen-panel { grid-template-columns: 1fr 1fr; }
+      .market-data-strip { grid-template-columns: 1fr; }
+      .market-data-card { grid-template-columns: 60px repeat(2, minmax(0, 1fr)); }
       .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .chart-controls { grid-template-columns: 1fr 1fr; }
       .analysis-insight-grid { grid-template-columns: 1fr; }
@@ -545,6 +780,23 @@
       .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .chart-controls { grid-template-columns: 1fr; }
       .chart-box { height: 330px; }
+      section.workspace { padding: 10px; }
+      .screen-panel { grid-template-columns: 1fr; }
+      .screen-panel h2 { display: none; }
+      .screen-panel .status-line { white-space: normal; }
+      .market-segment { width: 100%; }
+      .advanced-grid { grid-template-columns: 1fr 1fr; }
+      .market-data-card { grid-template-columns: 1fr 1fr; }
+      .market-data-card strong { grid-column: 1 / -1; }
+      .results-wrap { max-height: none; }
+      .modal { align-items: flex-end; justify-content: stretch; }
+      .progress-window {
+        width: 100%;
+        height: min(82vh, 680px);
+        border-radius: 6px 6px 0 0;
+        border: 1px solid var(--line);
+        border-bottom: 0;
+      }
       .analysis-heading { align-items: flex-start; flex-direction: column; }
       .analysis-tools { width: 100%; }
       .analysis-tools select { flex: 1; width: auto; }
@@ -554,20 +806,32 @@
     }
   </style>
 </head>
-<body>
+<body class="auth-pending">
+  <section class="login-screen" id="loginScreen">
+    <div class="login-card">
+      <h1>Moneymaker Markets</h1>
+      <p>Sign in with your invited account to view shared screens, charts, and your private appraisals.</p>
+      <label for="authEmail">Email</label>
+      <input id="authEmail" type="email" placeholder="you@example.com" autocomplete="username">
+      <label for="authPassword">Password</label>
+      <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password">
+      <div class="actions">
+        <button class="primary" id="authSignIn" type="button">Sign in</button>
+        <button id="authCreate" type="button">Set/reset password</button>
+      </div>
+      <p class="status-line" id="loginStatus">Checking sign-in state...</p>
+    </div>
+  </section>
   <header>
-    <h1>Moneymaker Stock Filter</h1>
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-      <nav class="app-tabs" id="appTabs" aria-label="Application views" hidden>
+    <h1>Moneymaker Markets</h1>
+    <div class="topbar-actions">
+      <nav class="app-tabs" id="appTabs" aria-label="Application views">
         <button id="marketTab" class="active" type="button" aria-pressed="true">Market</button>
         <button id="analysisTab" type="button" aria-pressed="false">Analysis</button>
       </nav>
       <span class="status-line" id="topStatus">Connecting to market data...</span>
       <span class="role-pill" id="authRole" hidden></span>
-      <input id="authEmail" type="email" placeholder="Email" autocomplete="username" style="width:180px">
-      <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password" style="width:140px">
-      <button id="authSignIn" type="button">Sign in</button>
-      <button id="authCreate" type="button">Set/reset password</button>
+      <button class="icon-button" id="openOperations" type="button" title="Operations" aria-label="Operations">Ops</button>
       <button id="authSignOut" type="button" hidden>Sign out</button>
     </div>
   </header>
@@ -670,63 +934,65 @@
         </div>
       </div>
 
-      <div class="panel">
-        <h2>Market Screen</h2>
-        <label for="marketSelect">Market</label>
-        <div class="market-switch">
-          <select id="marketSelect">
+      <div class="panel screen-panel">
+        <div>
+          <h2>Market Screen</h2>
+          <select id="marketSelect" hidden>
             <option value="asx">ASX market</option>
             <option value="us">US market</option>
           </select>
-          <button id="refreshStatus" type="button">Refresh data</button>
-        </div>
-        <div class="online-source">Screening the automatically updated online database</div>
-        <div class="grid-2">
-          <div>
-            <label for="volumeMultiplier">Volume multiplier</label>
-            <input id="volumeMultiplier" type="number" step="0.1" value="2.0">
-          </div>
-          <div>
-            <label for="lookbackWeeks">Lookback weeks</label>
-            <input id="lookbackWeeks" type="number" min="1" value="1">
+          <div class="market-segment" aria-label="Market">
+            <button id="marketAsx" class="active" type="button">ASX</button>
+            <button id="marketUs" type="button">US</button>
           </div>
         </div>
-        <div class="grid-2">
-          <div>
-            <label for="minCap">Min cap M</label>
-            <input id="minCap" type="number" step="1" value="0">
-          </div>
-          <div>
-            <label for="maxCap">Max cap M</label>
-            <input id="maxCap" type="number" step="1" value="0">
-          </div>
+        <div>
+          <label for="query">Ticker search</label>
+          <input id="query" placeholder="CBA, IBRX, AAPL">
         </div>
-        <label>Moving averages weeks (0 off)</label>
-        <div class="grid-4">
-          <input id="maShort" type="number" value="90">
-          <input id="maIntermediate" type="number" value="180">
-          <input id="maMedium" type="number" value="360">
-          <input id="maLong" type="number" value="700" title="Set to 0 to turn off the 700-week moving average">
-        </div>
-        <div class="grid-2">
-          <div>
-            <label for="query">Ticker search</label>
-            <input id="query" placeholder="CBA">
+        <button id="loadSharedScan" type="button">Load latest</button>
+        <button class="secondary" id="runFilter">Run fresh screen</button>
+        <span class="status-line" id="filterStatus">Ready</span>
+        <details class="advanced-settings" id="advancedSettings">
+          <summary>Advanced screen settings</summary>
+          <div class="advanced-grid">
+            <div>
+              <label for="volumeMultiplier">Volume</label>
+              <input id="volumeMultiplier" type="number" step="0.1" value="2.0">
+            </div>
+            <div>
+              <label for="lookbackWeeks">Lookback</label>
+              <input id="lookbackWeeks" type="number" min="1" value="1">
+            </div>
+            <div>
+              <label for="minCap">Min cap M</label>
+              <input id="minCap" type="number" step="1" value="0">
+            </div>
+            <div>
+              <label for="maxCap">Max cap M</label>
+              <input id="maxCap" type="number" step="1" value="0">
+            </div>
+            <div>
+              <label for="scanLimit">Limit</label>
+              <input id="scanLimit" type="number" min="1" value="250" disabled>
+            </div>
+            <label class="inline-check">
+              <input id="useScanLimit" type="checkbox">
+              Limit scan
+            </label>
           </div>
-          <div>
-            <label for="scanLimit">Scan limit</label>
-            <input id="scanLimit" type="number" min="1" value="250" disabled>
+          <label>Moving averages</label>
+          <div class="ma-period-toggles">
+            <label class="ma-toggle"><input class="screen-ma-check" type="checkbox" value="90" data-target="maShort" checked>90</label>
+            <label class="ma-toggle"><input class="screen-ma-check" type="checkbox" value="180" data-target="maIntermediate" checked>180</label>
+            <label class="ma-toggle"><input class="screen-ma-check" type="checkbox" value="360" data-target="maMedium" checked>360</label>
+            <label class="ma-toggle"><input class="screen-ma-check" type="checkbox" value="700" data-target="maLong" checked>700</label>
           </div>
-        </div>
-        <label class="inline-check">
-          <input id="useScanLimit" type="checkbox">
-          Limit scan to first N tickers
-        </label>
-        <div class="actions">
-          <button id="loadSharedScan" type="button">Load latest</button>
-          <button class="secondary" id="runFilter">Run Filter</button>
-          <span class="status-line" id="filterStatus">Ready</span>
-        </div>
+          <input id="maShort" type="hidden" value="90">
+          <input id="maIntermediate" type="hidden" value="180">
+          <input id="maMedium" type="hidden" value="360">
+          <input id="maLong" type="hidden" value="700">
+        </details>
       </div>
 
       <div class="panel admin-panel" id="adminPanel" hidden>
@@ -767,6 +1033,10 @@
     </aside>
 
     <section class="workspace">
+      <div class="market-data-strip" id="marketDataStrip" aria-live="polite">
+        <div class="market-data-card"><strong>ASX</strong><span>Latest bar<b>-</b></span><span>Refresh Brisbane<b>-</b></span><span>Tickers<b>-</b></span><span>Weekly rows<b>-</b></span><span>Next refresh<b>-</b></span></div>
+        <div class="market-data-card"><strong>US</strong><span>Latest bar<b>-</b></span><span>Refresh Brisbane<b>-</b></span><span>Tickers<b>-</b></span><span>Weekly rows<b>-</b></span><span>Next refresh<b>-</b></span></div>
+      </div>
       <div class="metrics">
         <div class="metric"><span>Covered stocks</span><strong id="metricTickers">0</strong></div>
         <div class="metric"><span>Weekly metric rows</span><strong id="metricRows">0</strong></div>
@@ -822,7 +1092,7 @@
           <canvas id="priceChart"></canvas>
         </div>
       </div>
-      <div class="panel">
+      <div class="panel" id="resultsPanel">
         <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
           <h2 style="margin:0">Results</h2>
           <span class="status-line" id="resultMeta">No scan yet</span>
@@ -944,7 +1214,17 @@
           <div class="progress-tile"><span>Count</span><strong id="progressCount">0</strong></div>
           <div class="progress-tile"><span>Complete</span><strong id="progressPercent">0%</strong></div>
         </div>
-        <pre class="log" id="modalFetchLog"></pre>
+        <div class="progress-grid">
+          <div class="progress-tile"><span>Started</span><strong id="progressStarted">-</strong></div>
+          <div class="progress-tile"><span>Elapsed</span><strong id="progressElapsed">-</strong></div>
+          <div class="progress-tile"><span>Snapshot</span><strong id="progressSnapshot">-</strong></div>
+        </div>
+        <div class="progress-steps" id="progressSteps" aria-live="polite"></div>
+        <div class="progress-events" id="progressEvents"></div>
+        <details class="technical-details">
+          <summary>Technical details</summary>
+          <pre class="log" id="modalFetchLog"></pre>
+        </details>
       </div>
     </div>
   </div>
@@ -986,16 +1266,12 @@
           if (user) {
             $("authEmail").value = user.email || "";
             $("authSignOut").hidden = false;
-            $("authSignIn").hidden = true;
-            $("authCreate").hidden = true;
-            $("authPassword").hidden = true;
+            $("loginStatus").textContent = `Signed in as ${user.email || "user"}`;
             if (currentUserProfile?.user) $("topStatus").textContent = `Signed in as ${currentUserProfile.user.email || "anonymous"}`;
             else $("topStatus").textContent = `Signed in as ${user.email || "user"}`;
           } else {
             $("authSignOut").hidden = true;
-            $("authSignIn").hidden = false;
-            $("authCreate").hidden = false;
-            $("authPassword").hidden = false;
+            $("loginStatus").textContent = "Sign in with an invited email account";
             $("topStatus").textContent = "Sign in with an invited email account";
           }
         });
@@ -1013,6 +1289,18 @@
     let lastMovingAverages = {};
     let currentScanId = null;
     let lastExportStoragePath = null;
+    let activeFilterAfterEventId = 0;
+    const FILTER_JOB_STORAGE_KEY = "moneymaker.activeFilterJobId";
+    const progressStageOrder = [
+      "Queued",
+      "Starting worker",
+      "Loading market snapshot",
+      "Applying screen criteria",
+      "Ranking matches",
+      "Saving screen",
+      "Loading results",
+      "Complete"
+    ];
     const maColors = {
       "30": "#f2c14e",
       "90": "#8dd7ff",
@@ -1132,6 +1420,68 @@
       sync();
     }
 
+    function syncScreenMaInputs() {
+      document.querySelectorAll(".screen-ma-check").forEach((input) => {
+        const target = input.dataset.target;
+        if (target && $(target)) $(target).value = input.checked ? input.value : "0";
+      });
+    }
+
+    function setMarket(market) {
+      $("marketSelect").value = market;
+      applyMarketDefaults();
+    }
+
+    function showSignedOut(message = "Sign in with an invited email account") {
+      document.body.classList.remove("auth-pending", "authenticated");
+      document.body.classList.add("signed-out");
+      $("loginStatus").textContent = message;
+    }
+
+    function showAuthenticated() {
+      document.body.classList.remove("auth-pending", "signed-out");
+      document.body.classList.add("authenticated");
+    }
+
+    function formatBrisbane(value, withTime = true) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return new Intl.DateTimeFormat("en-AU", {
+        timeZone: "Australia/Brisbane",
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        ...(withTime ? {hour: "2-digit", minute: "2-digit", hour12: false} : {})
+      }).format(date);
+    }
+
+    function elapsedText(seconds) {
+      const total = Math.max(0, Number(seconds || 0));
+      if (!Number.isFinite(total) || total === 0) return "-";
+      const minutes = Math.floor(total / 60);
+      const secs = Math.round(total % 60);
+      return minutes ? `${minutes}m ${secs}s` : `${secs}s`;
+    }
+
+    function renderMarketStatusStrip(markets) {
+      const strip = $("marketDataStrip");
+      strip.innerHTML = ["asx", "us"].map((market) => {
+        const item = markets?.[market] || {};
+        const refresh = item.latest_refresh || {};
+        const failure = refresh.status === "failed" ? `<span>Latest failure<b>${escapeHtml(refresh.error || "Refresh failed")}</b></span>` : "";
+        return `<div class="market-data-card" data-market-card="${market}">
+          <strong>${market.toUpperCase()}</strong>
+          <span>Latest bar<b>${escapeHtml(item.latest_bar_date || "-")}</b></span>
+          <span>Refresh Brisbane<b>${escapeHtml(formatBrisbane(item.last_successful_refresh_at_utc || item.database_refreshed_at_utc))}</b></span>
+          <span>Tickers<b>${fmt.format(Number(item.covered_tickers || 0))}</b></span>
+          <span>Weekly rows<b>${fmt.format(Number(item.weekly_metric_rows || 0))}</b></span>
+          <span>Next refresh<b>${escapeHtml(formatBrisbane(item.next_scheduled_refresh_at_utc))}</b></span>
+          ${failure}
+        </div>`;
+      }).join("");
+    }
+
     async function api(path, options = {}) {
       const getToken = await authReady;
       const headers = new Headers(options.headers || {});
@@ -1169,8 +1519,9 @@
         const role = user.role || "viewer";
         $("authRole").textContent = role;
         $("authRole").hidden = false;
-        $("adminPanel").hidden = role !== "admin";
-        $("appTabs").hidden = role !== "admin";
+        $("adminPanel").hidden = true;
+        $("openOperations").hidden = role !== "admin";
+        $("appTabs").hidden = false;
         const canRunScans = role === "admin" || role === "analyst";
         $("runFilter").disabled = !canRunScans;
         $("runFilter").title = canRunScans ? "" : "An analyst account is required to run a new scan";
@@ -1178,7 +1529,8 @@
       } catch (error) {
         $("authRole").hidden = true;
         $("adminPanel").hidden = true;
-        $("appTabs").hidden = true;
+        $("openOperations").hidden = true;
+        $("appTabs").hidden = false;
         console.warn("Could not load user profile", error);
       }
     }
@@ -1383,40 +1735,37 @@
       $("tickerFile").value = defaults.tickerFile;
       $("provider").value = defaults.provider;
       $("chartTicker").value = defaults.chartTicker;
+      $("marketAsx").classList.toggle("active", $("marketSelect").value === "asx");
+      $("marketUs").classList.toggle("active", $("marketSelect").value === "us");
       $("tickerSourceStatus").textContent = $("marketSelect").value === "us"
         ? "US uses Nasdaq Trader tickers and a separate SQLite cache"
         : "ASX uses the existing local ticker files and cache";
-      loadTickerFiles();
       refreshStatus().catch((error) => {
         $("topStatus").textContent = error.message;
         $("topStatus").className = "status-line bad";
-      }).finally(() => loadChart());
+      }).then(() => loadSharedScan()).finally(() => loadChart());
     }
 
     async function refreshStatus() {
-      const cache = encodeURIComponent($("cacheFile").value.trim() || "stock_cache.sqlite");
-      const market = encodeURIComponent($("marketSelect").value);
-      const payload = await api(`/api/status?market=${market}&cache_file=${cache}`);
-      const s = payload.status;
-      $("metricTickers").textContent = fmt.format(s.ticker_count || 0);
-      $("metricRows").textContent = fmt.format(s.history_rows || 0);
-      $("metricLatest").textContent = s.latest_date || "-";
-      $("cachePill").textContent = s.exists ? `${s.size_mb} MB` : "No cache";
-      $("cachePill").className = `pill ${s.exists ? "ok" : "warn"}`;
-      const refresh = payload.refresh || null;
-      if (refresh && refresh.running) {
-        $("topStatus").textContent = `${String(refresh.market || $("marketSelect").value).toUpperCase()} refresh running: ${fmt.format(refresh.current || 0)} / ${fmt.format(refresh.total || 0)} tickers, ${refresh.log || ""}`.trim();
+      const payload = await api("/api/markets/status");
+      const markets = payload.markets || {};
+      renderMarketStatusStrip(markets);
+      const market = $("marketSelect").value;
+      const s = markets[market] || {};
+      $("metricTickers").textContent = fmt.format(s.covered_tickers || 0);
+      $("metricRows").textContent = fmt.format(s.weekly_metric_rows || 0);
+      $("metricLatest").textContent = s.latest_bar_date || "-";
+      const refresh = s.latest_refresh || null;
+      if (refresh && ["queued", "running"].includes(String(refresh.status))) {
+        $("topStatus").textContent = `${market.toUpperCase()} refresh ${refresh.status}: ${fmt.format(refresh.completed_tickers || 0)} / ${fmt.format(refresh.total_tickers || 0)} tickers`;
         $("topStatus").className = "status-line warn";
+      } else if (refresh && refresh.status === "failed") {
+        $("topStatus").textContent = `${market.toUpperCase()} latest refresh failed at ${formatBrisbane(refresh.finished_at_utc || refresh.started_at_utc)}: ${refresh.error || "unknown error"}`;
+        $("topStatus").className = "status-line bad";
       } else {
-        $("topStatus").textContent = s.exists
-          ? `${fmt.format(s.ticker_count || 0)} stocks online, ${fmt.format(s.history_rows || 0)} weekly metric rows, latest ${s.latest_date || "-"}`
-          : "No online market data found";
-        $("topStatus").className = `status-line ${s.exists ? "ok" : "warn"}`;
+        $("topStatus").textContent = `${market.toUpperCase()} data latest bar ${s.latest_bar_date || "-"}, last successful refresh ${formatBrisbane(s.last_successful_refresh_at_utc || s.database_refreshed_at_utc)}`;
+        $("topStatus").className = "status-line ok";
       }
-      if (s.tickers && s.tickers.length && !$("chartTicker").value.trim()) {
-        $("chartTicker").value = s.tickers[0];
-      }
-      updateJob(refresh && refresh.running ? refresh : payload.job);
     }
 
     async function loadTickerFiles() {
@@ -1666,16 +2015,44 @@
       });
     }
 
+    function renderProgressSteps(stage, success) {
+      const currentIndex = progressStageOrder.findIndex((item) => item.toLowerCase() === String(stage || "").toLowerCase());
+      const doneIndex = success ? progressStageOrder.length - 1 : currentIndex;
+      $("progressSteps").innerHTML = progressStageOrder.map((item, index) => {
+        const statusClass = index < doneIndex ? "done" : index === currentIndex ? "active" : "";
+        return `<div class="progress-step ${statusClass}"><span class="progress-step-dot">${index + 1}</span><span>${item}</span></div>`;
+      }).join("");
+    }
+
+    function appendProgressEvents(events = []) {
+      if (!events.length) return;
+      const box = $("progressEvents");
+      for (const event of events.slice(-20)) {
+        const row = document.createElement("div");
+        row.className = "progress-event";
+        const at = event.created_at_utc ? formatBrisbane(event.created_at_utc) : "";
+        row.innerHTML = `<strong>${escapeHtml(event.stage || event.stage_code || "Working")} ${at ? `at ${escapeHtml(at)}` : ""}</strong>${escapeHtml(event.message || event.status || "")}`;
+        box.appendChild(row);
+      }
+      while (box.children.length > 30) box.removeChild(box.firstElementChild);
+    }
+
     function updateProgress(job, title) {
       $("progressTitle").textContent = title;
       $("progressStage").textContent = job.stage || "Working";
       $("progressDetail").textContent = job.error || job.detail || job.message || "Working...";
       const total = job.total || 0;
       $("progressCount").textContent = total ? `${job.current || 0} / ${total}` : `${job.current || 0}`;
-      $("progressPercent").textContent = `${job.percent || 0}%`;
-      $("progressFill").style.width = `${job.percent || 0}%`;
+      const percent = Number(job.percent);
+      const hasPercent = Number.isFinite(percent) && percent > 0;
+      $("progressPercent").textContent = hasPercent ? `${percent}%` : "Working";
+      $("progressFill").style.width = hasPercent ? `${percent}%` : "35%";
+      $("progressFill").classList.toggle("indeterminate", !hasPercent && !!job.running);
+      $("progressStarted").textContent = formatBrisbane(job.started_at_utc);
+      $("progressElapsed").textContent = elapsedText(job.elapsed_seconds);
+      $("progressSnapshot").textContent = job.summary?.market_snapshot_date || "-";
+      renderProgressSteps(job.stage, job.success === true);
       $("modalFetchLog").textContent = job.log || job.error || (job.summary && job.summary.error ? job.summary.error : "");
-      $("closeProgress").disabled = !!job.running;
       if (job.running || (!$("progressModal").classList.contains("hidden") && job.success !== null)) {
         $("progressModal").classList.remove("hidden");
       }
@@ -1726,14 +2103,20 @@
 
     async function pollFilterJob(jobId) {
       try {
-        const query = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";
+        const params = new URLSearchParams();
+        if (jobId) params.set("job_id", jobId);
+        if (activeFilterAfterEventId) params.set("after_event_id", String(activeFilterAfterEventId));
+        const query = params.toString() ? `?${params.toString()}` : "";
         const payload = await api(`/api/filter/job${query}`);
+        activeFilterAfterEventId = Number(payload.next_event_id || activeFilterAfterEventId || 0);
+        appendProgressEvents(payload.events || []);
         updateFilterJob(payload.job);
         if (payload.job.running) {
           setTimeout(() => pollFilterJob(jobId), 1000);
           return;
         }
         if (payload.job.success) {
+          appendProgressEvents([{stage: "Loading results", status: "running", message: "Loading completed screen results.", created_at_utc: new Date().toISOString()}]);
           const summary = payload.job.summary || {};
           currentScanId = summary.scan_id || null;
           renderResults(payload.job.results || [], currentScanId);
@@ -1746,6 +2129,11 @@
             .map(([label, count]) => `${count} ${label.toLowerCase()}`);
           const youngerText = youngerCount ? `, younger groups: ${youngerParts.join(", ")}` : "";
           $("resultMeta").textContent = `${scanText}${(payload.job.results || []).length} matches${youngerText} from ${summary.scanned_count || 0} scanned at ${summary.generated_at || ""}`;
+          localStorage.removeItem(FILTER_JOB_STORAGE_KEY);
+          activeFilterAfterEventId = 0;
+          refreshStatus().catch(() => {});
+        } else {
+          localStorage.removeItem(FILTER_JOB_STORAGE_KEY);
         }
       } catch (error) {
         $("filterStatus").textContent = error.message;
@@ -1914,6 +2302,8 @@
       $("filterStatus").textContent = "Scanning...";
       $("runFilter").disabled = true;
       $("progressModal").classList.remove("hidden");
+      $("progressEvents").replaceChildren();
+      activeFilterAfterEventId = 0;
       $("progressStage").textContent = "Filtering";
       $("progressDetail").textContent = "Preparing online market scan...";
       $("progressFill").style.width = "0%";
@@ -1939,6 +2329,7 @@
       };
       try {
         const response = await api("/api/filter/start", { method: "POST", body: JSON.stringify(payload) });
+        if (response.job?.id) localStorage.setItem(FILTER_JOB_STORAGE_KEY, response.job.id);
         updateFilterJob(response.job);
         pollFilterJob(response.job.id);
       } catch (error) {
@@ -1948,17 +2339,29 @@
       }
     }
 
+    function resumeActiveFilterJob() {
+      const jobId = localStorage.getItem(FILTER_JOB_STORAGE_KEY);
+      if (!jobId) return;
+      $("progressModal").classList.remove("hidden");
+      $("filterStatus").textContent = "Resuming scan progress...";
+      $("filterStatus").className = "status-line warn";
+      activeFilterAfterEventId = 0;
+      pollFilterJob(jobId);
+    }
+
     async function loadSharedScan() {
       $("filterStatus").textContent = "Loading shared scan...";
       $("filterStatus").className = "status-line warn";
       try {
         const market = encodeURIComponent($("marketSelect").value);
-        const payload = await api(`/api/scan-results?market=${market}`);
+        const payload = await api(`/api/scan-results?market=${market}&config=default`);
         currentScanId = payload.scan?.id || null;
         renderResults(payload.results || [], currentScanId);
         $("metricMatches").textContent = fmt.format((payload.results || []).length);
-        const created = payload.scan?.created_at_utc ? new Date(payload.scan.created_at_utc).toLocaleString() : "";
-        $("resultMeta").textContent = `shared scan ${currentScanId || ""}, ${(payload.results || []).length} matches${created ? ` from ${created}` : ""}`;
+        const scan = payload.scan || {};
+        const created = scan.created_at_utc ? formatBrisbane(scan.created_at_utc) : "-";
+        const snapshot = scan.market_snapshot_date || "-";
+        $("resultMeta").textContent = `scan ${currentScanId || "-"} created ${created}, data snapshot ${snapshot}, ${fmt.format(scan.scanned_count || 0)} scanned, ${fmt.format((payload.results || []).length)} matches`;
         $("filterStatus").textContent = "Shared scan loaded";
         $("filterStatus").className = "status-line ok";
       } catch (error) {
@@ -2103,7 +2506,7 @@
         await authReady;
         await firebaseAuthMethods.signInWithEmailAndPassword(firebaseAuth, $("authEmail").value.trim(), $("authPassword").value);
         window.location.reload();
-      } catch (error) { $("topStatus").textContent = error.message; }
+      } catch (error) { $("loginStatus").textContent = error.message; }
     });
     $("authCreate").addEventListener("click", async () => {
       try {
@@ -2111,8 +2514,8 @@
         const email = $("authEmail").value.trim();
         if (!email) throw new Error("Enter your invited email address first");
         await firebaseAuthMethods.sendPasswordResetEmail(firebaseAuth, email);
-        $("topStatus").textContent = `Password setup email sent to ${email}`;
-      } catch (error) { $("topStatus").textContent = error.message; }
+        $("loginStatus").textContent = `Password setup email sent to ${email}`;
+      } catch (error) { $("loginStatus").textContent = error.message; }
     });
     $("authSignOut").addEventListener("click", async () => {
       await firebaseAuthMethods.signOut(firebaseAuth);
@@ -2126,7 +2529,11 @@
     $("analysisMarket").addEventListener("change", loadAnalysis);
     $("analysisHorizon").addEventListener("change", loadAnalysis);
     $("marketSelect").addEventListener("change", applyMarketDefaults);
-    $("refreshStatus").addEventListener("click", refreshStatus);
+    $("marketAsx").addEventListener("click", () => setMarket("asx"));
+    $("marketUs").addEventListener("click", () => setMarket("us"));
+    $("openOperations").addEventListener("click", () => {
+      $("adminPanel").hidden = !$("adminPanel").hidden;
+    });
     bindLimitToggle("useFetchLimit", "fetchLimit");
     bindLimitToggle("useScanLimit", "scanLimit");
     $("tickerFileSelect").addEventListener("change", () => {
@@ -2146,6 +2553,9 @@
     document.querySelectorAll(".ma-check").forEach((input) => {
       input.addEventListener("change", () => loadChart());
     });
+    document.querySelectorAll(".screen-ma-check").forEach((input) => {
+      input.addEventListener("change", syncScreenMaInputs);
+    });
     $("chartTicker").addEventListener("keydown", (event) => {
       if (event.key === "Enter") loadChart();
     });
@@ -2158,9 +2568,19 @@
       }
     });
     $("closeProgress").addEventListener("click", () => $("progressModal").classList.add("hidden"));
-    initializeAppMode().finally(async () => {
+    authReady.then(async (getToken) => {
+      if (!getToken) {
+        showSignedOut();
+        return;
+      }
+      showAuthenticated();
+      syncScreenMaInputs();
+      await initializeAppMode();
       await loadCurrentUserProfile();
       applyMarketDefaults();
+      resumeActiveFilterJob();
+    }).catch((error) => {
+      showSignedOut(error.message || "Sign-in setup failed");
     });
   </script>
 </body>
