@@ -134,6 +134,21 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    #topStatus {
+      min-height: 24px;
+      max-width: min(44vw, 620px);
+      padding: 2px 5px;
+      border: 0;
+      background: transparent;
+      text-align: left;
+    }
+    #topStatus:disabled { opacity: 1; cursor: default; }
+    #topStatus.is-clickable {
+      cursor: pointer;
+      text-decoration: underline;
+      text-decoration-style: dotted;
+      text-underline-offset: 3px;
+    }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -681,6 +696,11 @@
     }
     .market-data-card:hover .market-data-tooltip,
     .market-data-card:focus .market-data-tooltip { display: block; }
+    .market-data-card.is-running {
+      cursor: pointer;
+      border-color: #3a7e5b;
+    }
+    .market-data-card.is-running .market-last-run b { color: var(--accent); }
     .metrics { grid-area: metrics; margin-bottom: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); }
     #resultsPanel {
       grid-area: results;
@@ -770,6 +790,9 @@
       color: var(--muted);
     }
     .progress-event strong { color: var(--text); display: block; }
+    .progress-event.running { border-left-color: var(--accent-2); }
+    .progress-event.succeeded { border-left-color: var(--accent); }
+    .progress-event.failed { border-left-color: var(--bad); }
     details.technical-details {
       margin-top: 12px;
       color: var(--muted);
@@ -860,7 +883,7 @@
         <button id="marketTab" class="active" type="button" aria-pressed="true">Market</button>
         <button id="analysisTab" type="button" aria-pressed="false">Analysis</button>
       </nav>
-      <span class="status-line" id="topStatus">Connecting to market data...</span>
+      <button class="status-line" id="topStatus" type="button" disabled>Connecting to market data...</button>
       <span class="role-pill" id="authRole" hidden></span>
       <button class="icon-button" id="openOperations" type="button" title="Operations" aria-label="Operations">Ops</button>
       <button id="authSignOut" type="button" hidden>Sign out</button>
@@ -1327,6 +1350,8 @@
     let currentScanId = null;
     let lastExportStoragePath = null;
     let activeFilterAfterEventId = 0;
+    let marketStatusTimer = null;
+    let activeRefreshPollToken = 0;
     const FILTER_JOB_STORAGE_KEY = "moneymaker.activeFilterJobId";
     const progressStageOrder = [
       "Queued",
@@ -1338,6 +1363,7 @@
       "Loading results",
       "Complete"
     ];
+    const refreshStageOrder = ["Queued", "Starting worker", "Fetching batches", "Updating market data", "Complete"];
     const maColors = {
       "30": "#f2c14e",
       "90": "#8dd7ff",
@@ -1507,7 +1533,10 @@
         const item = markets?.[market] || {};
         const refresh = item.latest_refresh || {};
         const refreshTimestamp = item.last_successful_refresh_at_utc || item.database_refreshed_at_utc;
-        const lastRun = formatBrisbane(refreshTimestamp, false);
+        const running = ["queued", "running"].includes(String(refresh.status));
+        const lastRun = running
+          ? `${fmt.format(Number(refresh.completed_tickers || 0))} / ${fmt.format(Number(refresh.total_tickers || 0))}`
+          : formatBrisbane(refreshTimestamp, false);
         const details = [
           `Last run: ${formatBrisbane(refreshTimestamp)}`,
           `Latest bar: ${item.latest_bar_date || "-"}`,
@@ -1516,15 +1545,27 @@
           `Next refresh: ${formatBrisbane(item.next_scheduled_refresh_at_utc)}`
         ];
         if (refresh.status === "failed") details.push(`Latest failure: ${refresh.error || "Refresh failed"}`);
-        return `<div class="market-data-card" data-market-card="${market}">
+        if (running) details.unshift("Click to view live batch activity");
+        return `<div class="market-data-card ${running ? "is-running" : ""}" data-market-card="${market}" data-refresh-id="${escapeHtml(refresh.id || "")}">
           <strong>${market.toUpperCase()}</strong>
-          <span class="market-last-run">Last run<b>${escapeHtml(lastRun)}</b></span>
+          <span class="market-last-run">${running ? "Updating" : "Last run"}<b>${escapeHtml(lastRun)}</b></span>
           <div class="market-data-tooltip" role="tooltip">${details.map(escapeHtml).join("<br>")}</div>
         </div>`;
       }).join("");
       strip.querySelectorAll(".market-data-card").forEach((card) => {
         card.tabIndex = 0;
-        card.setAttribute("aria-label", `${card.dataset.marketCard.toUpperCase()} market status. Hover or focus for details.`);
+        const running = card.classList.contains("is-running");
+        card.setAttribute("aria-label", `${card.dataset.marketCard.toUpperCase()} market status. ${running ? "Click to view live refresh activity." : "Hover or focus for details."}`);
+        if (running) {
+          card.setAttribute("role", "button");
+          card.addEventListener("click", () => openLiveRefresh(card.dataset.marketCard, card.dataset.refreshId));
+          card.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              openLiveRefresh(card.dataset.marketCard, card.dataset.refreshId);
+            }
+          });
+        }
       });
     }
 
@@ -1802,9 +1843,17 @@
       $("metricRows").textContent = fmt.format(s.weekly_metric_rows || 0);
       $("metricLatest").textContent = s.latest_bar_date || "-";
       const refresh = s.latest_refresh || null;
+      const topStatus = $("topStatus");
+      topStatus.disabled = true;
+      topStatus.classList.remove("is-clickable");
+      topStatus.dataset.refreshId = "";
+      topStatus.dataset.market = "";
       if (refresh && ["queued", "running"].includes(String(refresh.status))) {
-        $("topStatus").textContent = `${market.toUpperCase()} refresh ${refresh.status}: ${fmt.format(refresh.completed_tickers || 0)} / ${fmt.format(refresh.total_tickers || 0)} tickers`;
-        $("topStatus").className = "status-line warn";
+        topStatus.textContent = `${market.toUpperCase()} refresh ${refresh.status}: ${fmt.format(refresh.completed_tickers || 0)} / ${fmt.format(refresh.total_tickers || 0)} tickers - view live`;
+        topStatus.className = "status-line warn is-clickable";
+        topStatus.disabled = false;
+        topStatus.dataset.refreshId = refresh.id || "";
+        topStatus.dataset.market = market;
       } else if (refresh && refresh.status === "failed") {
         $("topStatus").textContent = `${market.toUpperCase()} refresh failed; hover market status for details`;
         $("topStatus").className = "status-line bad";
@@ -1812,6 +1861,14 @@
         $("topStatus").textContent = `${market.toUpperCase()} last run ${formatBrisbane(s.last_successful_refresh_at_utc || s.database_refreshed_at_utc, false)}`;
         $("topStatus").className = "status-line ok";
       }
+      if (marketStatusTimer) clearTimeout(marketStatusTimer);
+      const hasRunningRefresh = Object.values(markets).some((item) =>
+        ["queued", "running"].includes(String(item?.latest_refresh?.status))
+      );
+      if (hasRunningRefresh) {
+        marketStatusTimer = setTimeout(() => refreshStatus().catch(() => {}), 5000);
+      }
+      return markets;
     }
 
     async function loadTickerFiles() {
@@ -2061,10 +2118,10 @@
       });
     }
 
-    function renderProgressSteps(stage, success) {
-      const currentIndex = progressStageOrder.findIndex((item) => item.toLowerCase() === String(stage || "").toLowerCase());
-      const doneIndex = success ? progressStageOrder.length - 1 : currentIndex;
-      $("progressSteps").innerHTML = progressStageOrder.map((item, index) => {
+    function renderProgressSteps(stage, success, stages = progressStageOrder) {
+      const currentIndex = stages.findIndex((item) => item.toLowerCase() === String(stage || "").toLowerCase());
+      const doneIndex = success ? stages.length - 1 : currentIndex;
+      $("progressSteps").innerHTML = stages.map((item, index) => {
         const statusClass = index < doneIndex ? "done" : index === currentIndex ? "active" : "";
         return `<div class="progress-step ${statusClass}"><span class="progress-step-dot">${index + 1}</span><span>${item}</span></div>`;
       }).join("");
@@ -2099,9 +2156,66 @@
       $("progressSnapshot").textContent = job.summary?.market_snapshot_date || "-";
       renderProgressSteps(job.stage, job.success === true);
       $("modalFetchLog").textContent = job.log || job.error || (job.summary && job.summary.error ? job.summary.error : "");
-      if (job.running || (!$("progressModal").classList.contains("hidden") && job.success !== null)) {
-        $("progressModal").classList.remove("hidden");
+    }
+
+    function renderRefreshBatches(batches = [], refresh = {}) {
+      const box = $("progressEvents");
+      box.replaceChildren();
+      const failed = batches.filter((batch) => batch.status === "failed");
+      const running = batches.filter((batch) => batch.status === "running");
+      const completed = batches.filter((batch) => batch.status === "succeeded").slice(-6);
+      const queued = batches.filter((batch) => batch.status === "queued").slice(0, 4);
+      const visible = [...failed.slice(-4), ...completed, ...running, ...queued]
+        .sort((left, right) => Number(left.batch_index) - Number(right.batch_index));
+      for (const batch of visible) {
+        const row = document.createElement("div");
+        row.className = `progress-event ${batch.status || ""}`;
+        const range = [batch.first_ticker, batch.last_ticker].filter(Boolean).join(" to ");
+        const time = batch.status === "running" && batch.started_at_utc
+          ? `, running since ${formatBrisbane(batch.started_at_utc)}`
+          : batch.finished_at_utc ? `, finished ${formatBrisbane(batch.finished_at_utc)}` : "";
+        row.innerHTML = `<strong>Batch ${fmt.format(batch.batch_index)} of ${fmt.format(refresh.batch_counts?.total || batches.length)}: ${escapeHtml(batch.status || "queued")}</strong>${escapeHtml(`${batch.ticker_count || 0} tickers${range ? ` (${range})` : ""}, attempt ${batch.attempts || 0}${time}${batch.error ? ` - ${batch.error}` : ""}`)}`;
+        box.appendChild(row);
       }
+      if (!visible.length) box.textContent = "Waiting for the first batch to start.";
+    }
+
+    async function pollLiveRefresh(market, refreshJobId, pollToken) {
+      try {
+        const payload = await api(`/api/refresh/job?refresh_job_id=${encodeURIComponent(refreshJobId)}`);
+        if (pollToken !== activeRefreshPollToken) return;
+        const refresh = payload.refresh || {};
+        updateProgress(refresh, `${String(market).toUpperCase()} Market Refresh`);
+        renderProgressSteps(refresh.stage, refresh.success === true, refreshStageOrder);
+        renderRefreshBatches(payload.batches || [], refresh);
+        $("progressSnapshot").textContent = `${refresh.batch_counts?.completed || 0} / ${refresh.batch_counts?.total || 0} batches`;
+        $("modalFetchLog").textContent = JSON.stringify({
+          refresh_job_id: refresh.id,
+          market: refresh.market,
+          provider: refresh.provider,
+          status: refresh.status,
+          stage: refresh.stage,
+          batch_counts: refresh.batch_counts,
+          running_child_jobs: (payload.batches || []).filter((batch) => batch.status === "running").map((batch) => batch.child_job_id).filter(Boolean)
+        }, null, 2);
+        refreshStatus().catch(() => {});
+        if (refresh.running) setTimeout(() => pollLiveRefresh(market, refreshJobId, pollToken), 2000);
+      } catch (error) {
+        if (pollToken !== activeRefreshPollToken) return;
+        $("progressDetail").textContent = error.message;
+        $("progressDetail").className = "status-line bad";
+      }
+    }
+
+    function openLiveRefresh(market, refreshJobId) {
+      if (!refreshJobId) return;
+      activeRefreshPollToken += 1;
+      const pollToken = activeRefreshPollToken;
+      $("progressEvents").replaceChildren();
+      $("progressTitle").textContent = `${String(market).toUpperCase()} Market Refresh`;
+      $("progressDetail").textContent = "Loading live batch activity...";
+      $("progressModal").classList.remove("hidden");
+      pollLiveRefresh(market, refreshJobId, pollToken);
     }
 
     function updateJob(job) {
@@ -2577,6 +2691,11 @@
     $("marketSelect").addEventListener("change", applyMarketDefaults);
     $("marketAsx").addEventListener("click", () => setMarket("asx"));
     $("marketUs").addEventListener("click", () => setMarket("us"));
+    $("topStatus").addEventListener("click", () => {
+      if (!$("topStatus").disabled) {
+        openLiveRefresh($("topStatus").dataset.market, $("topStatus").dataset.refreshId);
+      }
+    });
     $("openOperations").addEventListener("click", () => {
       $("adminPanel").hidden = !$("adminPanel").hidden;
     });
@@ -2613,7 +2732,10 @@
         toggleChartFullscreen(false);
       }
     });
-    $("closeProgress").addEventListener("click", () => $("progressModal").classList.add("hidden"));
+    $("closeProgress").addEventListener("click", () => {
+      activeRefreshPollToken += 1;
+      $("progressModal").classList.add("hidden");
+    });
     authReady.then(async (getToken) => {
       if (!getToken) {
         showSignedOut();

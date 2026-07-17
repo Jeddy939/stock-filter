@@ -39,7 +39,7 @@ export const scheduledRefreshAsx = onSchedule(
 export const scheduledRefreshUs = onSchedule(
   {
     region,
-    schedule: "30 7 * * 2-6",
+    schedule: "30 7 * * 2",
     timeZone,
     timeoutSeconds: 540,
     memory: "512MiB"

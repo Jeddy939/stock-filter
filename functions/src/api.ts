@@ -115,7 +115,7 @@ function jobPayload(row?: JobRow | null): Record<string, unknown> {
 function nextScheduledRefresh(market: "asx" | "us", now = new Date()): string {
   const brisbaneOffsetMs = 10 * 60 * 60 * 1000;
   const localNow = new Date(now.getTime() + brisbaneOffsetMs);
-  const allowedDays = market === "asx" ? new Set([1, 2, 3, 4, 5]) : new Set([2, 3, 4, 5, 6]);
+  const allowedDays = market === "asx" ? new Set([1, 2, 3, 4, 5]) : new Set([2]);
   const hour = market === "asx" ? 6 : 7;
   for (let dayOffset = 0; dayOffset < 8; dayOffset += 1) {
     const localCandidate = new Date(Date.UTC(
@@ -1100,6 +1100,72 @@ apiApp.get("/api/markets/status", asyncRoute(async (req, res) => {
   await reconcileStaleJobsSafe();
   const [asx, us] = await Promise.all([marketFreshness("asx"), marketFreshness("us")]);
   res.json({ok: true, generated_at_utc: new Date().toISOString(), markets: {asx, us}});
+}));
+
+apiApp.get("/api/refresh/job", asyncRoute(async (req, res) => {
+  await requireAuth(req, db());
+  const refreshJobId = String(req.query.refresh_job_id ?? "").trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(refreshJobId)) {
+    throw new ApiError(400, "A valid refresh_job_id is required");
+  }
+
+  const [refreshResult, batchResult] = await Promise.all([
+    db().query(
+      `SELECT id, market, provider, status, stage, total_tickers, completed_tickers,
+              failed_tickers, started_at_utc, finished_at_utc, error,
+              GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(finished_at_utc, NOW()) - started_at_utc)))::int
+                AS elapsed_seconds
+       FROM refresh_jobs
+       WHERE id = $1`,
+      [refreshJobId]
+    ),
+    db().query(
+      `SELECT id, batch_index, status, attempts, started_at_utc, finished_at_utc, error,
+              jsonb_array_length(tickers_json)::int AS ticker_count,
+              tickers_json ->> 0 AS first_ticker,
+              tickers_json ->> (jsonb_array_length(tickers_json) - 1) AS last_ticker,
+              result_json #>> '{cloud_run_dispatch,job_id}' AS child_job_id
+       FROM refresh_batches
+       WHERE refresh_job_id = $1
+       ORDER BY batch_index`,
+      [refreshJobId]
+    )
+  ]);
+  const refresh = refreshResult.rows[0];
+  if (!refresh) throw new ApiError(404, "Refresh job not found");
+
+  const batches = batchResult.rows;
+  const completedBatches = batches.filter((batch) => batch.status === "succeeded").length;
+  const failedBatches = batches.filter((batch) => batch.status === "failed").length;
+  const runningBatches = batches.filter((batch) => batch.status === "running").length;
+  const queuedBatches = batches.filter((batch) => batch.status === "queued").length;
+  const totalTickers = Number(refresh.total_tickers ?? 0);
+  const completedTickers = Number(refresh.completed_tickers ?? 0);
+  const status = String(refresh.status ?? "queued");
+  const stage = status === "succeeded" ? "Complete" : status === "failed" ? "Failed" : refresh.stage;
+  const percent = totalTickers ? Math.min(100, Math.round((completedTickers / totalTickers) * 10000) / 100) : 0;
+
+  res.json({
+    ok: true,
+    refresh: {
+      ...refresh,
+      stage,
+      running: status === "queued" || status === "running",
+      success: status === "succeeded" ? true : status === "failed" ? false : null,
+      current: completedTickers,
+      total: totalTickers,
+      percent,
+      detail: `${completedBatches}/${batches.length} batches complete; ${runningBatches} running, ${queuedBatches} queued, ${failedBatches} failed`,
+      batch_counts: {
+        total: batches.length,
+        completed: completedBatches,
+        running: runningBatches,
+        queued: queuedBatches,
+        failed: failedBatches
+      }
+    },
+    batches
+  });
 }));
 
 apiApp.get("/api/job", asyncRoute(async (req, res) => {
