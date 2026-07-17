@@ -1431,9 +1431,10 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
     ORDER BY CASE label
       WHEN 'winner' THEN 1
       WHEN 'potential_winner' THEN 2
-      WHEN 'maybe' THEN 3
-      WHEN 'bad' THEN 4
-      ELSE 5
+      WHEN 'needs_confirmation' THEN 3
+      WHEN 'maybe' THEN 4
+      WHEN 'bad' THEN 5
+      ELSE 6
     END
     `,
     [market, horizon]

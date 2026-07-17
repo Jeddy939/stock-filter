@@ -1,4 +1,10 @@
-export const VALID_LABELS = new Set(["winner", "potential_winner", "maybe", "bad"]);
+export const VALID_LABELS = new Set([
+  "winner",
+  "potential_winner",
+  "needs_confirmation",
+  "maybe",
+  "bad"
+]);
 
 export const MARKET_DEFAULTS = {
   asx: {

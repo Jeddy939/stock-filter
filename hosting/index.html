@@ -201,6 +201,10 @@
       background: #285f6d;
       border-color: #58b8ce;
     }
+    .label-btn.active[data-label="needs_confirmation"] {
+      background: #70451f;
+      border-color: #df914f;
+    }
     .label-btn.active[data-label="maybe"] {
       background: #6d5422;
       border-color: #d1a94e;
@@ -211,6 +215,7 @@
     }
     tr.label-winner td:first-child { border-left: 3px solid var(--accent); }
     tr.label-potential_winner td:first-child { border-left: 3px solid var(--accent-2); }
+    tr.label-needs_confirmation td:first-child { border-left: 3px solid #df914f; }
     tr.label-maybe td:first-child { border-left: 3px solid var(--warn); }
     tr.label-bad td:first-child { border-left: 3px solid var(--bad); }
     tr.incomplete-ma td { background: rgba(242, 193, 78, 0.06); }
@@ -2533,6 +2538,7 @@
     function labelText(label) {
       if (label === "winner") return "Winner";
       if (label === "potential_winner") return "Potential Winner";
+      if (label === "needs_confirmation") return "Needs Confirmation";
       if (label === "maybe") return "Maybe";
       if (label === "bad") return "Bad";
       return "";
@@ -2540,13 +2546,14 @@
 
     function labelButtons(row) {
       const labels = [
-        ["winner", "Winner"],
-        ["potential_winner", "Potential"],
-        ["maybe", "Maybe"],
-        ["bad", "Bad"]
+        ["winner", "Winner", "Winner"],
+        ["potential_winner", "Potential", "Potential Winner"],
+        ["needs_confirmation", "Confirm", "Needs Confirmation"],
+        ["maybe", "Maybe", "Maybe"],
+        ["bad", "Bad", "Bad"]
       ];
-      return `<div class="label-cell">${labels.map(([value, text]) =>
-        `<button class="label-btn ${row.label === value ? "active" : ""}" data-label="${value}" data-ticker="${row.ticker}" title="Mark ${text}">${text}</button>`
+      return `<div class="label-cell">${labels.map(([value, text, title]) =>
+        `<button class="label-btn ${row.label === value ? "active" : ""}" data-label="${value}" data-ticker="${row.ticker}" title="Mark as ${title}">${text}</button>`
       ).join("")}</div>`;
     }
 
@@ -2564,7 +2571,7 @@
     function applyRowLabel(ticker, label) {
       const row = document.querySelector(`tr[data-ticker="${ticker}"]`);
       if (!row) return;
-      row.classList.remove("label-winner", "label-potential_winner", "label-maybe", "label-bad");
+      row.classList.remove("label-winner", "label-potential_winner", "label-needs_confirmation", "label-maybe", "label-bad");
       if (label) row.classList.add(`label-${label}`);
       row.querySelectorAll(".label-btn").forEach((button) => {
         button.classList.toggle("active", button.dataset.label === label);
