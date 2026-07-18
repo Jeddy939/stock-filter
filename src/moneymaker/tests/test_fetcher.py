@@ -38,6 +38,13 @@ def test_nasdaq_pipe_file_does_not_get_asx_suffix(tmp_path):
     assert get_tickers_from_file(str(ticker_file)) == ["AAPL", "MSFT"]
 
 
+def test_market_index_symbols_keep_their_yahoo_caret(tmp_path):
+    ticker_file = tmp_path / "asx_benchmark_tickers.txt"
+    ticker_file.write_text("^AORD\n^GSPC\n", encoding="utf-8")
+
+    assert get_tickers_from_file(str(ticker_file)) == ["^AORD", "^GSPC"]
+
+
 def test_apply_ticker_limit_preserves_order():
     assert apply_ticker_limit(["AAPL", "MSFT", "NVDA"], 2) == ["AAPL", "MSFT"]
     assert apply_ticker_limit(["AAPL", "MSFT"], None) == ["AAPL", "MSFT"]

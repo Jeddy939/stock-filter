@@ -20,6 +20,7 @@
       --shadow: rgba(0, 0, 0, .25);
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body {
       margin: 0;
       font: 14px/1.45 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
@@ -515,21 +516,121 @@
     }
     .analysis-page {
       min-height: calc(100vh - 58px);
-      padding: 16px;
+      padding: 14px 18px 24px;
       background: var(--bg);
     }
     .analysis-heading {
       display: flex;
-      align-items: center;
+      align-items: flex-end;
       justify-content: space-between;
       gap: 12px;
-      margin: 0 0 14px;
+      margin: 0 0 12px;
     }
-    .analysis-heading h2 { margin: 0; font-size: 18px; }
-    .analysis-tools { display: flex; gap: 8px; align-items: center; }
-    .analysis-tools select { width: 150px; }
-    .analysis-summary { margin-bottom: 14px; }
-    .analysis-summary table td, .analysis-summary table th { text-align: left; }
+    .analysis-heading h2 { margin: 0; font-size: 20px; }
+    .analysis-heading p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+    .analysis-tools { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+    .analysis-tools select { width: 112px; min-height: 34px; }
+    .analysis-segment {
+      display: inline-flex;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #0d1312;
+    }
+    .analysis-segment button {
+      min-height: 28px;
+      padding: 4px 10px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .analysis-segment button.active {
+      background: #1b3529;
+      color: var(--text);
+    }
+    .analysis-segment button:disabled { cursor: not-allowed; opacity: .42; }
+    .analysis-statusbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px 16px;
+      min-height: 33px;
+      margin-bottom: 10px;
+      padding: 6px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .analysis-statusbar strong { color: var(--text); font-weight: 600; }
+    .analysis-chart-section {
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .analysis-section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .analysis-section-head h3 { margin: 0; font-size: 14px; }
+    .analysis-section-head span { color: var(--muted); font-size: 11px; }
+    .analysis-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px 14px;
+      margin-bottom: 7px;
+    }
+    .analysis-legend label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .analysis-legend input { width: 14px; height: 14px; margin: 0; }
+    .analysis-legend-swatch { width: 14px; height: 2px; background: var(--series-color); }
+    .analysis-chart-wrap {
+      position: relative;
+      width: 100%;
+      height: 410px;
+      min-height: 280px;
+      background: #0b1110;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    #analysisChart { display: block; width: 100%; height: 100%; }
+    .analysis-chart-empty {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      color: var(--muted);
+      text-align: center;
+      pointer-events: none;
+    }
+    .analysis-lower-grid {
+      display: grid;
+      grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    .analysis-subsection { min-width: 0; }
+    .analysis-subsection .results-wrap { max-height: 290px; }
+    .analysis-picks {
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+    .analysis-picks .results-wrap { max-height: min(56vh, 620px); }
+    .analysis-picks-filter { width: 170px; min-height: 31px; }
     .analysis-insight-grid {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
@@ -824,6 +925,7 @@
       .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .chart-controls { grid-template-columns: 1fr 1fr; }
       .analysis-insight-grid { grid-template-columns: 1fr; }
+      .analysis-lower-grid { grid-template-columns: 1fr; }
       .analysis-page { padding: 12px; }
     }
     @media (max-width: 520px) {
@@ -858,7 +960,11 @@
       }
       .analysis-heading { align-items: flex-start; flex-direction: column; }
       .analysis-tools { width: 100%; }
-      .analysis-tools select { flex: 1; width: auto; }
+      .analysis-tools select { flex: 1; width: auto; min-width: 88px; }
+      .analysis-chart-wrap { height: 310px; }
+      .analysis-statusbar { align-items: flex-start; flex-direction: column; gap: 4px; }
+      .analysis-section-head { align-items: flex-start; flex-direction: column; gap: 3px; }
+      .analysis-picks-filter { width: 100%; }
       main {
         min-height: calc(100vh - 82px);
       }
@@ -1187,46 +1293,55 @@
 
   <section class="analysis-page" id="analysisPage" hidden>
     <div class="analysis-heading">
-      <h2>Rating Analysis</h2>
+      <div>
+        <h2>Pick performance</h2>
+        <p>Performance begins at each appraisal price. Lines show the average return of the available picks in each group.</p>
+      </div>
       <div class="analysis-tools">
-        <select id="analysisMarket" aria-label="Analysis market">
-          <option value="all">All markets</option>
-          <option value="asx">ASX</option>
-          <option value="us">US</option>
+        <input id="analysisMarket" type="hidden" value="asx">
+        <input id="analysisInterval" type="hidden" value="daily">
+        <div class="analysis-segment" aria-label="Analysis market">
+          <button class="active" id="analysisMarketAsx" type="button" aria-pressed="true">ASX</button>
+          <button id="analysisMarketUs" type="button" aria-pressed="false">US</button>
+        </div>
+        <div class="analysis-segment" aria-label="Performance interval">
+          <button class="active" id="analysisDaily" type="button" aria-pressed="true">Daily</button>
+          <button id="analysisWeekly" type="button" aria-pressed="false">Weekly</button>
+          <button id="analysisHourly" type="button" disabled title="Hourly bars are not stored in the current database">Hourly</button>
+        </div>
+        <select id="analysisRange" aria-label="Performance range">
+          <option value="3m">3 months</option>
+          <option value="6m">6 months</option>
+          <option value="1y" selected>1 year</option>
+          <option value="2y">2 years</option>
+          <option value="5y">5 years</option>
+          <option value="all">All picks</option>
         </select>
-        <select id="analysisHorizon" aria-label="Analysis horizon">
-          <option value="0">Current</option>
-          <option value="30">30 days</option>
-          <option value="90">90 days</option>
-          <option value="180">180 days</option>
-          <option value="360">360 days</option>
-        </select>
-        <button id="recalculateOutcomes" type="button">Recalculate</button>
         <button id="refreshAnalysis" type="button">Refresh</button>
       </div>
     </div>
-    <div class="metrics analysis-metrics">
-      <div class="metric"><span>Active picks</span><strong id="analysisPickCount">-</strong></div>
-      <div class="metric"><span>Priced picks</span><strong id="analysisPricedCount">-</strong></div>
-      <div class="metric"><span>Positive picks</span><strong id="analysisPositiveRate">-</strong></div>
-      <div class="metric"><span>Average return</span><strong id="analysisAverageReturn">-</strong></div>
+    <div class="analysis-statusbar" aria-live="polite">
+      <span id="analysisStatus">Open Analysis to load online appraisal performance.</span>
+      <span>Active picks <strong id="analysisPickCount">-</strong></span>
+      <span>Unique tickers <strong id="analysisTickerCount">-</strong></span>
+      <span>Benchmark <strong id="analysisBenchmarkName">-</strong></span>
+      <span>Signals <strong id="analysisSignalRange">-</strong></span>
     </div>
-    <div class="panel analysis-summary">
-      <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
-        <h2 style="margin:0">Performance by Appraisal</h2>
-        <span class="status-line" id="analysisStatus">Load analysis to view active appraisals.</span>
+    <section class="analysis-chart-section" aria-labelledby="analysisChartHeading">
+      <div class="analysis-section-head">
+        <h3 id="analysisChartHeading">Category return since appraisal</h3>
+        <span id="analysisChartMeta">Waiting for performance data</span>
       </div>
-      <div class="results-wrap">
-        <table>
-          <thead><tr><th>Appraisal</th><th>Picks</th><th>Priced</th><th>Positive</th><th>Hit Rate</th><th>Average Return</th><th>Median Return</th><th>Average Age</th></tr></thead>
-          <tbody id="analysisSummaryBody"><tr><td colspan="8" style="text-align:left;color:var(--muted)">No analysis loaded.</td></tr></tbody>
-        </table>
+      <div class="analysis-legend" id="analysisLegend"></div>
+      <div class="analysis-chart-wrap">
+        <canvas id="analysisChart" role="img" aria-label="Average return of appraisal groups compared with all picks and the market benchmark"></canvas>
+        <div class="analysis-chart-empty" id="analysisChartEmpty">No priced appraisals are available for this market and range.</div>
       </div>
-    </div>
-    <div class="analysis-insight-grid">
-      <div class="panel analysis-review">
-        <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
-          <h2 style="margin:0">Needs Review</h2>
+    </section>
+    <div class="analysis-lower-grid">
+      <section class="analysis-subsection analysis-review">
+        <div class="analysis-section-head">
+          <h3>Winner picks needing review</h3>
           <span class="status-line" id="analysisReviewMeta"></span>
         </div>
         <div class="results-wrap">
@@ -1235,10 +1350,10 @@
             <tbody id="analysisReviewBody"><tr><td colspan="6" style="text-align:left;color:var(--muted)">No underperformers loaded.</td></tr></tbody>
           </table>
         </div>
-      </div>
-      <div class="panel analysis-patterns">
-        <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
-          <h2 style="margin:0">Common Patterns</h2>
+      </section>
+      <section class="analysis-subsection analysis-patterns">
+        <div class="analysis-section-head">
+          <h3>Winner and potential-winner trends</h3>
           <span class="status-line" id="analysisPatternMeta"></span>
         </div>
         <div class="results-wrap">
@@ -1247,12 +1362,22 @@
             <tbody id="analysisPatternBody"><tr><td colspan="7" style="text-align:left;color:var(--muted)">No pattern data loaded.</td></tr></tbody>
           </table>
         </div>
-      </div>
+      </section>
     </div>
-    <div class="panel analysis-picks">
-      <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
-        <h2 style="margin:0">Current Appraisals</h2>
-        <span class="status-line" id="analysisPickMeta"></span>
+    <section class="analysis-picks">
+      <div class="analysis-section-head">
+        <h3>Current picks</h3>
+        <div class="actions" style="margin:0">
+          <select class="analysis-picks-filter" id="analysisLabelFilter" aria-label="Filter picks by appraisal">
+            <option value="">All appraisal groups</option>
+            <option value="winner">Winner</option>
+            <option value="potential_winner">Potential winner</option>
+            <option value="needs_confirmation">Needs confirmation</option>
+            <option value="maybe">Maybe</option>
+            <option value="bad">Bad</option>
+          </select>
+          <span class="status-line" id="analysisPickMeta"></span>
+        </div>
       </div>
       <div class="results-wrap">
         <table>
@@ -1260,7 +1385,7 @@
           <tbody id="analysisPicksBody"><tr><td colspan="8" style="text-align:left;color:var(--muted)">No appraisals loaded.</td></tr></tbody>
         </table>
       </div>
-    </div>
+    </section>
   </section>
 
   <div class="modal hidden" id="progressModal" role="dialog" aria-modal="true" aria-labelledby="progressTitle">
@@ -1352,6 +1477,8 @@
     let lastCandles = [];
     let lastChartTicker = "";
     let lastMovingAverages = {};
+    let lastAnalysisPayload = null;
+    let lastAnalysisPicks = [];
     let currentScanId = null;
     let lastExportStoragePath = null;
     let activeFilterAfterEventId = 0;
@@ -1375,6 +1502,15 @@
       "180": "#b58cff",
       "360": "#ff9f7a",
       "700": "#d9e672"
+    };
+    const analysisSeriesColors = {
+      winner: "#54d693",
+      potential_winner: "#7dcfff",
+      needs_confirmation: "#f2c14e",
+      maybe: "#b58cff",
+      bad: "#ff7b72",
+      all_picks: "#f2f5f3",
+      benchmark: "#8c9b94"
     };
     const marketDefaults = {
       asx: {
@@ -1668,71 +1804,116 @@
       return `$${fmt.format(Math.round(number))}`;
     }
 
-    function renderAnalysis(summary, picks, insights = {}) {
-      const horizon = Number($("analysisHorizon").value || 0);
-      const horizonText = horizon ? `${horizon} day measured performance` : "Current price performance";
-      const totalPicks = summary.reduce((total, row) => total + Number(row.pick_count || 0), 0);
-      const pricedPicks = summary.reduce((total, row) => total + Number(row.priced_count || 0), 0);
-      const positivePicks = summary.reduce((total, row) => total + Number(row.positive_count || 0), 0);
-      const weightedReturn = summary.reduce((total, row) =>
-        total + Number(row.average_return_percent || 0) * Number(row.priced_count || 0), 0);
-      $("analysisPickCount").textContent = fmt.format(totalPicks);
-      $("analysisPricedCount").textContent = fmt.format(pricedPicks);
-      $("analysisPositiveRate").textContent = pricedPicks ? `${((positivePicks / pricedPicks) * 100).toFixed(1)}%` : "-";
-      const averageReturn = pricedPicks ? weightedReturn / pricedPicks : null;
-      $("analysisAverageReturn").textContent = returnText(averageReturn);
-      $("analysisAverageReturn").className = returnClass(averageReturn);
+    function analysisSources(payload) {
+      const sources = (payload?.series || []).map((series) => ({...series, name: labelText(series.label)}));
+      const benchmark = payload?.benchmark || {};
+      sources.push({label: "benchmark", name: benchmark.name || "Market benchmark", points: benchmark.points || []});
+      return sources;
+    }
 
-      $("analysisSummaryBody").innerHTML = summary.length ? summary.map((row) => {
-        const priced = Number(row.priced_count || 0);
-        const positive = Number(row.positive_count || 0);
-        const hitRate = priced ? `${((positive / priced) * 100).toFixed(1)}%` : "-";
-        return `<tr>
-          <td>${labelText(row.label)}</td><td>${fmt.format(Number(row.pick_count || 0))}</td>
-          <td>${fmt.format(priced)}</td><td>${fmt.format(positive)}</td><td>${hitRate}</td>
-          <td class="${returnClass(row.average_return_percent)}">${returnText(row.average_return_percent)}</td>
-          <td class="${returnClass(row.median_return_percent)}">${returnText(row.median_return_percent)}</td>
-          <td>${Number(row.average_age_days || 0).toFixed(0)}d</td>
-        </tr>`;
-      }).join("") : '<tr><td colspan="8" style="text-align:left;color:var(--muted)">No current appraisals with price history.</td></tr>';
+    function renderAnalysisLegend(payload) {
+      const previous = new Map(Array.from(document.querySelectorAll(".analysis-series-toggle"))
+        .map((input) => [input.value, input.checked]));
+      $("analysisLegend").innerHTML = analysisSources(payload).map((series) => {
+        const latest = series.points.at(-1);
+        const count = Number(latest?.sample_count || 0);
+        const suffix = series.label === "benchmark" ? "" : ` (${fmt.format(count)})`;
+        const enabled = series.points.length > 0;
+        const checked = enabled && (previous.has(series.label) ? previous.get(series.label) : true);
+        return `<label style="--series-color:${analysisSeriesColors[series.label] || "#ffffff"}">
+          <input class="analysis-series-toggle" type="checkbox" value="${escapeHtml(series.label)}" ${checked ? "checked" : ""} ${enabled ? "" : "disabled"}>
+          <span class="analysis-legend-swatch"></span>${escapeHtml(series.name)}${suffix}
+        </label>`;
+      }).join("");
+      document.querySelectorAll(".analysis-series-toggle").forEach((input) => input.addEventListener("change", drawAnalysisChart));
+    }
 
-      const underperformers = insights.underperformers || [];
-      $("analysisReviewBody").innerHTML = underperformers.length ? underperformers.map((row) => `<tr>
-        <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
-        <td><a class="ticker analysis-chart-link" href="#" data-market="${escapeHtml(row.market)}" data-ticker="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</a></td>
-        <td>${labelText(row.label)}</td>
-        <td>${escapeHtml(row.sector || row.industry || "Unknown")}</td>
-        <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
-        <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
-      </tr>`).join("") : '<tr><td colspan="6" style="text-align:left;color:var(--muted)">No winner or potential-winner picks are underperforming for this view.</td></tr>';
-      $("analysisReviewMeta").textContent = `${fmt.format(underperformers.length)} weak high-conviction picks`;
+    function drawAnalysisChart() {
+      const canvas = $("analysisChart");
+      const payload = lastAnalysisPayload;
+      if (!canvas || !payload || $("analysisPage").hidden) return;
+      const bounds = canvas.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return;
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.round(bounds.width * ratio);
+      canvas.height = Math.round(bounds.height * ratio);
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, bounds.width, bounds.height);
 
-      const patterns = insights.patterns || [];
-      $("analysisPatternBody").innerHTML = patterns.length ? patterns.map((row) => {
-        const hitRate = Number.isFinite(Number(row.hit_rate_percent)) ? `${Number(row.hit_rate_percent).toFixed(1)}%` : "-";
-        return `<tr>
-          <td>${escapeHtml(row.dimension)}</td>
-          <td>${escapeHtml(row.group_name)}</td>
-          <td>${labelText(row.label)}</td>
-          <td>${fmt.format(Number(row.pick_count || 0))}</td>
-          <td>${hitRate}</td>
-          <td class="${returnClass(row.average_return_percent)}">${returnText(row.average_return_percent)}</td>
-          <td>${shortMoney(row.average_market_cap)}</td>
-        </tr>`;
-      }).join("") : '<tr><td colspan="7" style="text-align:left;color:var(--muted)">No winner or potential-winner pattern groups found.</td></tr>';
-      $("analysisPatternMeta").textContent = `${fmt.format(patterns.length)} grouped signals`;
+      const visible = new Set(Array.from(document.querySelectorAll(".analysis-series-toggle:checked")).map((input) => input.value));
+      const sources = analysisSources(payload).filter((series) => visible.has(series.label) && series.points.length);
+      const values = sources.flatMap((series) => series.points.map((point) => Number(point.return_percent)).filter(Number.isFinite));
+      const times = sources.flatMap((series) => series.points.map((point) => new Date(`${point.date}T00:00:00Z`).getTime()).filter(Number.isFinite));
+      const empty = $("analysisChartEmpty");
+      empty.hidden = values.length > 0;
+      if (!values.length || !times.length) return;
 
-      $("analysisPicksBody").innerHTML = picks.length ? picks.map((row) => `<tr>
-        <td>${String(row.market || "").toUpperCase()}</td>
-        <td><a class="ticker analysis-chart-link" href="#" data-market="${row.market}" data-ticker="${row.ticker}">${row.ticker}</a></td>
-        <td>${labelText(row.label)}</td>
-        <td>${row.event_at_utc ? new Date(row.event_at_utc).toLocaleDateString() : "-"}</td>
-        <td>${Number.isFinite(Number(row.signal_price)) ? Number(row.signal_price).toFixed(2) : "-"}</td>
-        <td>${Number.isFinite(Number(row.latest_price)) ? Number(row.latest_price).toFixed(2) : "-"}</td>
-        <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
-        <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
-      </tr>`).join("") : '<tr><td colspan="8" style="text-align:left;color:var(--muted)">No active appraisals found.</td></tr>';
-      $("analysisPickMeta").textContent = `${fmt.format(picks.length)} active appraisals - ${horizonText}`;
+      const margin = {top: 16, right: 20, bottom: 32, left: 58};
+      const plotWidth = Math.max(10, bounds.width - margin.left - margin.right);
+      const plotHeight = Math.max(10, bounds.height - margin.top - margin.bottom);
+      const minTime = Math.min(...times);
+      const maxTime = Math.max(...times);
+      let minValue = Math.min(0, ...values);
+      let maxValue = Math.max(0, ...values);
+      const valueSpan = Math.max(1, maxValue - minValue);
+      minValue -= valueSpan * .08;
+      maxValue += valueSpan * .08;
+      const x = (time) => margin.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * plotWidth;
+      const y = (value) => margin.top + ((maxValue - value) / Math.max(1, maxValue - minValue)) * plotHeight;
+
+      ctx.font = '11px system-ui, -apple-system, "Segoe UI", sans-serif';
+      ctx.textBaseline = "middle";
+      for (let index = 0; index <= 5; index += 1) {
+        const value = maxValue - ((maxValue - minValue) * index / 5);
+        const py = y(value);
+        ctx.beginPath();
+        ctx.strokeStyle = Math.abs(value) < valueSpan / 10 ? "#43534c" : "#22302b";
+        ctx.lineWidth = 1;
+        ctx.moveTo(margin.left, py);
+        ctx.lineTo(bounds.width - margin.right, py);
+        ctx.stroke();
+        ctx.fillStyle = "#87968f";
+        ctx.textAlign = "right";
+        ctx.fillText(`${value.toFixed(valueSpan < 10 ? 1 : 0)}%`, margin.left - 8, py);
+      }
+
+      const dateFormat = new Intl.DateTimeFormat("en-AU", {day: "2-digit", month: "short", year: "2-digit", timeZone: "UTC"});
+      [0, .5, 1].forEach((position) => {
+        const time = minTime + (maxTime - minTime) * position;
+        ctx.fillStyle = "#87968f";
+        ctx.textAlign = position === 0 ? "left" : position === 1 ? "center" : "right";
+        ctx.fillText(dateFormat.format(new Date(time)), margin.left + plotWidth * position, bounds.height - 12);
+      });
+
+      for (const series of sources) {
+        const points = series.points
+          .map((point) => ({time: new Date(`${point.date}T00:00:00Z`).getTime(), value: Number(point.return_percent)}))
+          .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value));
+        if (!points.length) continue;
+        const stride = Math.max(1, Math.ceil(points.length / Math.max(1, plotWidth * 1.5)));
+        ctx.beginPath();
+        ctx.strokeStyle = analysisSeriesColors[series.label] || "#ffffff";
+        ctx.lineWidth = ["winner", "all_picks"].includes(series.label) ? 2.2 : 1.6;
+        ctx.setLineDash(series.label === "benchmark" ? [6, 5] : series.label === "all_picks" ? [3, 3] : []);
+        let started = false;
+        points.forEach((point, index) => {
+          if (index % stride && index !== points.length - 1) return;
+          const px = x(point.time);
+          const py = y(point.value);
+          if (!started) {
+            ctx.moveTo(px, py);
+            started = true;
+          } else {
+            ctx.lineTo(px, py);
+          }
+        });
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+
+    function bindAnalysisChartLinks() {
       document.querySelectorAll(".analysis-chart-link").forEach((link) => {
         link.addEventListener("click", (event) => {
           event.preventDefault();
@@ -1744,63 +1925,87 @@
       });
     }
 
+    function renderAnalysisPicks() {
+      const label = $("analysisLabelFilter").value;
+      const picks = label ? lastAnalysisPicks.filter((row) => row.label === label) : lastAnalysisPicks;
+      $("analysisPicksBody").innerHTML = picks.length ? picks.map((row) => `<tr>
+        <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
+        <td><a class="ticker analysis-chart-link" href="#" data-market="${escapeHtml(row.market)}" data-ticker="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</a></td>
+        <td>${labelText(row.label)}</td>
+        <td>${row.event_at_utc ? new Date(row.event_at_utc).toLocaleDateString() : "-"}</td>
+        <td>${Number.isFinite(Number(row.signal_price)) ? Number(row.signal_price).toFixed(2) : "-"}</td>
+        <td>${Number.isFinite(Number(row.latest_price)) ? Number(row.latest_price).toFixed(2) : "-"}</td>
+        <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
+        <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
+      </tr>`).join("") : '<tr><td colspan="8" style="text-align:left;color:var(--muted)">No active picks match this appraisal group.</td></tr>';
+      $("analysisPickMeta").textContent = `${fmt.format(picks.length)} of ${fmt.format(lastAnalysisPicks.length)}`;
+      bindAnalysisChartLinks();
+    }
+
+    function renderAnalysis(payload, picks, insights = {}) {
+      lastAnalysisPayload = payload;
+      lastAnalysisPicks = picks;
+      const coverage = payload.coverage || {};
+      $("analysisPickCount").textContent = fmt.format(Number(coverage.active_pick_count || 0));
+      $("analysisTickerCount").textContent = fmt.format(Number(coverage.ticker_count || 0));
+      $("analysisBenchmarkName").textContent = payload.benchmark?.available
+        ? payload.benchmark.name
+        : `${payload.benchmark?.name || "Benchmark"} not loaded`;
+      const firstSignal = coverage.earliest_signal_date || "-";
+      const lastSignal = coverage.latest_signal_date || "-";
+      $("analysisSignalRange").textContent = firstSignal === lastSignal ? firstSignal : `${firstSignal} to ${lastSignal}`;
+
+      renderAnalysisLegend(payload);
+      const datedPoints = analysisSources(payload).flatMap((series) => series.points || []).map((point) => point.date).filter(Boolean).sort();
+      $("analysisChartMeta").textContent = datedPoints.length
+        ? `${payload.interval === "weekly" ? "Weekly" : "Daily"} data, ${datedPoints[0]} to ${datedPoints.at(-1)}`
+        : payload.benchmark?.unavailable_reason || "No priced picks in this range";
+      drawAnalysisChart();
+
+      const underperformers = insights.underperformers || [];
+      $("analysisReviewBody").innerHTML = underperformers.length ? underperformers.map((row) => `<tr>
+        <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
+        <td><a class="ticker analysis-chart-link" href="#" data-market="${escapeHtml(row.market)}" data-ticker="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</a></td>
+        <td>${labelText(row.label)}</td>
+        <td>${escapeHtml(row.sector || row.industry || "Unknown")}</td>
+        <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
+        <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
+      </tr>`).join("") : '<tr><td colspan="6" style="text-align:left;color:var(--muted)">No winner or potential-winner picks are currently below their appraisal price.</td></tr>';
+      $("analysisReviewMeta").textContent = `${fmt.format(underperformers.length)} below signal`;
+
+      const patterns = insights.patterns || [];
+      $("analysisPatternBody").innerHTML = patterns.length ? patterns.map((row) => {
+        const hitRate = Number.isFinite(Number(row.hit_rate_percent)) ? `${Number(row.hit_rate_percent).toFixed(1)}%` : "-";
+        return `<tr>
+          <td>${escapeHtml(row.dimension)}</td><td>${escapeHtml(row.group_name)}</td><td>${labelText(row.label)}</td>
+          <td>${fmt.format(Number(row.pick_count || 0))}</td><td>${hitRate}</td>
+          <td class="${returnClass(row.average_return_percent)}">${returnText(row.average_return_percent)}</td>
+          <td>${shortMoney(row.average_market_cap)}</td>
+        </tr>`;
+      }).join("") : '<tr><td colspan="7" style="text-align:left;color:var(--muted)">More winner and potential-winner picks are needed before common trends can be measured.</td></tr>';
+      $("analysisPatternMeta").textContent = `${fmt.format(patterns.length)} measured groups`;
+      renderAnalysisPicks();
+    }
+
     async function loadAnalysis() {
-      $("analysisStatus").textContent = "Loading online appraisal outcomes...";
+      $("analysisStatus").textContent = "Loading pick performance...";
       $("analysisStatus").className = "status-line warn";
       const market = encodeURIComponent($("analysisMarket").value);
-      const horizon = encodeURIComponent($("analysisHorizon").value);
+      const interval = encodeURIComponent($("analysisInterval").value);
+      const range = encodeURIComponent($("analysisRange").value);
       try {
-        const [summaryPayload, picksPayload, insightsPayload] = await Promise.all([
-          api(`/api/analysis/summary?market=${market}&horizon=${horizon}`),
-          api(`/api/analysis/picks?market=${market}&horizon=${horizon}&limit=250`),
-          api(`/api/analysis/insights?market=${market}&horizon=${horizon}`)
+        const [timeseriesPayload, picksPayload, insightsPayload] = await Promise.all([
+          api(`/api/analysis/timeseries?market=${market}&interval=${interval}&range=${range}`),
+          api(`/api/analysis/picks?market=${market}&horizon=0&limit=1000`),
+          api(`/api/analysis/insights?market=${market}&horizon=0`)
         ]);
-        renderAnalysis(summaryPayload.summary || [], picksPayload.picks || [], insightsPayload);
-        $("analysisStatus").textContent = Number($("analysisHorizon").value || 0)
-          ? `${$("analysisHorizon").value} day measured performance`
-          : "Current price performance";
+        renderAnalysis(timeseriesPayload, picksPayload.picks || [], insightsPayload);
+        $("analysisStatus").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
         $("analysisStatus").className = "status-line ok";
       } catch (error) {
         $("analysisStatus").textContent = error.message;
         $("analysisStatus").className = "status-line bad";
-      }
-    }
-
-    async function pollOutcomeJob(jobId) {
-      try {
-        const payload = await api(`/api/job?type=rating-outcomes&job_id=${encodeURIComponent(jobId)}`);
-        const job = payload.job || {};
-        $("analysisStatus").textContent = job.error || job.detail || job.message || "Recalculating outcomes...";
-        $("analysisStatus").className = `status-line ${job.success === false ? "bad" : job.running ? "warn" : "ok"}`;
-        if (job.running) {
-          setTimeout(() => pollOutcomeJob(jobId), 3500);
-          return;
-        }
-        $("recalculateOutcomes").disabled = false;
-        if (job.success) loadAnalysis();
-      } catch (error) {
-        $("analysisStatus").textContent = error.message;
-        $("analysisStatus").className = "status-line bad";
-        $("recalculateOutcomes").disabled = false;
-      }
-    }
-
-    async function recalculateOutcomes() {
-      $("recalculateOutcomes").disabled = true;
-      $("analysisStatus").textContent = "Starting outcome recalculation...";
-      $("analysisStatus").className = "status-line warn";
-      try {
-        const response = await api("/api/admin/recalculate-rating-outcomes", {
-          method: "POST",
-          body: JSON.stringify({market: $("analysisMarket").value, horizons: [30, 90, 180, 360]})
-        });
-        const job = response.job || {};
-        $("analysisStatus").textContent = job.detail || "Outcome recalculation queued.";
-        pollOutcomeJob(job.id);
-      } catch (error) {
-        $("analysisStatus").textContent = error.message;
-        $("analysisStatus").className = "status-line bad";
-        $("recalculateOutcomes").disabled = false;
+        $("analysisChartMeta").textContent = "Performance data could not be loaded";
       }
     }
 
@@ -2692,9 +2897,28 @@
     $("marketTab").addEventListener("click", () => activateView("market"));
     $("analysisTab").addEventListener("click", () => activateView("analysis"));
     $("refreshAnalysis").addEventListener("click", loadAnalysis);
-    $("recalculateOutcomes").addEventListener("click", recalculateOutcomes);
-    $("analysisMarket").addEventListener("change", loadAnalysis);
-    $("analysisHorizon").addEventListener("change", loadAnalysis);
+    [["analysisMarketAsx", "asx"], ["analysisMarketUs", "us"]].forEach(([id, market]) => {
+      $(id).addEventListener("click", () => {
+        $("analysisMarket").value = market;
+        $("analysisMarketAsx").classList.toggle("active", market === "asx");
+        $("analysisMarketUs").classList.toggle("active", market === "us");
+        $("analysisMarketAsx").setAttribute("aria-pressed", String(market === "asx"));
+        $("analysisMarketUs").setAttribute("aria-pressed", String(market === "us"));
+        loadAnalysis();
+      });
+    });
+    [["analysisDaily", "daily"], ["analysisWeekly", "weekly"]].forEach(([id, interval]) => {
+      $(id).addEventListener("click", () => {
+        $("analysisInterval").value = interval;
+        $("analysisDaily").classList.toggle("active", interval === "daily");
+        $("analysisWeekly").classList.toggle("active", interval === "weekly");
+        $("analysisDaily").setAttribute("aria-pressed", String(interval === "daily"));
+        $("analysisWeekly").setAttribute("aria-pressed", String(interval === "weekly"));
+        loadAnalysis();
+      });
+    });
+    $("analysisRange").addEventListener("change", loadAnalysis);
+    $("analysisLabelFilter").addEventListener("change", renderAnalysisPicks);
     $("marketSelect").addEventListener("change", applyMarketDefaults);
     $("marketAsx").addEventListener("click", () => setMarket("asx"));
     $("marketUs").addEventListener("click", () => setMarket("us"));
@@ -2733,6 +2957,7 @@
     });
     window.addEventListener("resize", () => {
       if (lastCandles.length) drawCandles(lastCandles, lastChartTicker, lastMovingAverages);
+      if (lastAnalysisPayload) drawAnalysisChart();
     });
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && $("chartPanel").classList.contains("fullscreen")) {

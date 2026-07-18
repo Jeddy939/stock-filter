@@ -621,6 +621,9 @@ def _normalize_ticker(raw_ticker: str, is_asx_list: bool) -> str:
     ticker = re.sub(r"\s+", "", ticker)
     if ticker.startswith("ASX:"):
         ticker = ticker[4:]
+    if ticker.startswith("^"):
+        index_symbol = re.sub(r"[^A-Z0-9.\-]", "", ticker[1:])
+        return f"^{index_symbol}" if index_symbol else ""
     ticker = re.sub(r"[^A-Z0-9.\-]", "", ticker)
 
     if not ticker or ticker in _HEADER_TOKENS:

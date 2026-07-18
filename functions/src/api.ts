@@ -8,7 +8,15 @@ import {ApiError, requireAdmin, requireAnalyst, requireAppCheck, requireAuth, ty
 import {dispatchCloudRunJob} from "./cloudrun";
 import {db} from "./db";
 import {readMarketStatusViaDataConnect, type MarketStatusRow} from "./dataconnect";
-import {currentMarket, MARKET_DEFAULTS, rangeDays, VALID_LABELS, yahooUrl} from "./market";
+import {
+  analysisRangeDays,
+  currentMarket,
+  MARKET_DEFAULTS,
+  normalizeCompanyProfile,
+  rangeDays,
+  VALID_LABELS,
+  yahooUrl
+} from "./market";
 import {requiresAppCheck} from "./request-policy";
 import {normalizeScreenConfig, screenConfigHash} from "./screen-config";
 
@@ -1383,15 +1391,15 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
   const horizon = analysisHorizon(req.query.horizon);
   const result = await db().query(
     `
-    WITH latest_labels AS (
+    WITH latest_events AS (
       SELECT DISTINCT ON (firebase_uid, market, ticker)
-        id, firebase_uid, user_email, market, ticker, label, event_at_utc, signal_date,
+        id, firebase_uid, user_email, market, ticker, action, label, event_at_utc, signal_date,
         close_price AS signal_price
       FROM rating_events
-      WHERE action = 'label'
-        AND label IS NOT NULL
-        AND ($1::text IS NULL OR market = $1)
+      WHERE ($1::text IS NULL OR market = $1)
       ORDER BY firebase_uid, market, ticker, event_at_utc DESC, id DESC
+    ), latest_labels AS (
+      SELECT * FROM latest_events WHERE action = 'label' AND label IS NOT NULL
     ), performance AS (
       SELECT
         labelled.*,
@@ -1442,6 +1450,168 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
   res.json({ok: true, market: requestedMarket, horizon_days: horizon, summary: result.rows});
 }));
 
+apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  const market = strictMarket(req.query.market);
+  const interval = String(req.query.interval ?? "daily").trim().toLowerCase();
+  if (interval === "hourly") {
+    throw new ApiError(400, "Hourly analysis is unavailable because the database currently stores daily market bars only");
+  }
+  if (interval !== "daily" && interval !== "weekly") {
+    throw new ApiError(400, "Analysis interval must be daily or weekly");
+  }
+  const range = String(req.query.range ?? "1y").trim().toLowerCase();
+  const days = analysisRangeDays(range);
+  if (days === undefined) throw new ApiError(400, "Analysis range must be 3m, 6m, 1y, 2y, 5y, or all");
+
+  const dateBucket = interval === "weekly"
+    ? "date_trunc('week', ph.price_date)::date"
+    : "ph.price_date";
+  const benchmarkBucket = interval === "weekly"
+    ? "date_trunc('week', price_date)::date"
+    : "price_date";
+  const benchmarkTicker = market === "asx" ? "^AORD" : "SPY";
+  const benchmarkName = market === "asx" ? "All Ordinaries" : "S&P 500 (SPY)";
+  const activeLabelsCte = `
+    WITH latest_events AS (
+      SELECT DISTINCT ON (firebase_uid, market, ticker)
+        id, firebase_uid, user_email, market, ticker, action, label, event_at_utc,
+        signal_date, close_price AS signal_price
+      FROM rating_events
+      WHERE market = $1
+      ORDER BY firebase_uid, market, ticker, event_at_utc DESC, id DESC
+    ), active_labels AS (
+      SELECT *
+      FROM latest_events
+      WHERE action = 'label'
+        AND label IS NOT NULL
+        AND signal_date IS NOT NULL
+        AND signal_price > 0
+    )
+  `;
+
+  const [seriesResult, benchmarkResult, coverageResult] = await Promise.all([
+    db().query(
+      `
+      ${activeLabelsCte}, pick_points AS (
+        SELECT
+          ${dateBucket} AS point_date,
+          labelled.label,
+          labelled.firebase_uid,
+          labelled.ticker,
+          ((ph.close_price - labelled.signal_price) / labelled.signal_price) * 100 AS return_percent
+        FROM active_labels labelled
+        JOIN price_history ph
+          ON ph.market = labelled.market
+         AND ph.provider = 'yfinance'
+         AND ph.ticker = labelled.ticker
+         AND ph.price_date >= labelled.signal_date
+         AND ph.close_price IS NOT NULL
+        WHERE ($2::int IS NULL OR ph.price_date >= CURRENT_DATE - ($2::int * INTERVAL '1 day'))
+      ), category_points AS (
+        SELECT point_date, label, ROUND(AVG(return_percent)::numeric, 4) AS return_percent,
+               COUNT(*)::int AS sample_count
+        FROM pick_points
+        GROUP BY point_date, label
+      ), all_pick_points AS (
+        SELECT point_date, 'all_picks'::text AS label,
+               ROUND(AVG(return_percent)::numeric, 4) AS return_percent,
+               COUNT(*)::int AS sample_count
+        FROM pick_points
+        GROUP BY point_date
+      )
+      SELECT point_date::text AS date, label, return_percent, sample_count
+      FROM (
+        SELECT * FROM category_points
+        UNION ALL
+        SELECT * FROM all_pick_points
+      ) combined
+      ORDER BY point_date, label
+      `,
+      [market, days]
+    ),
+    db().query(
+      `
+      WITH source_bars AS (
+        SELECT ${benchmarkBucket} AS point_date, price_date, close_price
+        FROM price_history
+        WHERE market = $1
+          AND provider = 'yfinance'
+          AND ticker = $2
+          AND close_price IS NOT NULL
+          AND ($3::int IS NULL OR price_date >= CURRENT_DATE - ($3::int * INTERVAL '1 day'))
+      ), ranked AS (
+        SELECT point_date, close_price,
+               ROW_NUMBER() OVER (PARTITION BY point_date ORDER BY price_date DESC) AS row_number
+        FROM source_bars
+      ), bars AS (
+        SELECT point_date, close_price
+        FROM ranked
+        WHERE row_number = 1
+      ), normalized AS (
+        SELECT point_date, close_price,
+               FIRST_VALUE(close_price) OVER (ORDER BY point_date) AS initial_close
+        FROM bars
+      )
+      SELECT point_date::text AS date,
+             ROUND((((close_price / NULLIF(initial_close, 0)) - 1) * 100)::numeric, 4) AS return_percent
+      FROM normalized
+      ORDER BY point_date
+      `,
+      [market, benchmarkTicker, days]
+    ),
+    db().query(
+      `
+      ${activeLabelsCte}
+      SELECT COUNT(*)::int AS active_pick_count,
+             COUNT(DISTINCT ticker)::int AS ticker_count,
+             MIN(signal_date)::text AS earliest_signal_date,
+             MAX(signal_date)::text AS latest_signal_date
+      FROM active_labels
+      `,
+      [market]
+    )
+  ]);
+
+  const series = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of seriesResult.rows) {
+    const label = String(row.label);
+    const points = series.get(label) ?? [];
+    points.push({
+      date: row.date,
+      return_percent: numberOrNull(row.return_percent),
+      sample_count: Number(row.sample_count ?? 0)
+    });
+    series.set(label, points);
+  }
+  const categoryOrder = ["winner", "potential_winner", "needs_confirmation", "maybe", "bad", "all_picks"];
+  const seriesPayload = categoryOrder.map((label) => ({label, points: series.get(label) ?? []}));
+  const benchmarkPoints = benchmarkResult.rows.map((row) => ({
+    date: row.date,
+    return_percent: numberOrNull(row.return_percent)
+  }));
+
+  res.json({
+    ok: true,
+    market,
+    interval,
+    range,
+    methodology: "Each pick is rebased to 0% on its appraisal price; category and all-picks lines are the mean available return on each date.",
+    coverage: coverageResult.rows[0] ?? {},
+    series: seriesPayload,
+    benchmark: {
+      ticker: benchmarkTicker,
+      name: benchmarkName,
+      available: benchmarkPoints.length > 0,
+      unavailable_reason: benchmarkPoints.length
+        ? null
+        : `${benchmarkName} price history has not been loaded into the ${market.toUpperCase()} database yet`,
+      points: benchmarkPoints
+    }
+  });
+}));
+
 apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   requireAdmin(user);
@@ -1453,16 +1623,18 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit ?? 250), 1), 1000);
   const result = await db().query(
     `
-    WITH latest_labels AS (
+    WITH latest_events AS (
       SELECT DISTINCT ON (firebase_uid, market, ticker)
-        id, firebase_uid, user_email, market, ticker, label, event_at_utc, signal_date,
+        id, firebase_uid, user_email, market, ticker, action, label, event_at_utc, signal_date,
         close_price AS signal_price
       FROM rating_events
+      WHERE ($1::text IS NULL OR market = $1)
+      ORDER BY firebase_uid, market, ticker, event_at_utc DESC, id DESC
+    ), latest_labels AS (
+      SELECT * FROM latest_events
       WHERE action = 'label'
         AND label IS NOT NULL
-        AND ($1::text IS NULL OR market = $1)
         AND ($2::text IS NULL OR label = $2)
-      ORDER BY firebase_uid, market, ticker, event_at_utc DESC, id DESC
     )
     SELECT
       labelled.market, labelled.ticker, labelled.label, labelled.user_email,
@@ -1508,15 +1680,15 @@ apiApp.get("/api/analysis/insights", asyncRoute(async (req, res) => {
   const patternLimit = Math.min(Math.max(Number(req.query.pattern_limit ?? 40), 1), 100);
 
   const commonCte = `
-    WITH latest_labels AS (
+    WITH latest_events AS (
       SELECT DISTINCT ON (firebase_uid, market, ticker)
-        id, firebase_uid, user_email, market, ticker, label, event_at_utc, signal_date,
+        id, firebase_uid, user_email, market, ticker, action, label, event_at_utc, signal_date,
         close_price AS signal_price, market_cap, avg_volume, volume_ratio, sector, industry
       FROM rating_events
-      WHERE action = 'label'
-        AND label IS NOT NULL
-        AND ($1::text IS NULL OR market = $1)
+      WHERE ($1::text IS NULL OR market = $1)
       ORDER BY firebase_uid, market, ticker, event_at_utc DESC, id DESC
+    ), latest_labels AS (
+      SELECT * FROM latest_events WHERE action = 'label' AND label IS NOT NULL
     ), performance AS (
       SELECT
         labelled.*,
@@ -1674,7 +1846,7 @@ apiApp.get("/api/chart", asyncRoute(async (req, res) => {
     provider,
     interval,
     range,
-    company: companyResult.rows[0]?.info_json ?? {},
+    company: normalizeCompanyProfile(companyResult.rows[0]?.info_json, ticker),
     candles,
     moving_averages: movingAverages,
     count: candles.length,
