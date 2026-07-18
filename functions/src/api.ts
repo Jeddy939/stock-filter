@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import cors from "cors";
 import express, {type NextFunction, type Request, type Response} from "express";
+import * as admin from "firebase-admin";
 import {getFunctions} from "firebase-admin/functions";
 import {getStorage} from "firebase-admin/storage";
 import {OAuth2Client} from "google-auth-library";
@@ -961,6 +962,83 @@ apiApp.get("/api/auth-config", asyncRoute(async (_req, res) => {
       siteKey: process.env.FIREBASE_APPCHECK_SITE_KEY ?? ""
     }
   });
+}));
+
+apiApp.get("/api/auth/bootstrap", asyncRoute(async (req, res) => {
+  const rawToken = String(req.query.token ?? "").trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(rawToken)) throw new ApiError(410, "This sign-in link is invalid or has expired");
+  const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+  const client = await db().connect();
+  try {
+    await client.query("BEGIN");
+    const tokenResult = await client.query(
+      `
+      SELECT token.email
+      FROM auth_bootstrap_tokens token
+      JOIN app_user_invites invite ON invite.email = token.email
+      WHERE token.token_hash = $1
+        AND token.used_at_utc IS NULL
+        AND token.expires_at_utc > NOW()
+        AND invite.status = 'active'
+      FOR UPDATE OF token
+      `,
+      [tokenHash]
+    );
+    const email = String(tokenResult.rows[0]?.email ?? "").trim().toLowerCase();
+    if (!email) throw new ApiError(410, "This sign-in link is invalid or has expired");
+
+    let firebaseUser: admin.auth.UserRecord;
+    try {
+      firebaseUser = await admin.auth().getUserByEmail(email);
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+      if (code !== "auth/user-not-found") throw error;
+      firebaseUser = await admin.auth().createUser({email, emailVerified: false, disabled: false});
+    }
+    if (firebaseUser.disabled) throw new ApiError(403, "This Firebase account is disabled");
+    const customToken = await admin.auth().createCustomToken(firebaseUser.uid, {bootstrap: true});
+    await client.query(
+      "UPDATE auth_bootstrap_tokens SET used_at_utc = NOW(), used_by_uid = $2 WHERE token_hash = $1",
+      [tokenHash, firebaseUser.uid]
+    );
+    await client.query("COMMIT");
+
+    const firebaseConfig = JSON.stringify({
+      apiKey: process.env.FIREBASE_API_KEY ?? "",
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN ?? "moneymaker-aedf7.firebaseapp.com",
+      projectId: process.env.GOOGLE_CLOUD_PROJECT ?? "moneymaker-aedf7",
+      appId: process.env.FIREBASE_APP_ID ?? ""
+    }).replace(/</g, "\\u003c");
+    const serializedToken = JSON.stringify(customToken).replace(/</g, "\\u003c");
+    const nonce = crypto.randomBytes(18).toString("base64");
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", `default-src 'none'; script-src 'nonce-${nonce}' https://www.gstatic.com; connect-src https://*.googleapis.com; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'`);
+    res.status(200).type("html").send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Signing in to Moneymaker</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0d1014;color:#f1f4f7;font:16px/1.5 system-ui,sans-serif}main{width:min(420px,calc(100% - 40px));padding:22px;border:1px solid #303844;border-radius:6px;background:#15191f}h1{margin:0 0 8px;font-size:21px}p{margin:0;color:#9ca8b5}.bad{color:#df7770}</style></head>
+<body><main><h1>Signing in</h1><p id="status">Preparing Brady's secure session...</p></main>
+<script type="module" nonce="${nonce}">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import {getAuth, signInWithCustomToken} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+const status = document.getElementById("status");
+try {
+  const app = initializeApp(${firebaseConfig});
+  await signInWithCustomToken(getAuth(app), ${serializedToken});
+  status.textContent = "Signed in. Opening Moneymaker...";
+  window.location.replace("/");
+} catch (error) {
+  status.className = "bad";
+  status.textContent = error?.message || "Sign-in failed. Ask the owner for a new one-time link.";
+}
+</script></body></html>`);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }));
 
 apiApp.use("/api", (req: Request, res: Response, next: NextFunction) => {
