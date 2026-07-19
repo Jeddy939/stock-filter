@@ -258,6 +258,11 @@ def test_yfinance_history_download_sets_auto_adjust_false(monkeypatch):
     assert calls[0]["auto_adjust"] is False
 
 
+def test_history_download_end_is_exclusive_and_stable():
+    assert fetcher._history_download_end("2026-07-17") == datetime(2026, 7, 17)
+    assert fetcher._history_download_end(now=datetime(2026, 7, 17, 23, 59)) == datetime(2026, 7, 18)
+
+
 def test_read_stooq_history_rejects_api_key_instruction_response(monkeypatch):
     class FakeResponse:
         def __enter__(self):

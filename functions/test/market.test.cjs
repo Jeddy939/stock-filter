@@ -1,6 +1,11 @@
 const assert = require("node:assert/strict");
 
-const {analysisRangeDays, normalizeCompanyProfile, VALID_LABELS} = require("../lib/market.js");
+const {
+  analysisRangeDays,
+  exclusiveHistoryEndDate,
+  normalizeCompanyProfile,
+  VALID_LABELS
+} = require("../lib/market.js");
 
 assert.deepEqual([...VALID_LABELS], [
   "winner",
@@ -43,5 +48,6 @@ assert.equal(analysisRangeDays("3m"), 92);
 assert.equal(analysisRangeDays("2Y"), 731);
 assert.equal(analysisRangeDays("all"), null);
 assert.equal(analysisRangeDays("invalid"), undefined);
+assert.equal(exclusiveHistoryEndDate(new Date("2026-07-17T23:59:00Z")), "2026-07-18");
 
 console.log("market and company profile tests passed");

@@ -43,6 +43,12 @@ export function rangeDays(range: unknown): number {
   }
 }
 
+export function exclusiveHistoryEndDate(now = new Date()): string {
+  const end = new Date(now.getTime());
+  end.setUTCDate(end.getUTCDate() + 1);
+  return end.toISOString().slice(0, 10);
+}
+
 export function yahooUrl(ticker: string): string {
   return `https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}`;
 }

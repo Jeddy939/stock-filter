@@ -12,6 +12,7 @@ import {readMarketStatusViaDataConnect, type MarketStatusRow} from "./dataconnec
 import {
   analysisRangeDays,
   currentMarket,
+  exclusiveHistoryEndDate,
   MARKET_DEFAULTS,
   normalizeCompanyProfile,
   rangeDays,
@@ -549,8 +550,12 @@ export async function startMarketRefresh(
   payload: Record<string, unknown>,
   user?: UserContext
 ): Promise<Record<string, unknown>> {
-  const refresh = await createRefreshTracking(payload, user);
-  return createFetchJob(payload, refresh);
+  const refreshPayload = {
+    ...payload,
+    history_end_date: String(payload.history_end_date ?? exclusiveHistoryEndDate())
+  };
+  const refresh = await createRefreshTracking(refreshPayload, user);
+  return createFetchJob(refreshPayload, refresh);
 }
 
 export async function startScheduledMarketRefresh(payload: Record<string, unknown>): Promise<Record<string, unknown>> {

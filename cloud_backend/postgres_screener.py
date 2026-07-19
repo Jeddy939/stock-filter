@@ -162,7 +162,45 @@ def _metric_column(period: int) -> str:
     return f"ma_{period}"
 
 
-def _result_from_metric(row: dict[str, Any], config: dict[str, Any]) -> dict[str, Any] | None:
+def _daily_confirmation_passes(
+    row: dict[str, Any],
+    ma_periods: dict[str, int],
+) -> bool:
+    """Confirm a weekly signal against the latest complete daily market session."""
+
+    market_latest_date = row.get("market_latest_date")
+    latest_daily_date = row.get("latest_daily_date")
+    latest_daily_close = _number(row.get("latest_daily_close"))
+    previous_close_price = _number(row.get("previous_close_price"))
+    price_avg_1 = _number(row.get("price_avg_1"))
+    if (
+        market_latest_date is None
+        or latest_daily_date is None
+        or latest_daily_date != market_latest_date
+        or latest_daily_close is None
+        or previous_close_price is None
+        or price_avg_1 is None
+    ):
+        return False
+    if latest_daily_close <= previous_close_price or latest_daily_close <= price_avg_1:
+        return False
+
+    available_weeks = int(row.get("available_weeks") or 0)
+    for period in ma_periods.values():
+        if available_weeks < period:
+            continue
+        ma_value = _number(row.get(_metric_column(period)))
+        if ma_value is None or latest_daily_close <= ma_value:
+            return False
+    return True
+
+
+def _result_from_metric(
+    row: dict[str, Any],
+    config: dict[str, Any],
+    *,
+    require_daily_confirmation: bool = False,
+) -> dict[str, Any] | None:
     ma_periods = {
         name: int(period)
         for name, period in (config.get("ma_periods") or {}).items()
@@ -206,6 +244,9 @@ def _result_from_metric(row: dict[str, Any], config: dict[str, Any]) -> dict[str
         if ma_value is None or close_price <= ma_value:
             return None
 
+    if require_daily_confirmation and not _daily_confirmation_passes(row, ma_periods):
+        return None
+
     market_cap = _number(row.get("market_cap"))
     min_cap_m = float(config.get("min_market_cap", 0) or 0)
     max_cap_m = float(config.get("max_market_cap", 0) or 0)
@@ -232,6 +273,12 @@ def _result_from_metric(row: dict[str, Any], config: dict[str, Any]) -> dict[str
         "missing_ma_periods": missing_ma_periods,
         "available_ma_weeks": available_weeks,
         "history_weeks": int(row.get("history_weeks") or 0),
+        "confirmation_date": (
+            row.get("latest_daily_date").isoformat()
+            if hasattr(row.get("latest_daily_date"), "isoformat")
+            else row.get("latest_daily_date")
+        ),
+        "confirmation_close_price": _number(row.get("latest_daily_close")),
         "sector": row.get("sector"),
         "industry": row.get("industry"),
     }
@@ -336,8 +383,17 @@ def _run_metric_filter_set_based(
         f"(ranked.available_weeks < {period} OR (ranked.{_metric_column(period)} IS NOT NULL AND ranked.close_price > ranked.{_metric_column(period)}))"
         for period in ma_periods
     ]
+    daily_ma_conditions = [
+        f"(ranked.available_weeks < {period} OR latest_daily.latest_daily_close > ranked.{_metric_column(period)})"
+        for period in ma_periods
+    ]
     cap_conditions: list[str] = []
-    params: list[Any] = [market, provider, market, provider, lookback_weeks, required_weeks, float(config["volume_multiplier"])]
+    params: list[Any] = [
+        market, provider,
+        market, provider,
+        market, provider, lookback_weeks,
+        required_weeks, float(config["volume_multiplier"]),
+    ]
     if min_cap_m > 0:
         cap_conditions.append("(ranked.market_cap IS NOT NULL AND ranked.market_cap >= %s)")
         params.append(min_cap_m * 1_000_000)
@@ -346,7 +402,6 @@ def _run_metric_filter_set_based(
         params.append(max_cap_m * 1_000_000)
 
     where_sql = "\n                  AND ".join([
-        "ranked.lookback_rank <= %s",
         "ranked.available_weeks >= %s",
         "ranked.close_price IS NOT NULL",
         "ranked.previous_close_price IS NOT NULL",
@@ -370,32 +425,70 @@ def _run_metric_filter_set_based(
             WITH input_tickers AS (
                 SELECT unnest(%s::text[]) AS ticker
             ),
-            latest AS (
-                SELECT wm.ticker, MAX(wm.week_date) AS latest_week
-                FROM weekly_metrics wm
-                JOIN input_tickers it ON it.ticker = wm.ticker
-                WHERE wm.market = %s
-                  AND wm.provider = %s
-                  AND wm.week_date <= CURRENT_DATE
-                GROUP BY wm.ticker
-                HAVING CURRENT_DATE - MAX(wm.week_date) <= 7
+            market_snapshot AS (
+                SELECT latest_date AS market_latest_date
+                FROM market_status
+                WHERE market = %s
+                  AND provider = %s
+            ),
+            latest_daily AS MATERIALIZED (
+                SELECT
+                    it.ticker,
+                    recent_daily.price_date AS latest_daily_date,
+                    recent_daily.close_price AS latest_daily_close,
+                    market_snapshot.market_latest_date
+                FROM input_tickers it
+                CROSS JOIN market_snapshot
+                JOIN LATERAL (
+                    SELECT ph.price_date, ph.close_price
+                    FROM price_history ph
+                    WHERE ph.market = %s
+                      AND ph.provider = %s
+                      AND ph.ticker = it.ticker
+                      AND ph.close_price IS NOT NULL
+                    ORDER BY ph.price_date DESC
+                    LIMIT 1
+                ) recent_daily ON recent_daily.price_date = market_snapshot.market_latest_date
+            ),
+            metric_candidates AS (
+                SELECT
+                    metrics.*
+                FROM latest_daily
+                JOIN LATERAL (
+                    SELECT wm.*
+                    FROM weekly_metrics wm
+                    WHERE wm.market = %s
+                      AND wm.provider = %s
+                      AND wm.ticker = latest_daily.ticker
+                      AND wm.week_date <= CURRENT_DATE
+                    ORDER BY wm.week_date DESC
+                    LIMIT %s
+                ) metrics ON TRUE
             ),
             ranked AS (
                 SELECT
-                    wm.*,
+                    metric_candidates.*,
                     ROW_NUMBER() OVER (
-                        PARTITION BY wm.ticker ORDER BY wm.week_date DESC
-                    ) AS lookback_rank
-                FROM weekly_metrics wm
-                JOIN latest l ON l.ticker = wm.ticker
-                WHERE wm.market = %s
-                  AND wm.provider = %s
-                  AND wm.week_date <= l.latest_week
+                        PARTITION BY metric_candidates.ticker ORDER BY metric_candidates.week_date DESC
+                    ) AS lookback_rank,
+                    MAX(metric_candidates.week_date) OVER (
+                        PARTITION BY metric_candidates.ticker
+                    ) AS latest_week
+                FROM metric_candidates
             ),
             matched AS (
-                SELECT DISTINCT ON (ranked.ticker) ranked.*
+                SELECT DISTINCT ON (ranked.ticker)
+                    ranked.*,
+                    latest_daily.latest_daily_date,
+                    latest_daily.latest_daily_close,
+                    latest_daily.market_latest_date
                 FROM ranked
+                JOIN latest_daily ON latest_daily.ticker = ranked.ticker
                 WHERE {where_sql}
+                  AND CURRENT_DATE - ranked.latest_week <= 7
+                  AND latest_daily.latest_daily_close > ranked.previous_close_price
+                  AND latest_daily.latest_daily_close > ranked.price_avg_1
+                  AND {" AND ".join(daily_ma_conditions) if daily_ma_conditions else "TRUE"}
                 ORDER BY ranked.ticker, ranked.week_date DESC
             )
             SELECT *
@@ -410,20 +503,26 @@ def _run_metric_filter_set_based(
             WITH input_tickers AS (
                 SELECT unnest(%s::text[]) AS ticker
             ),
-            latest AS (
-                SELECT wm.ticker, MAX(wm.week_date) AS latest_week
-                FROM weekly_metrics wm
-                JOIN input_tickers it ON it.ticker = wm.ticker
-                WHERE wm.market = %s
-                  AND wm.provider = %s
-                  AND wm.week_date <= CURRENT_DATE
-                GROUP BY wm.ticker
-                HAVING CURRENT_DATE - MAX(wm.week_date) <= 7
+            market_snapshot AS (
+                SELECT latest_date AS market_latest_date
+                FROM market_status
+                WHERE market = %s
+                  AND provider = %s
             )
             SELECT COUNT(*)::int
-            FROM latest
+            FROM input_tickers it
+            CROSS JOIN market_snapshot
+            JOIN LATERAL (
+                SELECT ph.price_date
+                FROM price_history ph
+                WHERE ph.market = %s
+                  AND ph.provider = %s
+                  AND ph.ticker = it.ticker
+                ORDER BY ph.price_date DESC
+                LIMIT 1
+            ) recent_daily ON recent_daily.price_date = market_snapshot.market_latest_date
             """,
-            (tickers, market, provider),
+            (tickers, market, provider, market, provider),
         )
         recent_ticker_count = int(cur.fetchone()["count"])
 
@@ -431,7 +530,7 @@ def _run_metric_filter_set_based(
     results = [
         result
         for row in rows
-        if (result := _result_from_metric(row, config)) is not None
+        if (result := _result_from_metric(row, config, require_daily_confirmation=True)) is not None
     ]
     skipped = max(0, total - recent_ticker_count)
     if progress:
@@ -497,6 +596,27 @@ def run_postgres_filter(
         progress(STAGE_LOADING_SNAPSHOT, 0, None, f"Loading {market.upper()} stock universe.")
     with conn.cursor() as cur:
         cur.execute(
+            """
+            SELECT completed_tickers, total_tickers
+            FROM refresh_jobs
+            WHERE market = %s
+              AND provider = %s
+              AND status IN ('queued', 'running')
+              AND started_at_utc > NOW() - INTERVAL '12 hours'
+            ORDER BY started_at_utc DESC
+            LIMIT 1
+            """,
+            (market, provider),
+        )
+        active_refresh = cur.fetchone()
+        if active_refresh:
+            completed, refresh_total = active_refresh
+            raise RuntimeError(
+                f"{market.upper()} market data refresh is still running "
+                f"({int(completed or 0):,}/{int(refresh_total or 0):,} tickers). "
+                "Run the screen after the refresh completes."
+            )
+        cur.execute(
             "SELECT ticker, info_json FROM companies WHERE market = %s ORDER BY ticker",
             (market,),
         )
@@ -514,8 +634,8 @@ def run_postgres_filter(
         if market_snapshot_date is None:
             cur.execute(
                 """
-                SELECT MAX(week_date)
-                FROM weekly_metrics
+                SELECT MAX(price_date)
+                FROM price_history
                 WHERE market = %s AND provider = %s
                 """,
                 (market, provider),

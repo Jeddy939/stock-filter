@@ -91,6 +91,15 @@ def _date_string(value) -> str:
     return _coerce_date(value).isoformat()
 
 
+def _history_download_end(value=None, now=None) -> datetime:
+    """Return the exclusive yfinance cutoff at a stable UTC date boundary."""
+
+    if value:
+        return datetime.combine(_coerce_date(value), datetime.min.time())
+    reference = now or datetime.now(timezone.utc)
+    return datetime.combine(_coerce_date(reference) + timedelta(days=1), datetime.min.time())
+
+
 def _cache_connect(cache_file: str) -> sqlite3.Connection:
     """Open and initialize the SQLite cache."""
 
@@ -1374,6 +1383,7 @@ def fetch_stock_data(
     max_rate_limit_retries: int = DEFAULT_RATE_LIMIT_RETRIES,
     stop_on_rate_limit: bool = DEFAULT_STOP_ON_RATE_LIMIT,
     export_json: bool = True,
+    history_end_date: Optional[str] = None,
 ) -> bool:
     """Fetches historical and info data for tickers and saves to ``output``.
 
@@ -1400,6 +1410,9 @@ def fetch_stock_data(
     history_refresh_days:
         Number of days before the latest cached bar to refetch so recent bars
         can be corrected or adjusted.
+    history_end_date:
+        Exclusive history cutoff shared by every batch. Defaults to tomorrow's
+        UTC date so yfinance includes the latest completed daily session.
     prune_missing_tickers:
         Create a new ticker file without attempted missing-history tickers.
         The source ticker file is left unchanged.
@@ -1450,7 +1463,7 @@ def fetch_stock_data(
     start_time = time.time()
 
     print("\n--- Step 1 of 3: Batch fetching historical data ---")
-    end_date = datetime.now()
+    end_date = _history_download_end(history_end_date)
     start_date = end_date - pd.DateOffset(years=years)
     start_dt = start_date.to_pydatetime() if hasattr(start_date, "to_pydatetime") else start_date
     end_dt = end_date.to_pydatetime() if hasattr(end_date, "to_pydatetime") else end_date
