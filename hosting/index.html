@@ -86,7 +86,7 @@
       font-size: 12px;
       margin: 9px 0 4px;
     }
-    input, select {
+    input, select, textarea {
       width: 100%;
       background: #0e1217;
       color: var(--text);
@@ -96,6 +96,7 @@
       padding: 6px 9px;
       font: inherit;
     }
+    textarea { resize: vertical; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
     .actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
@@ -687,6 +688,20 @@
       display: inline-grid;
       place-items: center;
     }
+    .feedback-button { position: relative; }
+    .feedback-badge {
+      display: inline-grid;
+      place-items: center;
+      min-width: 17px;
+      height: 17px;
+      margin-left: 5px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: var(--bad);
+      color: #fff;
+      font-size: 10px;
+      line-height: 1;
+    }
     .app-tabs { display: flex; gap: 4px; border: 1px solid var(--line); border-radius: 6px; padding: 3px; background: #0f1318; }
     .app-tabs button { border: 0; min-height: 30px; padding: 5px 10px; background: transparent; }
     .app-tabs button.active { background: #213126; color: #dff5e8; }
@@ -851,6 +866,58 @@
       justify-content: flex-end;
       background: rgba(0, 0, 0, .18);
     }
+    .modal.feedback-modal {
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: rgba(3, 7, 6, .72);
+    }
+    .feedback-window {
+      width: min(620px, 100%);
+      max-height: min(760px, calc(100vh - 32px));
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      box-shadow: 0 18px 55px rgba(0, 0, 0, .45);
+    }
+    .feedback-body { padding: 14px 16px 16px; overflow: auto; }
+    .feedback-body textarea { min-height: 120px; }
+    .feedback-form-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .feedback-admin {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+    .feedback-admin-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .feedback-admin-head h3 { margin: 0; font-size: 13px; }
+    .feedback-admin-head select { width: 125px; min-height: 30px; }
+    .feedback-list { margin-top: 8px; border-top: 1px solid var(--line); }
+    .feedback-item { padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .feedback-item-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .feedback-item p { margin: 5px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .feedback-item .actions { margin-top: 6px; }
+    .feedback-item button { min-height: 27px; padding: 3px 8px; font-size: 11px; }
     .progress-window {
       width: 360px;
       max-height: 100vh;
@@ -951,6 +1018,13 @@
       .advanced-grid { grid-template-columns: 1fr 1fr; }
       .results-wrap { max-height: none; }
       .modal { align-items: flex-end; justify-content: stretch; }
+      .modal.feedback-modal { align-items: flex-end; justify-content: stretch; padding: 0; }
+      .feedback-window {
+        width: 100%;
+        max-height: 88vh;
+        border-radius: 6px 6px 0 0;
+        border-bottom: 0;
+      }
       .progress-window {
         width: 100%;
         height: min(82vh, 680px);
@@ -996,6 +1070,7 @@
       </nav>
       <button class="status-line" id="topStatus" type="button" disabled>Connecting to market data...</button>
       <span class="role-pill" id="authRole" hidden></span>
+      <button class="feedback-button" id="openFeedback" type="button">Feedback<span class="feedback-badge" id="feedbackBadge" hidden>0</span></button>
       <button class="icon-button" id="openOperations" type="button" title="Operations" aria-label="Operations">Ops</button>
       <button id="authSignOut" type="button" hidden>Sign out</button>
     </div>
@@ -1388,6 +1463,49 @@
     </section>
   </section>
 
+  <div class="modal feedback-modal hidden" id="feedbackModal" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle">
+    <div class="feedback-window">
+      <div class="progress-head">
+        <h2 id="feedbackTitle">Send feedback</h2>
+        <button id="closeFeedback" type="button">Close</button>
+      </div>
+      <div class="feedback-body">
+        <label for="feedbackCategory">Type</label>
+        <select id="feedbackCategory">
+          <option value="bug">Something is broken</option>
+          <option value="data">Stock data or screen result</option>
+          <option value="usability">Hard to use</option>
+          <option value="idea">Feature idea</option>
+          <option value="other">Other</option>
+        </select>
+        <label for="feedbackMessage">What happened, or what should change?</label>
+        <textarea id="feedbackMessage" maxlength="4000" placeholder="Include the ticker and what you expected when reporting a screen result."></textarea>
+        <div class="feedback-form-meta">
+          <span>Current market, ticker, page and screen size are attached automatically.</span>
+          <span id="feedbackCharacterCount">0 / 4000</span>
+        </div>
+        <div class="actions">
+          <button class="primary" id="submitFeedback" type="button">Send feedback</button>
+        </div>
+        <p class="status-line" id="feedbackStatus" aria-live="polite"></p>
+
+        <section class="feedback-admin" id="feedbackAdminSection" hidden>
+          <div class="feedback-admin-head">
+            <h3>Feedback inbox</h3>
+            <select id="feedbackStatusFilter" aria-label="Feedback status">
+              <option value="new">New</option>
+              <option value="reviewed">Reviewed</option>
+              <option value="planned">Planned</option>
+              <option value="done">Done</option>
+              <option value="all">All</option>
+            </select>
+          </div>
+          <div class="feedback-list" id="feedbackList"><p class="status-line">Open the inbox to load feedback.</p></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <div class="modal hidden" id="progressModal" role="dialog" aria-modal="true" aria-labelledby="progressTitle">
     <div class="progress-window">
       <div class="progress-head">
@@ -1479,6 +1597,7 @@
     let lastMovingAverages = {};
     let lastAnalysisPayload = null;
     let lastAnalysisPicks = [];
+    let lastFeedbackItems = [];
     let currentScanId = null;
     let lastExportStoragePath = null;
     let activeFilterAfterEventId = 0;
@@ -1749,11 +1868,13 @@
         $("authRole").hidden = false;
         $("adminPanel").hidden = true;
         $("openOperations").hidden = role !== "admin";
+        $("feedbackAdminSection").hidden = role !== "admin";
         $("appTabs").hidden = false;
         const canRunScans = role === "admin" || role === "analyst";
         $("runFilter").disabled = !canRunScans;
         $("runFilter").title = canRunScans ? "" : "An analyst account is required to run a new scan";
         if (user.email) $("topStatus").textContent = `Signed in as ${user.email}`;
+        if (role === "admin") loadFeedbackInbox().catch((error) => console.warn("Could not load feedback inbox", error));
       } catch (error) {
         $("authRole").hidden = true;
         $("adminPanel").hidden = true;
@@ -2006,6 +2127,123 @@
         $("analysisStatus").textContent = error.message;
         $("analysisStatus").className = "status-line bad";
         $("analysisChartMeta").textContent = "Performance data could not be loaded";
+      }
+    }
+
+    function feedbackContext() {
+      const analysis = !$("analysisPage").hidden;
+      const ticker = String(lastChartTicker || $("chartTicker").value || "").trim().toUpperCase();
+      return {
+        category: $("feedbackCategory").value,
+        message: $("feedbackMessage").value,
+        page_path: window.location.pathname,
+        market: analysis ? $("analysisMarket").value : $("marketSelect").value,
+        ticker,
+        context: {
+          view: analysis ? "analysis" : "market",
+          scan_id: currentScanId,
+          viewport: `${window.innerWidth}x${window.innerHeight}`,
+          url_query: window.location.search.slice(0, 500)
+        }
+      };
+    }
+
+    function renderFeedbackInbox(payload) {
+      lastFeedbackItems = payload.feedback || [];
+      const counts = Object.fromEntries((payload.counts || []).map((item) => [item.status, Number(item.count || 0)]));
+      const newCount = counts.new || 0;
+      $("feedbackBadge").textContent = newCount > 99 ? "99+" : String(newCount);
+      $("feedbackBadge").hidden = newCount === 0;
+      $("feedbackList").innerHTML = lastFeedbackItems.length ? lastFeedbackItems.map((item) => {
+        const location = [String(item.market || "").toUpperCase(), item.ticker].filter(Boolean).join(" / ");
+        return `<article class="feedback-item" data-feedback-id="${Number(item.id)}">
+          <div class="feedback-item-head">
+            <span>#${Number(item.id)} · ${escapeHtml(item.category)}${location ? ` · ${escapeHtml(location)}` : ""}</span>
+            <time>${item.created_at_utc ? new Date(item.created_at_utc).toLocaleString() : ""}</time>
+          </div>
+          <p>${escapeHtml(item.message)}</p>
+          <div class="feedback-item-head"><span>${escapeHtml(item.user_email || "Unknown user")}</span><span>${escapeHtml(item.status)}</span></div>
+          <div class="actions">
+            <button type="button" data-feedback-copy="${Number(item.id)}">Copy</button>
+            ${item.status === "new" ? `<button type="button" data-feedback-status="reviewed" data-feedback-id="${Number(item.id)}">Mark reviewed</button>` : ""}
+            ${item.status !== "done" ? `<button type="button" data-feedback-status="done" data-feedback-id="${Number(item.id)}">Mark done</button>` : ""}
+          </div>
+        </article>`;
+      }).join("") : '<p class="status-line">No feedback matches this status.</p>';
+
+      document.querySelectorAll("[data-feedback-status]").forEach((button) => button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await api(`/api/admin/feedback/${button.dataset.feedbackId}`, {
+            method: "PATCH",
+            body: JSON.stringify({status: button.dataset.feedbackStatus})
+          });
+          await loadFeedbackInbox();
+        } catch (error) {
+          $("feedbackStatus").textContent = error.message;
+          $("feedbackStatus").className = "status-line bad";
+          button.disabled = false;
+        }
+      }));
+      document.querySelectorAll("[data-feedback-copy]").forEach((button) => button.addEventListener("click", async () => {
+        const item = lastFeedbackItems.find((entry) => Number(entry.id) === Number(button.dataset.feedbackCopy));
+        if (!item) return;
+        const text = [
+          `MoneyMaker feedback #${item.id}`,
+          `${item.category} · ${item.status} · ${item.user_email || "Unknown user"}`,
+          [item.market && String(item.market).toUpperCase(), item.ticker].filter(Boolean).join(" / "),
+          item.message,
+          item.page_path ? `Page: ${item.page_path}` : ""
+        ].filter(Boolean).join("\n");
+        try {
+          await navigator.clipboard.writeText(text);
+          button.textContent = "Copied";
+          setTimeout(() => { button.textContent = "Copy"; }, 1200);
+        } catch (_) {
+          $("feedbackStatus").textContent = "Clipboard access was blocked by the browser.";
+        }
+      }));
+    }
+
+    async function loadFeedbackInbox() {
+      if (currentUserProfile?.user?.role !== "admin") return;
+      const status = encodeURIComponent($("feedbackStatusFilter").value || "new");
+      renderFeedbackInbox(await api(`/api/admin/feedback?status=${status}&limit=100`));
+    }
+
+    function openFeedbackDialog() {
+      $("feedbackModal").classList.remove("hidden");
+      $("feedbackAdminSection").hidden = currentUserProfile?.user?.role !== "admin";
+      $("feedbackMessage").focus();
+      if (currentUserProfile?.user?.role === "admin") {
+        loadFeedbackInbox().catch((error) => {
+          $("feedbackList").innerHTML = `<p class="status-line bad">${escapeHtml(error.message)}</p>`;
+        });
+      }
+    }
+
+    function closeFeedbackDialog() {
+      $("feedbackModal").classList.add("hidden");
+      $("openFeedback").focus();
+    }
+
+    async function submitFeedback() {
+      const button = $("submitFeedback");
+      button.disabled = true;
+      $("feedbackStatus").textContent = "Sending...";
+      $("feedbackStatus").className = "status-line warn";
+      try {
+        const payload = await api("/api/feedback", {method: "POST", body: JSON.stringify(feedbackContext())});
+        $("feedbackMessage").value = "";
+        $("feedbackCharacterCount").textContent = "0 / 4000";
+        $("feedbackStatus").textContent = `Feedback #${payload.feedback.id} sent.`;
+        $("feedbackStatus").className = "status-line ok";
+        if (currentUserProfile?.user?.role === "admin") await loadFeedbackInbox();
+      } catch (error) {
+        $("feedbackStatus").textContent = error.message;
+        $("feedbackStatus").className = "status-line bad";
+      } finally {
+        button.disabled = false;
       }
     }
 
@@ -2896,6 +3134,16 @@
 
     $("marketTab").addEventListener("click", () => activateView("market"));
     $("analysisTab").addEventListener("click", () => activateView("analysis"));
+    $("openFeedback").addEventListener("click", openFeedbackDialog);
+    $("closeFeedback").addEventListener("click", closeFeedbackDialog);
+    $("submitFeedback").addEventListener("click", submitFeedback);
+    $("feedbackStatusFilter").addEventListener("change", () => loadFeedbackInbox().catch(() => {}));
+    $("feedbackMessage").addEventListener("input", () => {
+      $("feedbackCharacterCount").textContent = `${$("feedbackMessage").value.length} / 4000`;
+    });
+    $("feedbackModal").addEventListener("click", (event) => {
+      if (event.target === $("feedbackModal")) closeFeedbackDialog();
+    });
     $("refreshAnalysis").addEventListener("click", loadAnalysis);
     [["analysisMarketAsx", "asx"], ["analysisMarketUs", "us"]].forEach(([id, market]) => {
       $(id).addEventListener("click", () => {
@@ -2960,6 +3208,10 @@
       if (lastAnalysisPayload) drawAnalysisChart();
     });
     window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !$("feedbackModal").classList.contains("hidden")) {
+        closeFeedbackDialog();
+        return;
+      }
       if (event.key === "Escape" && $("chartPanel").classList.contains("fullscreen")) {
         toggleChartFullscreen(false);
       }

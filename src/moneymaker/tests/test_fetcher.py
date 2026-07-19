@@ -258,6 +258,29 @@ def test_yfinance_history_download_sets_auto_adjust_false(monkeypatch):
     assert calls[0]["auto_adjust"] is False
 
 
+def test_extract_histories_accepts_price_first_yfinance_multiindex():
+    index = pd.to_datetime(["2026-01-02"])
+    columns = pd.MultiIndex.from_product([["Close", "Volume"], ["AAA"]], names=["Price", "Ticker"])
+    data = pd.DataFrame([[1.5, 100]], index=index, columns=columns)
+
+    histories = fetcher._extract_histories_from_frame(["AAA"], data)
+
+    assert list(histories) == ["AAA"]
+    assert histories["AAA"].loc[index[0], "Close"] == 1.5
+    assert histories["AAA"].loc[index[0], "Volume"] == 100
+
+
+def test_extract_histories_accepts_ticker_first_yfinance_multiindex():
+    index = pd.to_datetime(["2026-01-02"])
+    columns = pd.MultiIndex.from_product([["AAA"], ["Close", "Volume"]], names=["Ticker", "Price"])
+    data = pd.DataFrame([[1.5, 100]], index=index, columns=columns)
+
+    histories = fetcher._extract_histories_from_frame(["AAA"], data)
+
+    assert list(histories) == ["AAA"]
+    assert histories["AAA"].loc[index[0], "Close"] == 1.5
+
+
 def test_history_download_end_is_exclusive_and_stable():
     assert fetcher._history_download_end("2026-07-17") == datetime(2026, 7, 17)
     assert fetcher._history_download_end(now=datetime(2026, 7, 17, 23, 59)) == datetime(2026, 7, 18)

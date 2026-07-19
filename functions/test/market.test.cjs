@@ -6,6 +6,7 @@ const {
   normalizeCompanyProfile,
   VALID_LABELS
 } = require("../lib/market.js");
+const {normalizeFeedbackInput, normalizeFeedbackStatus} = require("../lib/feedback.js");
 
 assert.deepEqual([...VALID_LABELS], [
   "winner",
@@ -49,5 +50,25 @@ assert.equal(analysisRangeDays("2Y"), 731);
 assert.equal(analysisRangeDays("all"), null);
 assert.equal(analysisRangeDays("invalid"), undefined);
 assert.equal(exclusiveHistoryEndDate(new Date("2026-07-17T23:59:00Z")), "2026-07-18");
+
+assert.deepEqual(normalizeFeedbackInput({
+  category: " Data ",
+  message: " ARI should not pass MA360. ",
+  market: "US",
+  ticker: "ari",
+  page_path: "/analysis",
+  context: {view: "analysis"}
+}), {
+  category: "data",
+  message: "ARI should not pass MA360.",
+  market: "us",
+  ticker: "ARI",
+  pagePath: "/analysis",
+  context: {view: "analysis"}
+});
+assert.throws(() => normalizeFeedbackInput({category: "bug", message: "x"}), /at least 3/);
+assert.throws(() => normalizeFeedbackInput({category: "invalid", message: "valid message"}), /category/);
+assert.equal(normalizeFeedbackStatus("Done"), "done");
+assert.throws(() => normalizeFeedbackStatus("deleted"), /status/);
 
 console.log("market and company profile tests passed");

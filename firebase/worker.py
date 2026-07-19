@@ -145,7 +145,15 @@ def mark_refresh_batches(refresh_job_id: str, status: str, error: str | None = N
         conn.commit()
 
 
-def update_parent_fetch_job(parent_job_id: str, refresh_job_id: str, detail: str | None = None) -> None:
+def update_parent_fetch_job(
+    parent_job_id: str,
+    refresh_job_id: str,
+    detail: str | None = None,
+    *,
+    market: str | None = None,
+    provider: str | None = None,
+    target_price_basis: str | None = None,
+) -> None:
     if not parent_job_id or not refresh_job_id:
         return
     with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
@@ -196,6 +204,11 @@ def update_parent_fetch_job(parent_job_id: str, refresh_job_id: str, detail: str
                     parent_job_id,
                 ),
             )
+            if status == "succeeded" and market and provider and target_price_basis:
+                cur.execute(
+                    "UPDATE market_status SET price_basis = %s WHERE market = %s AND provider = %s",
+                    (target_price_basis, market, provider),
+                )
         conn.commit()
 
 
@@ -288,8 +301,10 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
         if str(ticker).strip()
     ]
     batch_refresh = bool(refresh_batch_id and explicit_tickers)
+    force_full_history = bool(data.get("force_full_history"))
+    target_price_basis = str(data.get("target_price_basis") or "").strip()
     cache = checkpoint_path(market)
-    if batch_refresh:
+    if batch_refresh or force_full_history:
         remove_sqlite_checkpoint(cache)
     else:
         download_checkpoint(market, cache)
@@ -312,7 +327,7 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
         with conn.cursor() as cur:
             cur.execute("SELECT DISTINCT ticker FROM price_history WHERE market = %s", (market,))
             existing_tickers = {row[0] for row in cur.fetchall()}
-    full_tickers = set(requested_tickers) - existing_tickers
+    full_tickers = set(requested_tickers) if force_full_history else set(requested_tickers) - existing_tickers
     last_update = 0.0
 
     def progress(stage: str, current: int, total: int | None, message: str) -> None:
@@ -383,6 +398,12 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
         counts["market_status_refreshed"] = False
         if not refresh_batch_id:
             refresh_market_status(conn, market, provider)
+            if force_full_history and target_price_basis:
+                conn.execute(
+                    "UPDATE market_status SET price_basis = %s WHERE market = %s AND provider = %s",
+                    (target_price_basis, market, provider),
+                )
+                conn.commit()
             counts["market_status_refreshed"] = True
     if not batch_refresh:
         upload_checkpoint(market, cache)
@@ -445,20 +466,31 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
                 )
                 cur.execute(
                     """
-                    SELECT NOT EXISTS (
-                        SELECT 1
-                        FROM refresh_batches
-                        WHERE refresh_job_id = %s
-                          AND status IN ('queued', 'running')
-                    )
+                    SELECT
+                        COUNT(*) FILTER (WHERE status IN ('queued', 'running'))::int AS active_batches,
+                        COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_batches
+                    FROM refresh_batches
+                    WHERE refresh_job_id = %s
                     """,
                     (refresh_job_id,),
                 )
-                if bool(cur.fetchone()[0]):
+                active_batches, failed_batches = cur.fetchone()
+                if int(active_batches or 0) == 0:
                     refresh_market_status(conn, market, provider)
+                    if force_full_history and target_price_basis and int(failed_batches or 0) == 0:
+                        cur.execute(
+                            "UPDATE market_status SET price_basis = %s WHERE market = %s AND provider = %s",
+                            (target_price_basis, market, provider),
+                        )
                     counts["market_status_refreshed"] = True
             conn.commit()
-        update_parent_fetch_job(parent_job_id, refresh_job_id)
+        update_parent_fetch_job(
+            parent_job_id,
+            refresh_job_id,
+            market=market,
+            provider=provider,
+            target_price_basis=target_price_basis if force_full_history else None,
+        )
     else:
         update_refresh_job(
             refresh_job_id,

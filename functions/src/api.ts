@@ -9,6 +9,7 @@ import {ApiError, requireAdmin, requireAnalyst, requireAppCheck, requireAuth, ty
 import {dispatchCloudRunJob} from "./cloudrun";
 import {db} from "./db";
 import {readMarketStatusViaDataConnect, type MarketStatusRow} from "./dataconnect";
+import {normalizeFeedbackInput, normalizeFeedbackStatus} from "./feedback";
 import {
   analysisRangeDays,
   currentMarket,
@@ -550,8 +551,22 @@ export async function startMarketRefresh(
   payload: Record<string, unknown>,
   user?: UserContext
 ): Promise<Record<string, unknown>> {
+  const market = currentMarket(payload.market);
+  const provider = String(payload.provider ?? "yfinance");
+  let forceFullHistory = booleanValue(payload.force_full_history ?? payload.forceFullHistory, false);
+  if (provider === "yfinance" && payload.force_full_history === undefined && payload.forceFullHistory === undefined) {
+    const basisResult = await db().query(
+      "SELECT price_basis FROM market_status WHERE market = $1 AND provider = $2",
+      [market, provider]
+    );
+    forceFullHistory = String(basisResult.rows[0]?.price_basis ?? "legacy_mixed") !== "raw_close_v1";
+  }
   const refreshPayload = {
     ...payload,
+    market,
+    provider,
+    force_full_history: forceFullHistory,
+    target_price_basis: provider === "yfinance" ? "raw_close_v1" : undefined,
     history_end_date: String(payload.history_end_date ?? exclusiveHistoryEndDate())
   };
   const refresh = await createRefreshTracking(refreshPayload, user);
@@ -1075,6 +1090,93 @@ apiApp.get("/api/user/profile", asyncRoute(async (req, res) => {
   res.json({ok: true, user});
 }));
 
+apiApp.post("/api/feedback", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  let feedback;
+  try {
+    feedback = normalizeFeedbackInput(req.body);
+  } catch (error) {
+    throw new ApiError(400, error instanceof Error ? error.message : "Invalid feedback");
+  }
+  const context = {
+    ...feedback.context,
+    user_agent: String(req.header("user-agent") ?? "").slice(0, 500)
+  };
+  const result = await db().query(
+    `
+    INSERT INTO app_feedback
+      (firebase_uid, user_email, category, message, page_path, market, ticker, context_json)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+    RETURNING id, status, created_at_utc
+    `,
+    [
+      user.uid,
+      user.email,
+      feedback.category,
+      feedback.message,
+      feedback.pagePath,
+      feedback.market,
+      feedback.ticker,
+      JSON.stringify(context)
+    ]
+  );
+  res.status(201).json({ok: true, feedback: result.rows[0]});
+}));
+
+apiApp.get("/api/admin/feedback", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  const requestedStatus = String(req.query.status ?? "new").trim().toLowerCase();
+  const status = requestedStatus === "all" ? null : (() => {
+    try {
+      return normalizeFeedbackStatus(requestedStatus);
+    } catch (error) {
+      throw new ApiError(400, error instanceof Error ? error.message : "Invalid feedback status");
+    }
+  })();
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 100), 1), 500);
+  const [items, counts] = await Promise.all([
+    db().query(
+      `
+      SELECT id, user_email, category, message, page_path, market, ticker,
+             context_json, status, admin_note, created_at_utc, updated_at_utc
+      FROM app_feedback
+      WHERE ($1::text IS NULL OR status = $1)
+      ORDER BY created_at_utc DESC
+      LIMIT $2
+      `,
+      [status, limit]
+    ),
+    db().query("SELECT status, COUNT(*)::int AS count FROM app_feedback GROUP BY status")
+  ]);
+  res.json({ok: true, feedback: items.rows, counts: counts.rows});
+}));
+
+apiApp.patch("/api/admin/feedback/:id", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAdmin(user);
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) throw new ApiError(400, "A valid feedback ID is required");
+  let status: string;
+  try {
+    status = normalizeFeedbackStatus(req.body?.status);
+  } catch (error) {
+    throw new ApiError(400, error instanceof Error ? error.message : "Invalid feedback status");
+  }
+  const adminNote = String(req.body?.admin_note ?? req.body?.adminNote ?? "").trim().slice(0, 2000) || null;
+  const result = await db().query(
+    `
+    UPDATE app_feedback
+    SET status = $1, admin_note = $2, updated_at_utc = NOW()
+    WHERE id = $3
+    RETURNING id, status, admin_note, updated_at_utc
+    `,
+    [status, adminNote, id]
+  );
+  if (!result.rows[0]) throw new ApiError(404, "Feedback item not found");
+  res.json({ok: true, feedback: result.rows[0]});
+}));
+
 apiApp.get("/api/ticker-files", asyncRoute(async (req, res) => {
   await requireAuth(req, db());
   const files = ["asx_yfinance_valid_stocks_2026-05-11.txt", "us_tickers_nasdaqtrader.txt"];
@@ -1467,8 +1569,7 @@ apiApp.get("/api/user/rating-history", asyncRoute(async (req, res) => {
 }));
 
 apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
-  const user = await requireAuth(req, db());
-  requireAdmin(user);
+  await requireAuth(req, db());
   const requestedMarket = strictMarket(req.query.market, true);
   const market = requestedMarket === "all" ? null : requestedMarket;
   const horizon = analysisHorizon(req.query.horizon);
@@ -1476,7 +1577,7 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
     `
     WITH latest_events AS (
       SELECT DISTINCT ON (firebase_uid, market, ticker)
-        id, firebase_uid, user_email, market, ticker, action, label, event_at_utc, signal_date,
+        id, firebase_uid, market, ticker, action, label, event_at_utc, signal_date,
         close_price AS signal_price
       FROM rating_events
       WHERE ($1::text IS NULL OR market = $1)
@@ -1534,8 +1635,7 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
 }));
 
 apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
-  const user = await requireAuth(req, db());
-  requireAdmin(user);
+  await requireAuth(req, db());
   const market = strictMarket(req.query.market);
   const interval = String(req.query.interval ?? "daily").trim().toLowerCase();
   if (interval === "hourly") {
@@ -1559,7 +1659,7 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
   const activeLabelsCte = `
     WITH latest_events AS (
       SELECT DISTINCT ON (firebase_uid, market, ticker)
-        id, firebase_uid, user_email, market, ticker, action, label, event_at_utc,
+        id, firebase_uid, market, ticker, action, label, event_at_utc,
         signal_date, close_price AS signal_price
       FROM rating_events
       WHERE market = $1
@@ -1696,8 +1796,7 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
 }));
 
 apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
-  const user = await requireAuth(req, db());
-  requireAdmin(user);
+  await requireAuth(req, db());
   const requestedMarket = strictMarket(req.query.market, true);
   const market = requestedMarket === "all" ? null : requestedMarket;
   const horizon = analysisHorizon(req.query.horizon);
@@ -1708,7 +1807,7 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
     `
     WITH latest_events AS (
       SELECT DISTINCT ON (firebase_uid, market, ticker)
-        id, firebase_uid, user_email, market, ticker, action, label, event_at_utc, signal_date,
+        id, firebase_uid, market, ticker, action, label, event_at_utc, signal_date,
         close_price AS signal_price
       FROM rating_events
       WHERE ($1::text IS NULL OR market = $1)
@@ -1720,7 +1819,7 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
         AND ($2::text IS NULL OR label = $2)
     )
     SELECT
-      labelled.market, labelled.ticker, labelled.label, labelled.user_email,
+      labelled.market, labelled.ticker, labelled.label,
       labelled.event_at_utc, labelled.signal_date, labelled.signal_price,
       CASE WHEN $3::int = 0 THEN latest.close_price ELSE outcome.price_at_horizon END AS latest_price,
       CASE WHEN $3::int = 0 THEN latest.price_date ELSE NULL END AS latest_date,
@@ -1754,8 +1853,7 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
 }));
 
 apiApp.get("/api/analysis/insights", asyncRoute(async (req, res) => {
-  const user = await requireAuth(req, db());
-  requireAdmin(user);
+  await requireAuth(req, db());
   const requestedMarket = strictMarket(req.query.market, true);
   const market = requestedMarket === "all" ? null : requestedMarket;
   const horizon = analysisHorizon(req.query.horizon);
@@ -1765,7 +1863,7 @@ apiApp.get("/api/analysis/insights", asyncRoute(async (req, res) => {
   const commonCte = `
     WITH latest_events AS (
       SELECT DISTINCT ON (firebase_uid, market, ticker)
-        id, firebase_uid, user_email, market, ticker, action, label, event_at_utc, signal_date,
+        id, firebase_uid, market, ticker, action, label, event_at_utc, signal_date,
         close_price AS signal_price, market_cap, avg_volume, volume_ratio, sector, industry
       FROM rating_events
       WHERE ($1::text IS NULL OR market = $1)
@@ -1811,7 +1909,7 @@ apiApp.get("/api/analysis/insights", asyncRoute(async (req, res) => {
   const underperformers = await db().query(
     `
     ${commonCte}
-    SELECT market, ticker, label, user_email, event_at_utc, signal_date,
+    SELECT market, ticker, label, event_at_utc, signal_date,
            signal_price, latest_price, latest_date, measured_at_utc,
            ROUND(return_percent::numeric, 2) AS return_percent,
            sector, industry, market_cap, avg_volume, volume_ratio

@@ -904,6 +904,19 @@ def _download_stooq_historical_data(
     return historical_data, missing_tickers
 
 
+def _extract_single_ticker_frame(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    """Flatten either yfinance MultiIndex orientation for one ticker."""
+
+    if data is None or data.empty:
+        return pd.DataFrame()
+    if not isinstance(data.columns, pd.MultiIndex):
+        return data.dropna(how="all")
+    for level in range(data.columns.nlevels):
+        if ticker in set(data.columns.get_level_values(level)):
+            return data.xs(ticker, axis=1, level=level).dropna(how="all")
+    return pd.DataFrame()
+
+
 def _extract_histories_from_frame(chunk: List[str], data: pd.DataFrame) -> Dict[str, pd.DataFrame]:
     """Normalises the output of ``yfinance.download`` into ticker keyed frames."""
 
@@ -915,15 +928,13 @@ def _extract_histories_from_frame(chunk: List[str], data: pd.DataFrame) -> Dict[
 
     histories: Dict[str, pd.DataFrame] = {}
     if isinstance(data.columns, pd.MultiIndex):
-        available = set(data.columns.get_level_values(0))
         for ticker in chunk:
-            if ticker in available:
-                hist = data[ticker].dropna(how="all")
-                if not hist.empty:
-                    histories[ticker] = hist
-    else:
+            hist = _extract_single_ticker_frame(data, ticker)
+            if not hist.empty:
+                histories[ticker] = hist
+    elif chunk:
         ticker = chunk[0]
-        hist = data.dropna(how="all")
+        hist = _extract_single_ticker_frame(data, ticker)
         if not hist.empty:
             histories[ticker] = hist
 
@@ -984,7 +995,7 @@ def _download_chunk_sequential(
                 failures.add(ticker)
                 break
             else:
-                data = data.dropna(how="all")
+                data = _extract_single_ticker_frame(data, ticker)
                 if data.empty:
                     failures.add(ticker)
                 else:
