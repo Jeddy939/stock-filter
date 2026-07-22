@@ -20,11 +20,17 @@ export interface UserContext {
   status: string;
 }
 
+type FirebaseTokenVerifier = (token: string) => Promise<admin.auth.DecodedIdToken>;
+
 function authRequired(): boolean {
   return ["1", "true", "yes"].includes(String(process.env.MONEYMAKER_REQUIRE_AUTH ?? "true").toLowerCase());
 }
 
-export async function requireAuth(req: Request, pool: Pool): Promise<UserContext> {
+export async function requireAuth(
+  req: Request,
+  pool: Pool,
+  verifyToken: FirebaseTokenVerifier = (token) => admin.auth().verifyIdToken(token)
+): Promise<UserContext> {
   if (!authRequired()) {
     return {uid: "local", email: null, display_name: "Local user", role: "admin", status: "active"};
   }
@@ -34,14 +40,20 @@ export async function requireAuth(req: Request, pool: Pool): Promise<UserContext
     throw new ApiError(401, "Sign-in required");
   }
 
+  let decoded: admin.auth.DecodedIdToken;
   try {
-    const decoded = await admin.auth().verifyIdToken(header.slice(7).trim());
-    const uid = String(decoded.uid ?? "").trim();
-    if (!uid) throw new Error("Token has no uid");
+    decoded = await verifyToken(header.slice(7).trim());
+  } catch (_error) {
+    throw new ApiError(401, "Invalid Firebase ID token");
+  }
 
-    const email = String(decoded.email ?? "").trim().toLowerCase() || null;
-    const displayName = String(decoded.name ?? decoded.email ?? "").trim() || null;
+  const uid = String(decoded.uid ?? "").trim();
+  if (!uid) throw new ApiError(401, "Invalid Firebase ID token");
 
+  const email = String(decoded.email ?? "").trim().toLowerCase() || null;
+  const displayName = String(decoded.name ?? decoded.email ?? "").trim() || null;
+
+  try {
     const inviteResult = await pool.query(
       "SELECT role, status FROM app_user_invites WHERE email = $1",
       [email]
@@ -81,7 +93,8 @@ export async function requireAuth(req: Request, pool: Pool): Promise<UserContext
     return {uid, email, display_name: displayName, role: normalizeRole(profile?.role ?? role), status};
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    throw new ApiError(401, "Invalid Firebase ID token");
+    console.error("Authentication profile lookup failed", error);
+    throw new ApiError(503, "Database temporarily unavailable");
   }
 }
 

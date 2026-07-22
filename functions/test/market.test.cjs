@@ -72,3 +72,5 @@ assert.equal(normalizeFeedbackStatus("Done"), "done");
 assert.throws(() => normalizeFeedbackStatus("deleted"), /status/);
 
 console.log("market and company profile tests passed");
+
+require("./auth.test.cjs");
