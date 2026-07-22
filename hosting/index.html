@@ -1963,10 +1963,43 @@
       return `$${fmt.format(Math.round(number))}`;
     }
 
+    function analysisPickWindow(payload) {
+      const times = (payload?.series || [])
+        .flatMap((series) => series.points || [])
+        .map((point) => new Date(`${point.date}T00:00:00Z`).getTime())
+        .filter(Number.isFinite);
+      return times.length ? {start: Math.min(...times), end: Math.max(...times)} : null;
+    }
+
+    function benchmarkPointsInPickWindow(payload, pickWindow) {
+      if (!pickWindow) return [];
+      const points = (payload?.benchmark?.points || []).filter((point) => {
+        const time = new Date(`${point.date}T00:00:00Z`).getTime();
+        return Number.isFinite(time) && time >= pickWindow.start && time <= pickWindow.end;
+      });
+      const baseline = Number(points[0]?.return_percent);
+      const baselineFactor = 1 + baseline / 100;
+      if (!Number.isFinite(baseline) || baselineFactor <= 0) return points;
+      return points.map((point) => {
+        const value = Number(point.return_percent);
+        return {
+          ...point,
+          return_percent: Number.isFinite(value)
+            ? (((1 + value / 100) / baselineFactor) - 1) * 100
+            : point.return_percent
+        };
+      });
+    }
+
     function analysisSources(payload) {
       const sources = (payload?.series || []).map((series) => ({...series, name: labelText(series.label)}));
       const benchmark = payload?.benchmark || {};
-      sources.push({label: "benchmark", name: benchmark.name || "Market benchmark", points: benchmark.points || []});
+      const pickWindow = analysisPickWindow(payload);
+      sources.push({
+        label: "benchmark",
+        name: benchmark.name || "Market benchmark",
+        points: benchmarkPointsInPickWindow(payload, pickWindow)
+      });
       return sources;
     }
 
@@ -2003,7 +2036,8 @@
       const visible = new Set(Array.from(document.querySelectorAll(".analysis-series-toggle:checked")).map((input) => input.value));
       const sources = analysisSources(payload).filter((series) => visible.has(series.label) && series.points.length);
       const values = sources.flatMap((series) => series.points.map((point) => Number(point.return_percent)).filter(Number.isFinite));
-      const times = sources.flatMap((series) => series.points.map((point) => new Date(`${point.date}T00:00:00Z`).getTime()).filter(Number.isFinite));
+      const pickWindow = analysisPickWindow(payload);
+      const times = pickWindow ? [pickWindow.start, pickWindow.end] : [];
       const empty = $("analysisChartEmpty");
       empty.hidden = values.length > 0;
       if (!values.length || !times.length) return;
@@ -2115,9 +2149,9 @@
       $("analysisSignalRange").textContent = firstSignal === lastSignal ? firstSignal : `${firstSignal} to ${lastSignal}`;
 
       renderAnalysisLegend(payload);
-      const datedPoints = analysisSources(payload).flatMap((series) => series.points || []).map((point) => point.date).filter(Boolean).sort();
-      $("analysisChartMeta").textContent = datedPoints.length
-        ? `${payload.interval === "weekly" ? "Weekly" : "Daily"} data, ${datedPoints[0]} to ${datedPoints.at(-1)}`
+      const pickWindow = analysisPickWindow(payload);
+      $("analysisChartMeta").textContent = pickWindow
+        ? `${payload.interval === "weekly" ? "Weekly" : "Daily"} picks, ${new Date(pickWindow.start).toISOString().slice(0, 10)} to ${new Date(pickWindow.end).toISOString().slice(0, 10)}`
         : payload.benchmark?.unavailable_reason || "No priced picks in this range";
       drawAnalysisChart();
 
