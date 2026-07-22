@@ -62,7 +62,7 @@ export function analysisRangeDays(range: unknown): number | null | undefined {
     "5y": 1827,
     all: null
   };
-  const key = String(range ?? "1y").trim().toLowerCase();
+  const key = String(range ?? "all").trim().toLowerCase();
   return Object.prototype.hasOwnProperty.call(ranges, key) ? ranges[key] : undefined;
 }
 

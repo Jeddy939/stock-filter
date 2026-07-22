@@ -6,7 +6,7 @@ const {
   normalizeCompanyProfile,
   VALID_LABELS
 } = require("../lib/market.js");
-const {manualRefreshPayload} = require("../lib/api.js");
+const {buildChartSeries, manualRefreshPayload} = require("../lib/api.js");
 const {normalizeFeedbackInput, normalizeFeedbackStatus} = require("../lib/feedback.js");
 
 assert.deepEqual([...VALID_LABELS], [
@@ -49,8 +49,39 @@ assert.ok(longProfile.summary.endsWith("..."));
 assert.equal(analysisRangeDays("3m"), 92);
 assert.equal(analysisRangeDays("2Y"), 731);
 assert.equal(analysisRangeDays("all"), null);
+assert.equal(analysisRangeDays(undefined), null);
 assert.equal(analysisRangeDays("invalid"), undefined);
 assert.equal(exclusiveHistoryEndDate(new Date("2026-07-17T23:59:00Z")), "2026-07-18");
+
+function weeklyRows(count) {
+  const start = new Date("2010-01-01T00:00:00.000Z");
+  return Array.from({length: count}, (_, index) => {
+    const date = new Date(start);
+    date.setUTCDate(date.getUTCDate() + index * 7);
+    const close = 10 + index / 10;
+    return {
+      date: date.toISOString().slice(0, 10),
+      open: close - 0.1,
+      high: close + 0.2,
+      low: close - 0.2,
+      close,
+      volume: 1000 + index
+    };
+  });
+}
+
+const warmedWeeklyChart = buildChartSeries(weeklyRows(760), "weekly", "1y", [30, 700]);
+assert.ok(warmedWeeklyChart.rows.length >= 52 && warmedWeeklyChart.rows.length <= 54);
+assert.equal(warmedWeeklyChart.movingAverages["700"].length, warmedWeeklyChart.rows.length);
+assert.ok(Number.isFinite(warmedWeeklyChart.movingAverages["700"][0]));
+assert.equal(warmedWeeklyChart.availability["700"].available, true);
+assert.equal(warmedWeeklyChart.availability["700"].cached_bars, 760);
+
+const youngWeeklyChart = buildChartSeries(weeklyRows(100), "weekly", "all", [180]);
+assert.equal(youngWeeklyChart.rows.length, 100);
+assert.equal(youngWeeklyChart.availability["180"].available, false);
+assert.equal(youngWeeklyChart.availability["180"].initialized_at, null);
+assert.ok(youngWeeklyChart.movingAverages["180"].every((value) => value === null));
 
 const manualUsRefresh = manualRefreshPayload({market: "US", limit: 10, workers: 8});
 assert.equal(manualUsRefresh.market, "us");

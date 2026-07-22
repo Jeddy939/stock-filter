@@ -43,7 +43,7 @@ interface JobRow {
   [key: string]: unknown;
 }
 
-interface PriceRow {
+export interface PriceRow {
   date: string | Date;
   open: number | string | null;
   high: number | string | null;
@@ -215,6 +215,50 @@ function movingAverage(values: Array<number | null>, period: number): Array<numb
     output.push(index >= period - 1 ? sum / period : null);
   }
   return output;
+}
+
+export function buildChartSeries(
+  historyRows: PriceRow[],
+  interval: string,
+  range: string,
+  periods: number[]
+): {
+  rows: PriceRow[];
+  movingAverages: Record<string, Array<number | null>>;
+  availability: Record<string, {available: boolean; required_bars: number; cached_bars: number; initialized_at: string | null}>;
+} {
+  const allRows = aggregateRows(historyRows, interval)
+    .filter((row) => numberOrNull(row.close) !== null);
+  const closes = allRows.map((row) => numberOrNull(row.close));
+  const uniquePeriods = [...new Set(periods)];
+  const completeAverages: Record<string, Array<number | null>> = {};
+  for (const period of uniquePeriods) {
+    completeAverages[String(period)] = movingAverage(closes, period);
+  }
+
+  let visibleStartIndex = 0;
+  if (range !== "all" && allRows.length) {
+    const latest = new Date(`${dateOnly(allRows[allRows.length - 1].date)}T00:00:00.000Z`);
+    latest.setUTCDate(latest.getUTCDate() - rangeDays(range));
+    const cutoff = latest.toISOString().slice(0, 10);
+    const firstVisible = allRows.findIndex((row) => dateOnly(row.date) >= cutoff);
+    visibleStartIndex = firstVisible >= 0 ? firstVisible : allRows.length;
+  }
+
+  const rows = allRows.slice(visibleStartIndex);
+  const movingAverages: Record<string, Array<number | null>> = {};
+  const availability: Record<string, {available: boolean; required_bars: number; cached_bars: number; initialized_at: string | null}> = {};
+  for (const period of uniquePeriods) {
+    const values = completeAverages[String(period)].slice(visibleStartIndex);
+    movingAverages[String(period)] = values;
+    availability[String(period)] = {
+      available: values.some((value) => Number.isFinite(value)),
+      required_bars: period,
+      cached_bars: allRows.length,
+      initialized_at: allRows.length >= period ? dateOnly(allRows[period - 1].date) : null
+    };
+  }
+  return {rows, movingAverages, availability};
 }
 
 async function createJob(jobType: string, payload: Record<string, unknown>) {
@@ -1658,7 +1702,7 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
   if (interval !== "daily" && interval !== "weekly") {
     throw new ApiError(400, "Analysis interval must be daily or weekly");
   }
-  const range = String(req.query.range ?? "1y").trim().toLowerCase();
+  const range = String(req.query.range ?? "all").trim().toLowerCase();
   const days = analysisRangeDays(range);
   if (days === undefined) throw new ApiError(400, "Analysis range must be 3m, 6m, 1y, 2y, 5y, or all");
 
@@ -1730,14 +1774,21 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
     ),
     db().query(
       `
-      WITH source_bars AS (
+      ${activeLabelsCte}, analysis_window AS (
+        SELECT CASE
+          WHEN COUNT(*) = 0 THEN NULL::date
+          WHEN $3::int IS NULL THEN MIN(signal_date)
+          ELSE GREATEST(MIN(signal_date), CURRENT_DATE - $3::int)
+        END AS start_date
+        FROM active_labels
+      ), source_bars AS (
         SELECT ${benchmarkBucket} AS point_date, price_date, close_price
         FROM price_history
         WHERE market = $1
           AND provider = 'yfinance'
           AND ticker = $2
           AND close_price IS NOT NULL
-          AND ($3::int IS NULL OR price_date >= CURRENT_DATE - ($3::int * INTERVAL '1 day'))
+          AND price_date >= (SELECT start_date FROM analysis_window)
       ), ranked AS (
         SELECT point_date, close_price,
                ROW_NUMBER() OVER (PARTITION BY point_date ORDER BY price_date DESC) AS row_number
@@ -2004,28 +2055,25 @@ apiApp.get("/api/chart", asyncRoute(async (req, res) => {
   const interval = String(req.query.interval ?? "daily").toLowerCase();
   if (!["daily", "weekly", "monthly"].includes(interval)) throw new ApiError(400, "Invalid chart interval");
   const range = String(req.query.range ?? "1y").toLowerCase();
-  const history = await db().query(
-    `
-    SELECT price_date::text AS date, open_price AS open, high_price AS high,
-           low_price AS low, close_price AS close, volume
-    FROM price_history
-    WHERE market = $1 AND provider = $2 AND ticker = $3
-      AND price_date >= CURRENT_DATE - ($4::int * INTERVAL '1 day')
-    ORDER BY price_date
-    `,
-    [market, provider, ticker, rangeDays(range)]
-  );
-  const companyResult = await db().query("SELECT info_json FROM companies WHERE market = $1 AND ticker = $2", [market, ticker]);
-  const rows = aggregateRows(history.rows as PriceRow[], interval);
-  const closes = rows.map((row) => numberOrNull(row.close));
   const maPeriods = String(req.query.ma ?? "")
     .split(",")
     .map((value) => Number(value.trim()))
-    .filter((value) => Number.isInteger(value) && value > 0);
-  const movingAverages: Record<string, Array<number | null>> = {};
-  for (const period of maPeriods) {
-    movingAverages[String(period)] = movingAverage(closes, period);
-  }
+    .filter((value) => Number.isInteger(value) && value > 0 && value <= 10000);
+  const [history, companyResult] = await Promise.all([
+    db().query(
+      `
+      SELECT price_date::text AS date, open_price AS open, high_price AS high,
+             low_price AS low, close_price AS close, volume
+      FROM price_history
+      WHERE market = $1 AND provider = $2 AND ticker = $3
+      ORDER BY price_date
+      `,
+      [market, provider, ticker]
+    ),
+    db().query("SELECT info_json FROM companies WHERE market = $1 AND ticker = $2", [market, ticker])
+  ]);
+  const chartSeries = buildChartSeries(history.rows as PriceRow[], interval, range, maPeriods);
+  const rows = chartSeries.rows;
   const candles = rows.map((row) => ({
     date: dateOnly(row.date),
     open: numberOrNull(row.open),
@@ -2043,7 +2091,8 @@ apiApp.get("/api/chart", asyncRoute(async (req, res) => {
     range,
     company: normalizeCompanyProfile(companyResult.rows[0]?.info_json, ticker),
     candles,
-    moving_averages: movingAverages,
+    moving_averages: chartSeries.movingAverages,
+    moving_average_availability: chartSeries.availability,
     count: candles.length,
     start: candles[0]?.date ?? null,
     end: candles[candles.length - 1]?.date ?? null

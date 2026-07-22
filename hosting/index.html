@@ -1407,12 +1407,12 @@
           <button id="analysisHourly" type="button" disabled title="Hourly bars are not stored in the current database">Hourly</button>
         </div>
         <select id="analysisRange" aria-label="Performance range">
+          <option value="all" selected>Since first pick</option>
           <option value="3m">3 months</option>
           <option value="6m">6 months</option>
-          <option value="1y" selected>1 year</option>
+          <option value="1y">1 year</option>
           <option value="2y">2 years</option>
           <option value="5y">5 years</option>
-          <option value="all">All picks</option>
         </select>
         <button id="refreshAnalysis" type="button">Refresh</button>
       </div>
@@ -2465,8 +2465,11 @@
         const payload = await api(`/api/chart?${params.toString()}`);
         renderCompanyProfile(payload.company || {}, payload.ticker || selectedTicker);
         drawCandles(payload.candles || [], payload.ticker, payload.moving_averages || {});
+        const unavailable = Object.entries(payload.moving_average_availability || {})
+          .filter(([, detail]) => !detail.available)
+          .map(([period, detail]) => `MA ${period} needs ${detail.required_bars} ${payload.interval} bars; ${detail.cached_bars} cached`);
         $("chartStatus").textContent = payload.count
-          ? `${payload.ticker} ${payload.interval} candles, ${payload.start} to ${payload.end}`
+          ? `${payload.ticker} ${payload.interval} candles, ${payload.start} to ${payload.end}${unavailable.length ? `. ${unavailable.join(". ")}` : ""}`
           : `${payload.ticker || selectedTicker}: no cached candles`;
       } catch (error) {
         renderCompanyProfile({}, selectedTicker);
