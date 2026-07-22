@@ -6,6 +6,7 @@ const {
   normalizeCompanyProfile,
   VALID_LABELS
 } = require("../lib/market.js");
+const {manualRefreshPayload} = require("../lib/api.js");
 const {normalizeFeedbackInput, normalizeFeedbackStatus} = require("../lib/feedback.js");
 
 assert.deepEqual([...VALID_LABELS], [
@@ -50,6 +51,16 @@ assert.equal(analysisRangeDays("2Y"), 731);
 assert.equal(analysisRangeDays("all"), null);
 assert.equal(analysisRangeDays("invalid"), undefined);
 assert.equal(exclusiveHistoryEndDate(new Date("2026-07-17T23:59:00Z")), "2026-07-18");
+
+const manualUsRefresh = manualRefreshPayload({market: "US", limit: 10, workers: 8});
+assert.equal(manualUsRefresh.market, "us");
+assert.equal(manualUsRefresh.ticker_file, "us_tickers_nasdaqtrader.txt");
+assert.equal(manualUsRefresh.provider, "yfinance");
+assert.equal(manualUsRefresh.limit, undefined);
+assert.equal(manualUsRefresh.workers, 1);
+assert.equal(manualUsRefresh.scheduled, false);
+assert.equal(manualUsRefresh.manual, true);
+assert.throws(() => manualRefreshPayload({}), /Market must be asx or us/);
 
 assert.deepEqual(normalizeFeedbackInput({
   category: " Data ",

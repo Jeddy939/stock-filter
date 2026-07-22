@@ -479,6 +479,13 @@
     }
     .admin-panel { border-color: #3b6452; }
     .admin-panel h2 { color: #b7e5c9; }
+    .admin-section {
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .admin-section h3 { margin: 0 0 8px; font-size: 12px; color: var(--text); }
+    .manual-refresh-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
     .admin-status { display: block; min-height: 18px; white-space: normal; }
     .upload-progress {
       height: 7px;
@@ -822,6 +829,13 @@
       border-color: #3a7e5b;
     }
     .market-data-card.is-running .market-last-run b { color: var(--accent); }
+    .market-refresh-state {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    .market-refresh-state.bad { color: var(--bad); }
     .metrics { grid-area: metrics; margin-bottom: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); }
     #resultsPanel {
       grid-area: results;
@@ -1237,6 +1251,14 @@
 
       <div class="panel admin-panel" id="adminPanel" hidden>
         <h2>Data Operations</h2>
+        <section class="admin-section" aria-labelledby="marketRefreshHeading">
+          <h3 id="marketRefreshHeading">Market data</h3>
+          <div class="manual-refresh-actions">
+            <button id="refreshAsxData" type="button" title="Queue an incremental ASX market-data update">Update ASX</button>
+            <button id="refreshUsData" type="button" title="Queue an incremental US market-data update">Update US</button>
+          </div>
+          <span class="status-line admin-status" id="manualRefreshStatus">No manual update running</span>
+        </section>
         <label for="importDatabaseFile">SQLite database</label>
         <input id="importDatabaseFile" type="file" accept=".sqlite,.sqlite3,.db,application/x-sqlite3">
         <label class="inline-check">
@@ -1275,11 +1297,11 @@
     <section class="workspace">
       <div class="market-data-strip" id="marketDataStrip" aria-live="polite">
         <div class="market-data-card" tabindex="0" aria-label="ASX market status">
-          <strong>ASX</strong><span class="market-last-run">Last run<b>-</b></span>
+          <strong>ASX</strong><span class="market-last-run">Data through<b>-</b></span>
           <div class="market-data-tooltip" role="tooltip">Latest bar: -<br>Tickers: -<br>Weekly rows: -<br>Next refresh: -</div>
         </div>
         <div class="market-data-card" tabindex="0" aria-label="US market status">
-          <strong>US</strong><span class="market-last-run">Last run<b>-</b></span>
+          <strong>US</strong><span class="market-last-run">Data through<b>-</b></span>
           <div class="market-data-tooltip" role="tooltip">Latest bar: -<br>Tickers: -<br>Weekly rows: -<br>Next refresh: -</div>
         </div>
       </div>
@@ -1794,28 +1816,33 @@
         const refresh = item.latest_refresh || {};
         const refreshTimestamp = item.last_successful_refresh_at_utc || item.database_refreshed_at_utc;
         const running = ["queued", "running"].includes(String(refresh.status));
-        const lastRun = running
+        const dataThrough = item.latest_bar_date || formatBrisbane(refreshTimestamp, false);
+        const visibleValue = running
           ? `${fmt.format(Number(refresh.completed_tickers || 0))} / ${fmt.format(Number(refresh.total_tickers || 0))}`
-          : formatBrisbane(refreshTimestamp, false);
+          : dataThrough;
         const details = [
-          `Last run: ${formatBrisbane(refreshTimestamp)}`,
-          `Latest bar: ${item.latest_bar_date || "-"}`,
+          `Data through: ${dataThrough || "-"}`,
+          `Last successful update: ${formatBrisbane(refreshTimestamp)}`,
           `Tickers: ${fmt.format(Number(item.covered_tickers || 0))}`,
           `Weekly rows: ${fmt.format(Number(item.weekly_metric_rows || 0))}`,
           `Next refresh: ${formatBrisbane(item.next_scheduled_refresh_at_utc)}`
         ];
-        if (refresh.status === "failed") details.push(`Latest failure: ${refresh.error || "Refresh failed"}`);
+        if (refresh.status) details.push(`Latest attempt: ${refresh.status} at ${formatBrisbane(refresh.finished_at_utc || refresh.started_at_utc)}`);
+        if (refresh.status === "failed") details.push(`Failure: ${refresh.error || "Refresh failed"}`);
         if (running) details.unshift("Click to view live batch activity");
         return `<div class="market-data-card ${running ? "is-running" : ""}" data-market-card="${market}" data-refresh-id="${escapeHtml(refresh.id || "")}">
           <strong>${market.toUpperCase()}</strong>
-          <span class="market-last-run">${running ? "Updating" : "Last run"}<b>${escapeHtml(lastRun)}</b></span>
+          <span class="market-last-run">${running ? "Updating" : "Data through"}<b>${escapeHtml(visibleValue || "-")}</b></span>
+          ${refresh.status === "failed" ? '<span class="market-refresh-state bad">Update failed</span>' : ""}
           <div class="market-data-tooltip" role="tooltip">${details.map(escapeHtml).join("<br>")}</div>
         </div>`;
       }).join("");
       strip.querySelectorAll(".market-data-card").forEach((card) => {
         card.tabIndex = 0;
         const running = card.classList.contains("is-running");
-        card.setAttribute("aria-label", `${card.dataset.marketCard.toUpperCase()} market status. ${running ? "Click to view live refresh activity." : "Hover or focus for details."}`);
+        const item = markets?.[card.dataset.marketCard] || {};
+        const failed = item.latest_refresh?.status === "failed";
+        card.setAttribute("aria-label", `${card.dataset.marketCard.toUpperCase()} data through ${item.latest_bar_date || "unknown"}. ${failed ? "Latest update failed. " : ""}${running ? "Click to view live refresh activity." : "Hover or focus for details."}`);
         if (running) {
           card.setAttribute("role", "button");
           card.addEventListener("click", () => openLiveRefresh(card.dataset.marketCard, card.dataset.refreshId));
@@ -1826,6 +1853,17 @@
             }
           });
         }
+      });
+      syncManualRefreshButtons(markets);
+    }
+
+    function syncManualRefreshButtons(markets = {}) {
+      const isAdmin = currentUserProfile?.user?.role === "admin";
+      [["asx", "refreshAsxData"], ["us", "refreshUsData"]].forEach(([market, id]) => {
+        const running = ["queued", "running"].includes(String(markets?.[market]?.latest_refresh?.status));
+        const button = $(id);
+        button.disabled = !isAdmin || running;
+        button.textContent = running ? `${market.toUpperCase()} updating` : `Update ${market.toUpperCase()}`;
       });
     }
 
@@ -2303,10 +2341,10 @@
         topStatus.dataset.refreshId = refresh.id || "";
         topStatus.dataset.market = market;
       } else if (refresh && refresh.status === "failed") {
-        $("topStatus").textContent = `${market.toUpperCase()} refresh failed; hover market status for details`;
+        $("topStatus").textContent = `${market.toUpperCase()} update failed; data through ${s.latest_bar_date || "unknown"}`;
         $("topStatus").className = "status-line bad";
       } else {
-        $("topStatus").textContent = `${market.toUpperCase()} last run ${formatBrisbane(s.last_successful_refresh_at_utc || s.database_refreshed_at_utc, false)}`;
+        $("topStatus").textContent = `${market.toUpperCase()} data through ${s.latest_bar_date || "unknown"}; updated ${formatBrisbane(s.last_successful_refresh_at_utc || s.database_refreshed_at_utc, false)}`;
         $("topStatus").className = "status-line ok";
       }
       if (marketStatusTimer) clearTimeout(marketStatusTimer);
@@ -2317,6 +2355,29 @@
         marketStatusTimer = setTimeout(() => refreshStatus().catch(() => {}), 5000);
       }
       return markets;
+    }
+
+    async function startManualMarketRefresh(market) {
+      const status = $("manualRefreshStatus");
+      status.textContent = `Queueing ${market.toUpperCase()} update...`;
+      status.className = "status-line admin-status warn";
+      $(market === "asx" ? "refreshAsxData" : "refreshUsData").disabled = true;
+      try {
+        const response = await api("/api/admin/refresh-market", {
+          method: "POST",
+          body: JSON.stringify({market})
+        });
+        const refreshId = response.refresh_job_id || response.job?.summary?.refresh_job_id || "";
+        status.textContent = response.skipped
+          ? `${market.toUpperCase()} update is already running`
+          : `${market.toUpperCase()} update queued`;
+        await refreshStatus();
+        if (refreshId) openLiveRefresh(market, refreshId);
+      } catch (error) {
+        status.textContent = error.message;
+        status.className = "status-line admin-status bad";
+        refreshStatus().catch(() => syncManualRefreshButtons());
+      }
     }
 
     async function loadTickerFiles() {
@@ -2646,8 +2707,17 @@
           batch_counts: refresh.batch_counts,
           running_child_jobs: (payload.batches || []).filter((batch) => batch.status === "running").map((batch) => batch.child_job_id).filter(Boolean)
         }, null, 2);
-        refreshStatus().catch(() => {});
-        if (refresh.running) setTimeout(() => pollLiveRefresh(market, refreshJobId, pollToken), 2000);
+        const marketStatusPromise = refreshStatus().catch(() => null);
+        if (refresh.running) {
+          setTimeout(() => pollLiveRefresh(market, refreshJobId, pollToken), 2000);
+        } else {
+          const markets = await marketStatusPromise;
+          const dataThrough = markets?.[market]?.latest_bar_date || "unknown";
+          $("manualRefreshStatus").textContent = refresh.success
+            ? `${String(market).toUpperCase()} update complete; data through ${dataThrough}`
+            : `${String(market).toUpperCase()} update failed; data remains through ${dataThrough}`;
+          $("manualRefreshStatus").className = `status-line admin-status ${refresh.success ? "ok" : "bad"}`;
+        }
       } catch (error) {
         if (pollToken !== activeRefreshPollToken) return;
         $("progressDetail").textContent = error.message;
@@ -3178,6 +3248,8 @@
     $("openOperations").addEventListener("click", () => {
       $("adminPanel").hidden = !$("adminPanel").hidden;
     });
+    $("refreshAsxData").addEventListener("click", () => startManualMarketRefresh("asx"));
+    $("refreshUsData").addEventListener("click", () => startManualMarketRefresh("us"));
     bindLimitToggle("useFetchLimit", "fetchLimit");
     bindLimitToggle("useScanLimit", "scanLimit");
     $("tickerFileSelect").addEventListener("change", () => {

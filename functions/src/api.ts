@@ -547,6 +547,16 @@ export function defaultScheduledFetchPayload(marketInput: unknown): Record<strin
   };
 }
 
+export function manualRefreshPayload(input: Record<string, unknown>): Record<string, unknown> {
+  const requestedMarket = strictMarket(input.market);
+  if (requestedMarket === "all") throw new ApiError(400, "Market must be asx or us");
+  return {
+    ...defaultScheduledFetchPayload(requestedMarket),
+    scheduled: false,
+    manual: true
+  };
+}
+
 export async function startMarketRefresh(
   payload: Record<string, unknown>,
   user?: UserContext
@@ -573,7 +583,10 @@ export async function startMarketRefresh(
   return createFetchJob(refreshPayload, refresh);
 }
 
-export async function startScheduledMarketRefresh(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function startScheduledMarketRefresh(
+  payload: Record<string, unknown>,
+  user?: UserContext
+): Promise<Record<string, unknown>> {
   const market = currentMarket(payload.market);
   const active = await db().query(
     `
@@ -590,6 +603,7 @@ export async function startScheduledMarketRefresh(payload: Record<string, unknow
   const row = active.rows[0];
   if (row) {
     return {
+      ok: true,
       skipped: true,
       reason: "refresh_already_running",
       refresh_job_id: row.id,
@@ -602,7 +616,7 @@ export async function startScheduledMarketRefresh(payload: Record<string, unknow
       started_at_utc: row.started_at_utc
     };
   }
-  return startMarketRefresh(payload);
+  return startMarketRefresh(payload, user);
 }
 
 export function defaultScanPayload(marketInput: unknown): Record<string, unknown> {
@@ -2169,8 +2183,8 @@ apiApp.post("/api/fetch", asyncRoute(async (req, res) => {
 apiApp.post("/api/admin/refresh-market", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   requireAdmin(user);
-  const payload = req.body ?? {};
-  res.json(await startMarketRefresh(payload, user));
+  const payload = manualRefreshPayload(req.body ?? {});
+  res.json(await startScheduledMarketRefresh(payload, user));
 }));
 
 apiApp.post("/api/admin/import-sqlite", asyncRoute(async (req, res) => {
