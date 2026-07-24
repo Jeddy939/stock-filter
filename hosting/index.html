@@ -268,6 +268,20 @@
     }
     .analysis-sort[data-direction="asc"]::after { border-bottom: 6px solid currentColor; }
     .analysis-sort[data-direction="desc"]::after { border-top: 6px solid currentColor; }
+    .analysis-category-pill {
+      min-height: 24px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .analysis-category-pill[data-label="winner"] { color: #8fe1a9; border-color: #246d42; background: rgba(36, 109, 66, .18); }
+    .analysis-category-pill[data-label="potential_winner"] { color: #8dd7ff; border-color: #285f6d; background: rgba(40, 95, 109, .18); }
+    .analysis-category-pill[data-label="needs_confirmation"] { color: #f2c14e; border-color: #70451f; background: rgba(112, 69, 31, .2); }
+    .analysis-category-pill[data-label="confirmed"] { color: #78d9bd; border-color: #225f50; background: rgba(34, 95, 80, .2); }
+    .analysis-category-pill[data-label="maybe"] { color: #dfc47c; border-color: #6d5422; background: rgba(109, 84, 34, .18); }
+    .analysis-category-pill[data-label="bad"] { color: #ef9a92; border-color: #73342f; background: rgba(115, 52, 47, .18); }
     tr.incomplete-ma td { background: rgba(242, 193, 78, 0.06); }
     tr.incomplete-ma td:nth-child(7) { color: var(--warn); }
     .results-wrap { max-height: calc(100vh - 210px); overflow: auto; border-radius: 6px; }
@@ -675,17 +689,121 @@
     }
     .analysis-lower-grid {
       display: grid;
-      grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+      grid-template-columns: minmax(0, 1fr);
       gap: 18px;
       margin-bottom: 18px;
     }
     .analysis-subsection { min-width: 0; }
     .analysis-subsection .results-wrap { max-height: 290px; }
+    .analysis-review {
+      border: 1px solid #5d4a1f;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #12150f;
+    }
+    .analysis-review > .analysis-section-head {
+      margin: 0;
+      padding: 9px 12px;
+      border-bottom: 1px solid #5d4a1f;
+      border-left: 4px solid #f2c14e;
+      background: #2b2716;
+    }
+    .analysis-review > .analysis-section-head h3 { color: #f5d874; }
+    .analysis-review-chart-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .analysis-review-chart-title {
+      display: flex;
+      align-items: baseline;
+      gap: 9px;
+      min-width: 0;
+    }
+    .analysis-review-chart-title strong { color: var(--text); }
+    .analysis-review-chart-title span {
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .analysis-review-chart-box {
+      position: relative;
+      width: 100%;
+      height: 330px;
+      min-height: 260px;
+      background: #0c1110;
+      border-bottom: 1px solid var(--line);
+      overflow: hidden;
+    }
+    #analysisReviewChart { display: block; width: 100%; height: 100%; }
+    .analysis-review-chart-empty {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      color: var(--muted);
+      text-align: center;
+      pointer-events: none;
+    }
+    .analysis-review .results-wrap {
+      max-height: 320px;
+      border-radius: 0;
+    }
+    .analysis-review table { border: 0; border-radius: 0; }
+    .analysis-review tr[data-review-ticker] { cursor: pointer; }
+    .analysis-review tr[data-review-ticker]:hover td { background: rgba(242, 193, 78, .06); }
+    .analysis-review tr[data-review-ticker].selected td { background: rgba(242, 193, 78, .11); }
+    .analysis-review tr[data-review-ticker].selected td:first-child { border-left: 3px solid #f2c14e; }
     .analysis-picks {
       padding-top: 12px;
       border-top: 1px solid var(--line);
     }
-    .analysis-picks .results-wrap { max-height: min(56vh, 620px); }
+    .analysis-picks .results-wrap {
+      position: relative;
+      max-height: min(56vh, 620px);
+      overflow: auto;
+      scrollbar-gutter: stable;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+    .analysis-picks table {
+      min-width: 880px;
+      border: 0;
+      border-radius: 0;
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow: visible;
+    }
+    .analysis-picks thead { position: sticky; top: 0; z-index: 5; }
+    .analysis-picks th {
+      top: 0;
+      z-index: 5;
+      box-shadow: 0 1px 0 var(--line);
+    }
+    .analysis-picks th:nth-child(1) { width: 8%; }
+    .analysis-picks th:nth-child(2) { width: 12%; }
+    .analysis-picks th:nth-child(3) { width: 18%; }
+    .analysis-picks th:nth-child(4) { width: 15%; }
+    .analysis-picks th:nth-child(5) { width: 11%; }
+    .analysis-picks th:nth-child(6) { width: 11%; }
+    .analysis-picks th:nth-child(7) { width: 11%; }
+    .analysis-picks th:nth-child(8) { width: 14%; }
+    .analysis-picks th:nth-child(n+5) .analysis-sort {
+      justify-content: flex-end;
+      text-align: right;
+    }
+    .analysis-picks tr.label-winner td { background: rgba(36, 109, 66, .055); }
+    .analysis-picks tr.label-potential_winner td { background: rgba(40, 95, 109, .055); }
+    .analysis-picks tr.label-needs_confirmation td { background: rgba(112, 69, 31, .075); }
+    .analysis-picks tr.label-confirmed td { background: rgba(34, 95, 80, .065); }
+    .analysis-picks tr.label-maybe td { background: rgba(109, 84, 34, .055); }
+    .analysis-picks tr.label-bad td { background: rgba(115, 52, 47, .055); }
     .analysis-picks-filter { width: 170px; min-height: 31px; }
     .analysis-insight-grid {
       display: grid;
@@ -1098,6 +1216,9 @@
       .analysis-tools { width: 100%; }
       .analysis-tools select { flex: 1; width: auto; min-width: 88px; }
       .analysis-chart-wrap { height: 310px; }
+      .analysis-review-chart-box { height: 290px; }
+      .analysis-review-chart-head { align-items: flex-start; }
+      .analysis-review-chart-title { align-items: flex-start; flex-direction: column; gap: 2px; }
       .analysis-statusbar { align-items: flex-start; flex-direction: column; gap: 4px; }
       .analysis-section-head { align-items: flex-start; flex-direction: column; gap: 3px; }
       .analysis-picks-filter { width: 100%; }
@@ -1486,13 +1607,24 @@
     <div class="analysis-lower-grid">
       <section class="analysis-subsection analysis-review">
         <div class="analysis-section-head">
-          <h3>Winner picks needing review</h3>
+          <h3>Needs confirmation</h3>
           <span class="status-line" id="analysisReviewMeta"></span>
+        </div>
+        <div class="analysis-review-chart-head">
+          <div class="analysis-review-chart-title">
+            <strong id="analysisReviewChartTitle">Select a stock to review</strong>
+            <span id="analysisReviewChartMeta">Daily candles, one year</span>
+          </div>
+          <button id="analysisReviewOpenMarket" type="button" hidden>Open full chart</button>
+        </div>
+        <div class="analysis-review-chart-box">
+          <canvas id="analysisReviewChart" role="img" aria-label="Price chart for the selected stock needing confirmation"></canvas>
+          <div class="analysis-review-chart-empty" id="analysisReviewChartEmpty">Select a stock in the table to view its chart.</div>
         </div>
         <div class="results-wrap">
           <table>
-            <thead><tr><th>Market</th><th>Ticker</th><th>Appraisal</th><th>Sector</th><th>Return</th><th>Date</th></tr></thead>
-            <tbody id="analysisReviewBody"><tr><td colspan="6" style="text-align:left;color:var(--muted)">No underperformers loaded.</td></tr></tbody>
+            <thead><tr><th>Market</th><th>Ticker</th><th>Appraisal</th><th>Selected</th><th>Return</th><th>Price date</th></tr></thead>
+            <tbody id="analysisReviewBody"><tr><td colspan="6" style="text-align:left;color:var(--muted)">No stocks currently need confirmation.</td></tr></tbody>
           </table>
         </div>
       </section>
@@ -1677,6 +1809,9 @@
     let lastMovingAverages = {};
     let lastAnalysisPayload = null;
     let lastAnalysisPicks = [];
+    let lastAnalysisReviewPicks = [];
+    let lastReviewChart = null;
+    let reviewChartRequestToken = 0;
     let analysisPickSort = {key: "return_percent", direction: "asc"};
     let lastFeedbackItems = [];
     let currentScanId = null;
@@ -2192,6 +2327,121 @@
       });
     }
 
+    function reviewChartParams(row) {
+      return new URLSearchParams({
+        market: row.market,
+        cache_file: marketDefaults[row.market]?.cacheFile || "stock_cache.sqlite",
+        provider: "yfinance",
+        ticker: row.ticker,
+        interval: "daily",
+        range: "1y",
+        ma: "30,90,180,360,700"
+      });
+    }
+
+    function setSelectedReviewRow(market, ticker) {
+      document.querySelectorAll("#analysisReviewBody tr[data-review-ticker]").forEach((row) => {
+        const selected = row.dataset.reviewMarket === market && row.dataset.reviewTicker === ticker;
+        row.classList.toggle("selected", selected);
+        row.setAttribute("aria-selected", String(selected));
+      });
+    }
+
+    async function loadAnalysisReviewChart(row) {
+      if (!row?.ticker || !row?.market) return;
+      const requestToken = ++reviewChartRequestToken;
+      setSelectedReviewRow(row.market, row.ticker);
+      $("analysisReviewChartTitle").textContent = row.ticker;
+      $("analysisReviewChartMeta").textContent = "Loading daily candles...";
+      $("analysisReviewChartEmpty").hidden = true;
+      $("analysisReviewOpenMarket").hidden = true;
+      try {
+        const payload = await api(`/api/chart?${reviewChartParams(row).toString()}`);
+        if (requestToken !== reviewChartRequestToken) return;
+        lastReviewChart = {
+          candles: payload.candles || [],
+          ticker: payload.ticker || row.ticker,
+          movingAverages: payload.moving_averages || {},
+          interval: payload.interval || "daily",
+          range: payload.range || "1y",
+          market: payload.market || row.market
+        };
+        drawCandles(lastReviewChart.candles, lastReviewChart.ticker, lastReviewChart.movingAverages, {
+          canvas: $("analysisReviewChart"),
+          interval: lastReviewChart.interval,
+          range: lastReviewChart.range,
+          trackState: false
+        });
+        $("analysisReviewChartMeta").textContent = payload.count
+          ? `${labelText(row.label)} | ${returnText(row.return_percent)} | ${payload.start} to ${payload.end}`
+          : `${row.ticker} has no cached candle data`;
+        $("analysisReviewChartEmpty").textContent = payload.count
+          ? ""
+          : "No cached candle data is available for this stock.";
+        $("analysisReviewChartEmpty").hidden = !!payload.count;
+        $("analysisReviewOpenMarket").dataset.market = row.market;
+        $("analysisReviewOpenMarket").dataset.ticker = row.ticker;
+        $("analysisReviewOpenMarket").hidden = false;
+      } catch (error) {
+        if (requestToken !== reviewChartRequestToken) return;
+        lastReviewChart = null;
+        $("analysisReviewChartMeta").textContent = error.message;
+        $("analysisReviewChartEmpty").textContent = "The review chart could not be loaded.";
+        $("analysisReviewChartEmpty").hidden = false;
+      }
+    }
+
+    function bindAnalysisReviewRows() {
+      document.querySelectorAll("#analysisReviewBody tr[data-review-ticker]").forEach((tableRow) => {
+        const select = () => {
+          const pick = lastAnalysisReviewPicks.find((row) =>
+            row.market === tableRow.dataset.reviewMarket && row.ticker === tableRow.dataset.reviewTicker
+          );
+          if (pick) loadAnalysisReviewChart(pick);
+        };
+        tableRow.addEventListener("click", select);
+        tableRow.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            select();
+          }
+        });
+      });
+    }
+
+    function renderAnalysisReview(reviewPicks) {
+      lastAnalysisReviewPicks = reviewPicks;
+      $("analysisReviewBody").innerHTML = reviewPicks.length ? reviewPicks.map((row) => `<tr
+        data-review-market="${escapeHtml(row.market)}"
+        data-review-ticker="${escapeHtml(row.ticker)}"
+        tabindex="0"
+        aria-selected="false"
+      >
+        <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
+        <td><span class="ticker">${escapeHtml(row.ticker)}</span></td>
+        <td><span class="analysis-category-pill" data-label="${escapeHtml(row.label)}">${labelText(row.label)}</span></td>
+        <td>${row.event_at_utc ? new Date(row.event_at_utc).toLocaleDateString() : "-"}</td>
+        <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
+        <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
+      </tr>`).join("") : '<tr><td colspan="6" style="text-align:left;color:var(--muted)">No stocks currently need confirmation.</td></tr>';
+      $("analysisReviewMeta").textContent = `${fmt.format(reviewPicks.length)} awaiting review`;
+      bindAnalysisReviewRows();
+      if (reviewPicks.length) {
+        const selected = lastReviewChart
+          ? reviewPicks.find((row) => row.market === lastReviewChart.market && row.ticker === lastReviewChart.ticker)
+          : null;
+        loadAnalysisReviewChart(selected || reviewPicks[0]);
+      } else {
+        reviewChartRequestToken += 1;
+        lastReviewChart = null;
+        $("analysisReviewChartTitle").textContent = "No stocks awaiting review";
+        $("analysisReviewChartMeta").textContent = "Needs Confirmation picks will appear here.";
+        $("analysisReviewChartEmpty").textContent = "No stocks currently need confirmation.";
+        $("analysisReviewChartEmpty").hidden = false;
+        $("analysisReviewOpenMarket").hidden = true;
+      }
+    }
+
     function analysisPickSortValue(row, key) {
       if (key === "label") {
         const order = {
@@ -2261,10 +2511,10 @@
       const label = $("analysisLabelFilter").value;
       const filtered = label ? lastAnalysisPicks.filter((row) => row.label === label) : lastAnalysisPicks;
       const picks = sortedAnalysisPicks(filtered);
-      $("analysisPicksBody").innerHTML = picks.length ? picks.map((row) => `<tr>
+      $("analysisPicksBody").innerHTML = picks.length ? picks.map((row) => `<tr class="label-${escapeHtml(row.label || "")}">
         <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
         <td><a class="ticker analysis-chart-link" href="#" data-market="${escapeHtml(row.market)}" data-ticker="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</a></td>
-        <td>${labelText(row.label)}</td>
+        <td><button class="analysis-category-pill" type="button" data-analysis-label-filter="${escapeHtml(row.label)}" data-label="${escapeHtml(row.label)}" title="Show ${labelText(row.label)} picks">${labelText(row.label)}</button></td>
         <td>${row.event_at_utc ? new Date(row.event_at_utc).toLocaleDateString() : "-"}</td>
         <td>${Number.isFinite(Number(row.signal_price)) ? Number(row.signal_price).toFixed(2) : "-"}</td>
         <td>${Number.isFinite(Number(row.latest_price)) ? Number(row.latest_price).toFixed(2) : "-"}</td>
@@ -2274,9 +2524,15 @@
       $("analysisPickMeta").textContent = `${fmt.format(picks.length)} of ${fmt.format(lastAnalysisPicks.length)}`;
       syncAnalysisSortHeaders();
       bindAnalysisChartLinks();
+      document.querySelectorAll("#analysisPicksBody [data-analysis-label-filter]").forEach((button) => {
+        button.addEventListener("click", () => {
+          $("analysisLabelFilter").value = button.dataset.analysisLabelFilter;
+          renderAnalysisPicks();
+        });
+      });
     }
 
-    function renderAnalysis(payload, picks, insights = {}) {
+    function renderAnalysis(payload, picks, reviewPicks, insights = {}) {
       lastAnalysisPayload = payload;
       lastAnalysisPicks = picks;
       const coverage = payload.coverage || {};
@@ -2296,16 +2552,7 @@
         : payload.benchmark?.unavailable_reason || "No priced picks in this range";
       drawAnalysisChart();
 
-      const underperformers = insights.underperformers || [];
-      $("analysisReviewBody").innerHTML = underperformers.length ? underperformers.map((row) => `<tr>
-        <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
-        <td><a class="ticker analysis-chart-link" href="#" data-market="${escapeHtml(row.market)}" data-ticker="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</a></td>
-        <td>${labelText(row.label)}</td>
-        <td>${escapeHtml(row.sector || row.industry || "Unknown")}</td>
-        <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
-        <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
-      </tr>`).join("") : '<tr><td colspan="6" style="text-align:left;color:var(--muted)">No winner or potential-winner picks are currently below their appraisal price.</td></tr>';
-      $("analysisReviewMeta").textContent = `${fmt.format(underperformers.length)} below signal`;
+      renderAnalysisReview(reviewPicks);
 
       const patterns = insights.patterns || [];
       $("analysisPatternBody").innerHTML = patterns.length ? patterns.map((row) => {
@@ -2328,12 +2575,13 @@
       const interval = encodeURIComponent($("analysisInterval").value);
       const range = encodeURIComponent($("analysisRange").value);
       try {
-        const [timeseriesPayload, picksPayload, insightsPayload] = await Promise.all([
+        const [timeseriesPayload, picksPayload, reviewPayload, insightsPayload] = await Promise.all([
           api(`/api/analysis/timeseries?market=${market}&interval=${interval}&range=${range}`),
-          api(`/api/analysis/picks?market=${market}&horizon=0&limit=1000`),
+          api(`/api/analysis/picks?market=${market}&horizon=0&limit=5000`),
+          api(`/api/analysis/picks?market=${market}&label=needs_confirmation&horizon=0&limit=5000`),
           api(`/api/analysis/insights?market=${market}&horizon=0`)
         ]);
-        renderAnalysis(timeseriesPayload, picksPayload.picks || [], insightsPayload);
+        renderAnalysis(timeseriesPayload, picksPayload.picks || [], reviewPayload.picks || [], insightsPayload);
         $("analysisStatus").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
         $("analysisStatus").className = "status-line ok";
       } catch (error) {
@@ -2655,12 +2903,16 @@
       }
     }
 
-    function drawCandles(candles, ticker, movingAverages = {}) {
-      lastCandles = candles;
-      lastChartTicker = ticker || lastChartTicker;
-      lastMovingAverages = movingAverages || {};
-      const canvas = $("priceChart");
+    function drawCandles(candles, ticker, movingAverages = {}, options = {}) {
+      if (options.trackState !== false) {
+        lastCandles = candles;
+        lastChartTicker = ticker || lastChartTicker;
+        lastMovingAverages = movingAverages || {};
+      }
+      const canvas = options.canvas || $("priceChart");
       const box = canvas.parentElement;
+      const interval = options.interval || $("chartInterval").value;
+      const range = options.range || $("chartRange").value;
       const dpr = window.devicePixelRatio || 1;
       const width = Math.max(320, box.clientWidth);
       const height = Math.max(260, box.clientHeight);
@@ -2782,7 +3034,7 @@
       ctx.font = "13px Segoe UI, sans-serif";
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
-      ctx.fillText(`${ticker} ${$("chartInterval").value.toUpperCase()} ${$("chartRange").value.toUpperCase()}`, pad.left, 8);
+      ctx.fillText(`${ticker} ${interval.toUpperCase()} ${range.toUpperCase()}`, pad.left, 8);
 
       let legendX = pad.left;
       Object.entries(movingAverages || {}).forEach(([period, values]) => {
@@ -3421,6 +3673,15 @@
     });
     $("analysisRange").addEventListener("change", loadAnalysis);
     $("analysisLabelFilter").addEventListener("change", renderAnalysisPicks);
+    $("analysisReviewOpenMarket").addEventListener("click", () => {
+      const market = $("analysisReviewOpenMarket").dataset.market;
+      const ticker = $("analysisReviewOpenMarket").dataset.ticker;
+      if (!market || !ticker) return;
+      $("marketSelect").value = market;
+      applyMarketDefaults();
+      activateView("market");
+      loadChart(ticker, true);
+    });
     document.querySelectorAll(".analysis-sort").forEach((button) => {
       button.addEventListener("click", () => changeAnalysisPickSort(button.dataset.sortKey));
     });
@@ -3464,6 +3725,14 @@
     });
     window.addEventListener("resize", () => {
       if (lastCandles.length) drawCandles(lastCandles, lastChartTicker, lastMovingAverages);
+      if (lastReviewChart) {
+        drawCandles(lastReviewChart.candles, lastReviewChart.ticker, lastReviewChart.movingAverages, {
+          canvas: $("analysisReviewChart"),
+          interval: lastReviewChart.interval,
+          range: lastReviewChart.range,
+          trackState: false
+        });
+      }
       if (lastAnalysisPayload) drawAnalysisChart();
     });
     window.addEventListener("keydown", (event) => {

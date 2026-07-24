@@ -1887,7 +1887,7 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
   const horizon = analysisHorizon(req.query.horizon);
   const requestedLabel = String(req.query.label ?? "").trim().toLowerCase().replace(/\s+/g, "_");
   if (requestedLabel && !VALID_LABELS.has(requestedLabel)) throw new ApiError(400, "Invalid rating label");
-  const limit = Math.min(Math.max(Number(req.query.limit ?? 250), 1), 1000);
+  const limit = Math.min(Math.max(Number(req.query.limit ?? 250), 1), 5000);
   const result = await db().query(
     `
     WITH latest_events AS (
