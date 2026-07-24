@@ -186,8 +186,9 @@
     .label-cell {
       display: flex;
       gap: 5px;
-      justify-content: flex-end;
+      justify-content: flex-start;
       align-items: center;
+      flex-wrap: wrap;
     }
     .label-btn {
       min-height: 28px;
@@ -207,6 +208,10 @@
       background: #70451f;
       border-color: #df914f;
     }
+    .label-btn.active[data-label="confirmed"] {
+      background: #225f50;
+      border-color: #55c3a2;
+    }
     .label-btn.active[data-label="maybe"] {
       background: #6d5422;
       border-color: #d1a94e;
@@ -218,8 +223,51 @@
     tr.label-winner td:first-child { border-left: 3px solid var(--accent); }
     tr.label-potential_winner td:first-child { border-left: 3px solid var(--accent-2); }
     tr.label-needs_confirmation td:first-child { border-left: 3px solid #df914f; }
+    tr.label-confirmed td:first-child { border-left: 3px solid #55c3a2; }
     tr.label-maybe td:first-child { border-left: 3px solid var(--warn); }
     tr.label-bad td:first-child { border-left: 3px solid var(--bad); }
+    .appraisal-current,
+    .company-appraisal {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 7px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .appraisal-current { flex-basis: 100%; width: fit-content; }
+    .appraisal-current[data-label="winner"], .company-appraisal[data-label="winner"] { color: #8fe1a9; border-color: #246d42; }
+    .appraisal-current[data-label="potential_winner"], .company-appraisal[data-label="potential_winner"] { color: #8dd7ff; border-color: #285f6d; }
+    .appraisal-current[data-label="needs_confirmation"], .company-appraisal[data-label="needs_confirmation"] { color: #f2c14e; border-color: #70451f; }
+    .appraisal-current[data-label="confirmed"], .company-appraisal[data-label="confirmed"] { color: #78d9bd; border-color: #225f50; }
+    .appraisal-current[data-label="maybe"], .company-appraisal[data-label="maybe"] { color: #dfc47c; border-color: #6d5422; }
+    .appraisal-current[data-label="bad"], .company-appraisal[data-label="bad"] { color: #ef9a92; border-color: #73342f; }
+    .analysis-sort {
+      width: 100%;
+      min-height: 28px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .analysis-sort:hover { color: var(--text); background: transparent; }
+    .analysis-sort[data-direction]::after {
+      content: "";
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+    }
+    .analysis-sort[data-direction="asc"]::after { border-bottom: 6px solid currentColor; }
+    .analysis-sort[data-direction="desc"]::after { border-top: 6px solid currentColor; }
     tr.incomplete-ma td { background: rgba(242, 193, 78, 0.06); }
     tr.incomplete-ma td:nth-child(7) { color: var(--warn); }
     .results-wrap { max-height: calc(100vh - 210px); overflow: auto; border-radius: 6px; }
@@ -1376,7 +1424,7 @@
                 <th style="width:110px">Avg Volume</th>
                 <th style="width:95px">Volume Ratio</th>
                 <th style="width:150px">MA Data</th>
-                <th style="width:260px">Label</th>
+                <th style="width:390px">Appraisal</th>
               </tr>
             </thead>
             <tbody id="resultsBody">
@@ -1470,6 +1518,7 @@
             <option value="winner">Winner</option>
             <option value="potential_winner">Potential winner</option>
             <option value="needs_confirmation">Needs confirmation</option>
+            <option value="confirmed">Confirmed</option>
             <option value="maybe">Maybe</option>
             <option value="bad">Bad</option>
           </select>
@@ -1478,7 +1527,16 @@
       </div>
       <div class="results-wrap">
         <table>
-          <thead><tr><th>Market</th><th>Ticker</th><th>Appraisal</th><th>Selected</th><th>Signal</th><th>Price</th><th>Return</th><th>Date</th></tr></thead>
+          <thead id="analysisPicksHead"><tr>
+            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="market">Market</button></th>
+            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="ticker">Ticker</button></th>
+            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="label">Appraisal</button></th>
+            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="event_at_utc">Selected</button></th>
+            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="signal_price">Signal</button></th>
+            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="latest_price">Price</button></th>
+            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="return_percent">Return</button></th>
+            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="latest_date">Date</button></th>
+          </tr></thead>
           <tbody id="analysisPicksBody"><tr><td colspan="8" style="text-align:left;color:var(--muted)">No appraisals loaded.</td></tr></tbody>
         </table>
       </div>
@@ -1619,6 +1677,7 @@
     let lastMovingAverages = {};
     let lastAnalysisPayload = null;
     let lastAnalysisPicks = [];
+    let analysisPickSort = {key: "return_percent", direction: "asc"};
     let lastFeedbackItems = [];
     let currentScanId = null;
     let lastExportStoragePath = null;
@@ -1648,6 +1707,7 @@
       winner: "#54d693",
       potential_winner: "#7dcfff",
       needs_confirmation: "#f2c14e",
+      confirmed: "#78d9bd",
       maybe: "#b58cff",
       bad: "#ff7b72",
       all_picks: "#f2f5f3",
@@ -1682,7 +1742,19 @@
       return fmt.format(Math.round(value));
     }
 
-    function renderCompanyProfile(company, ticker) {
+    function appendCompanyAppraisal(box, appraisal) {
+      if (!appraisal?.label) return;
+      const badge = document.createElement("span");
+      badge.className = "company-appraisal";
+      badge.dataset.label = appraisal.label;
+      badge.textContent = `Your appraisal: ${labelText(appraisal.label)}`;
+      if (appraisal.appraised_at_utc) {
+        badge.title = `Last changed ${formatBrisbane(appraisal.appraised_at_utc)}`;
+      }
+      box.appendChild(badge);
+    }
+
+    function renderCompanyProfile(company, ticker, appraisal = null) {
       const box = $("companyProfile");
       box.replaceChildren();
       if (!company || (!company.summary && !company.name && !company.sector && !company.industry)) {
@@ -1690,6 +1762,7 @@
         const p = document.createElement("p");
         p.textContent = `${ticker || "Ticker"}: no cached company description yet. Run a fetch with company info enabled to fill this in.`;
         box.appendChild(p);
+        appendCompanyAppraisal(box, appraisal);
         if (company && company.yahoo_url) {
           const meta = document.createElement("div");
           meta.className = "company-meta";
@@ -1708,6 +1781,7 @@
       const heading = document.createElement("h3");
       heading.textContent = company.name || ticker;
       box.appendChild(heading);
+      appendCompanyAppraisal(box, appraisal);
 
       const metaParts = [company.sector, company.industry, company.country].filter(Boolean);
       if (metaParts.length || company.website || company.yahoo_url) {
@@ -2118,9 +2192,75 @@
       });
     }
 
+    function analysisPickSortValue(row, key) {
+      if (key === "label") {
+        const order = {
+          winner: 1,
+          confirmed: 2,
+          potential_winner: 3,
+          needs_confirmation: 4,
+          maybe: 5,
+          bad: 6
+        };
+        return order[row.label] ?? 99;
+      }
+      if (["event_at_utc", "latest_date"].includes(key)) {
+        const value = key === "latest_date" ? (row.latest_date || row.measured_at_utc) : row[key];
+        const time = value ? new Date(value).getTime() : NaN;
+        return Number.isFinite(time) ? time : null;
+      }
+      if (["signal_price", "latest_price", "return_percent"].includes(key)) {
+        if (row[key] === null || row[key] === undefined || row[key] === "") return null;
+        const value = Number(row[key]);
+        return Number.isFinite(value) ? value : null;
+      }
+      const value = String(row[key] ?? "").trim().toLowerCase();
+      return value || null;
+    }
+
+    function sortedAnalysisPicks(picks) {
+      const {key, direction} = analysisPickSort;
+      const multiplier = direction === "desc" ? -1 : 1;
+      return picks.map((row, index) => ({row, index})).sort((left, right) => {
+        const a = analysisPickSortValue(left.row, key);
+        const b = analysisPickSortValue(right.row, key);
+        if (a === null && b === null) return left.index - right.index;
+        if (a === null) return 1;
+        if (b === null) return -1;
+        const comparison = typeof a === "string" && typeof b === "string"
+          ? a.localeCompare(b, undefined, {numeric: true})
+          : Number(a) - Number(b);
+        return comparison ? comparison * multiplier : left.index - right.index;
+      }).map((item) => item.row);
+    }
+
+    function syncAnalysisSortHeaders() {
+      document.querySelectorAll(".analysis-sort").forEach((button) => {
+        const active = button.dataset.sortKey === analysisPickSort.key;
+        const heading = button.closest("th");
+        button.toggleAttribute("data-direction", active);
+        if (active) button.dataset.direction = analysisPickSort.direction;
+        else delete button.dataset.direction;
+        heading?.setAttribute("aria-sort", active ? (analysisPickSort.direction === "asc" ? "ascending" : "descending") : "none");
+      });
+    }
+
+    function changeAnalysisPickSort(key) {
+      if (analysisPickSort.key === key) {
+        analysisPickSort.direction = analysisPickSort.direction === "asc" ? "desc" : "asc";
+      } else {
+        analysisPickSort = {
+          key,
+          direction: ["event_at_utc", "latest_date", "return_percent"].includes(key) ? "desc" : "asc"
+        };
+      }
+      renderAnalysisPicks();
+    }
+
     function renderAnalysisPicks() {
       const label = $("analysisLabelFilter").value;
-      const picks = label ? lastAnalysisPicks.filter((row) => row.label === label) : lastAnalysisPicks;
+      const filtered = label ? lastAnalysisPicks.filter((row) => row.label === label) : lastAnalysisPicks;
+      const picks = sortedAnalysisPicks(filtered);
       $("analysisPicksBody").innerHTML = picks.length ? picks.map((row) => `<tr>
         <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
         <td><a class="ticker analysis-chart-link" href="#" data-market="${escapeHtml(row.market)}" data-ticker="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</a></td>
@@ -2132,6 +2272,7 @@
         <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
       </tr>`).join("") : '<tr><td colspan="8" style="text-align:left;color:var(--muted)">No active picks match this appraisal group.</td></tr>';
       $("analysisPickMeta").textContent = `${fmt.format(picks.length)} of ${fmt.format(lastAnalysisPicks.length)}`;
+      syncAnalysisSortHeaders();
       bindAnalysisChartLinks();
     }
 
@@ -2497,7 +2638,7 @@
       });
       try {
         const payload = await api(`/api/chart?${params.toString()}`);
-        renderCompanyProfile(payload.company || {}, payload.ticker || selectedTicker);
+        renderCompanyProfile(payload.company || {}, payload.ticker || selectedTicker, payload.appraisal || null);
         drawCandles(payload.candles || [], payload.ticker, payload.moving_averages || {});
         const unavailable = Object.entries(payload.moving_average_availability || {})
           .filter(([, detail]) => !detail.available)
@@ -3089,6 +3230,7 @@
       if (label === "winner") return "Winner";
       if (label === "potential_winner") return "Potential Winner";
       if (label === "needs_confirmation") return "Needs Confirmation";
+      if (label === "confirmed") return "Confirmed";
       if (label === "maybe") return "Maybe";
       if (label === "bad") return "Bad";
       return "";
@@ -3097,12 +3239,12 @@
     function labelButtons(row) {
       const labels = [
         ["winner", "Winner", "Winner"],
-        ["potential_winner", "Potential", "Potential Winner"],
-        ["needs_confirmation", "Confirm", "Needs Confirmation"],
+        ["needs_confirmation", "Needs confirm", "Needs Confirmation"],
+        ["confirmed", "Confirmed", "Confirmed"],
         ["maybe", "Maybe", "Maybe"],
         ["bad", "Bad", "Bad"]
       ];
-      return `<div class="label-cell">${labels.map(([value, text, title]) =>
+      return `<div class="label-cell"><span class="appraisal-current" data-label="${row.label || ""}">${row.label ? labelText(row.label) : "Not appraised"}</span>${labels.map(([value, text, title]) =>
         `<button class="label-btn ${row.label === value ? "active" : ""}" data-label="${value}" data-ticker="${row.ticker}" title="Mark as ${title}">${text}</button>`
       ).join("")}</div>`;
     }
@@ -3121,8 +3263,13 @@
     function applyRowLabel(ticker, label) {
       const row = document.querySelector(`tr[data-ticker="${ticker}"]`);
       if (!row) return;
-      row.classList.remove("label-winner", "label-potential_winner", "label-needs_confirmation", "label-maybe", "label-bad");
+      row.classList.remove("label-winner", "label-potential_winner", "label-needs_confirmation", "label-confirmed", "label-maybe", "label-bad");
       if (label) row.classList.add(`label-${label}`);
+      const current = row.querySelector(".appraisal-current");
+      if (current) {
+        current.dataset.label = label || "";
+        current.textContent = label ? labelText(label) : "Not appraised";
+      }
       row.querySelectorAll(".label-btn").forEach((button) => {
         button.classList.toggle("active", button.dataset.label === label);
       });
@@ -3274,6 +3421,9 @@
     });
     $("analysisRange").addEventListener("change", loadAnalysis);
     $("analysisLabelFilter").addEventListener("change", renderAnalysisPicks);
+    document.querySelectorAll(".analysis-sort").forEach((button) => {
+      button.addEventListener("click", () => changeAnalysisPickSort(button.dataset.sortKey));
+    });
     $("marketSelect").addEventListener("change", applyMarketDefaults);
     $("marketAsx").addEventListener("click", () => setMarket("asx"));
     $("marketUs").addEventListener("click", () => setMarket("us"));

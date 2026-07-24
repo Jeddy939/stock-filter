@@ -930,33 +930,52 @@ function requireJobVisibility(user: UserContext, jobType: string, row: JobRow | 
   throw new ApiError(403, "admin access required");
 }
 
-async function overlayUserAppraisals(user: UserContext, scanId: number, results: Array<Record<string, unknown>>) {
-  if (!scanId || results.length === 0) return results;
-  const tickers = results.map((row) => String(row.ticker ?? "").toUpperCase()).filter(Boolean);
-  const appraisalResult = await db().query(
-    `
-    SELECT up.ticker, up.label, un.note, up.status, up.updated_at_utc AS appraised_at_utc
-    FROM user_picks up
-    LEFT JOIN user_notes un
-      ON un.firebase_uid = up.firebase_uid
-     AND un.scan_id = up.scan_id
-     AND un.source_id = up.source_id
-     AND un.ticker = up.ticker
-    WHERE up.firebase_uid = $1 AND up.scan_id = $2 AND up.ticker = ANY($3)
-    `,
-    [user.uid, scanId, tickers]
-  );
-  const appraisals = new Map(appraisalResult.rows.map((row) => [String(row.ticker).toUpperCase(), row]));
+export function applyLatestAppraisals(
+  results: Array<Record<string, unknown>>,
+  appraisalRows: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  const appraisals = new Map(appraisalRows.map((row) => [String(row.ticker ?? "").toUpperCase(), row]));
   return results.map((row) => {
-    const appraisal = appraisals.get(String(row.ticker ?? "").toUpperCase());
+    const latest = appraisals.get(String(row.ticker ?? "").toUpperCase());
+    const appraisal = latest?.action === "label" && latest.label ? latest : null;
     return {
       ...row,
       label: appraisal?.label ?? null,
       personal_note: appraisal?.note ?? null,
       personal_status: appraisal?.status ?? null,
-      appraised_at_utc: appraisal?.appraised_at_utc ?? null
+      appraised_at_utc: appraisal?.event_at_utc ?? null
     };
   });
+}
+
+async function latestUserAppraisals(user: UserContext, market: "asx" | "us", tickers: string[]) {
+  if (!tickers.length) return [];
+  const result = await db().query(
+    `
+    SELECT ticker, action, label, note, event_at_utc
+    FROM (
+      SELECT DISTINCT ON (ticker)
+        ticker, action, label, note, event_at_utc, id
+      FROM rating_events
+      WHERE firebase_uid = $1
+        AND market = $2
+        AND ticker = ANY($3::text[])
+      ORDER BY ticker, event_at_utc DESC, id DESC
+    ) latest
+    `,
+    [user.uid, market, tickers]
+  );
+  return result.rows as Array<Record<string, unknown>>;
+}
+
+async function overlayUserAppraisals(
+  user: UserContext,
+  market: "asx" | "us",
+  results: Array<Record<string, unknown>>
+) {
+  if (results.length === 0) return results;
+  const tickers = results.map((row) => String(row.ticker ?? "").toUpperCase()).filter(Boolean);
+  return applyLatestAppraisals(results, await latestUserAppraisals(user, market, tickers));
 }
 
 async function marketFreshness(market: "asx" | "us") {
@@ -1533,7 +1552,7 @@ apiApp.get("/api/scan-results", asyncRoute(async (req, res) => {
       industry: row.industry
     };
   });
-  res.json({ok: true, scan, results: await overlayUserAppraisals(user, Number(scan.id), results)});
+  res.json({ok: true, scan, results: await overlayUserAppraisals(user, market, results)});
 }));
 
 apiApp.get("/api/labels", asyncRoute(async (req, res) => {
@@ -1682,9 +1701,10 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
       WHEN 'winner' THEN 1
       WHEN 'potential_winner' THEN 2
       WHEN 'needs_confirmation' THEN 3
-      WHEN 'maybe' THEN 4
-      WHEN 'bad' THEN 5
-      ELSE 6
+      WHEN 'confirmed' THEN 4
+      WHEN 'maybe' THEN 5
+      WHEN 'bad' THEN 6
+      ELSE 7
     END
     `,
     [market, horizon]
@@ -1833,7 +1853,7 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
     });
     series.set(label, points);
   }
-  const categoryOrder = ["winner", "potential_winner", "needs_confirmation", "maybe", "bad", "all_picks"];
+  const categoryOrder = ["winner", "potential_winner", "needs_confirmation", "confirmed", "maybe", "bad", "all_picks"];
   const seriesPayload = categoryOrder.map((label) => ({label, points: series.get(label) ?? []}));
   const benchmarkPoints = benchmarkResult.rows.map((row) => ({
     date: row.date,
@@ -2047,7 +2067,7 @@ apiApp.get("/api/analysis/insights", asyncRoute(async (req, res) => {
 }));
 
 apiApp.get("/api/chart", asyncRoute(async (req, res) => {
-  await requireAuth(req, db());
+  const user = await requireAuth(req, db());
   const ticker = String(req.query.ticker ?? "").trim().toUpperCase();
   if (!ticker) throw new ApiError(400, "ticker is required");
   const market = currentMarket(req.query.market, ticker);
@@ -2059,7 +2079,7 @@ apiApp.get("/api/chart", asyncRoute(async (req, res) => {
     .split(",")
     .map((value) => Number(value.trim()))
     .filter((value) => Number.isInteger(value) && value > 0 && value <= 10000);
-  const [history, companyResult] = await Promise.all([
+  const [history, companyResult, appraisalRows] = await Promise.all([
     db().query(
       `
       SELECT price_date::text AS date, open_price AS open, high_price AS high,
@@ -2070,7 +2090,8 @@ apiApp.get("/api/chart", asyncRoute(async (req, res) => {
       `,
       [market, provider, ticker]
     ),
-    db().query("SELECT info_json FROM companies WHERE market = $1 AND ticker = $2", [market, ticker])
+    db().query("SELECT info_json FROM companies WHERE market = $1 AND ticker = $2", [market, ticker]),
+    latestUserAppraisals(user, market, [ticker])
   ]);
   const chartSeries = buildChartSeries(history.rows as PriceRow[], interval, range, maPeriods);
   const rows = chartSeries.rows;
@@ -2090,6 +2111,7 @@ apiApp.get("/api/chart", asyncRoute(async (req, res) => {
     interval,
     range,
     company: normalizeCompanyProfile(companyResult.rows[0]?.info_json, ticker),
+    appraisal: applyLatestAppraisals([{ticker}], appraisalRows)[0],
     candles,
     moving_averages: chartSeries.movingAverages,
     moving_average_availability: chartSeries.availability,
@@ -2337,7 +2359,9 @@ apiApp.post("/api/filter", asyncRoute(async (req, res) => {
   const summary = payload.summary as Record<string, unknown> | undefined;
   const scanId = Number(summary?.scan_id ?? payload.scan_id ?? 0);
   if (scanId && Array.isArray(payload.results)) {
-    payload.results = await overlayUserAppraisals(user, scanId, payload.results as Array<Record<string, unknown>>);
+    const firstResult = payload.results[0] as Record<string, unknown> | undefined;
+    const market = currentMarket(summary?.market ?? payload.market, firstResult?.ticker);
+    payload.results = await overlayUserAppraisals(user, market, payload.results as Array<Record<string, unknown>>);
   }
   res.json({ok: true, ...payload});
 }));

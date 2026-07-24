@@ -6,17 +6,19 @@ const {
   normalizeCompanyProfile,
   VALID_LABELS
 } = require("../lib/market.js");
-const {buildChartSeries, manualRefreshPayload} = require("../lib/api.js");
+const {applyLatestAppraisals, buildChartSeries, manualRefreshPayload} = require("../lib/api.js");
 const {normalizeFeedbackInput, normalizeFeedbackStatus} = require("../lib/feedback.js");
 
 assert.deepEqual([...VALID_LABELS], [
   "winner",
   "potential_winner",
   "needs_confirmation",
+  "confirmed",
   "maybe",
   "bad"
 ]);
 assert.equal(VALID_LABELS.has("needs_confirmation"), true);
+assert.equal(VALID_LABELS.has("confirmed"), true);
 assert.equal(VALID_LABELS.has("needs confirmation"), false);
 assert.equal(VALID_LABELS.has("clear"), false);
 
@@ -82,6 +84,21 @@ assert.equal(youngWeeklyChart.rows.length, 100);
 assert.equal(youngWeeklyChart.availability["180"].available, false);
 assert.equal(youngWeeklyChart.availability["180"].initialized_at, null);
 assert.ok(youngWeeklyChart.movingAverages["180"].every((value) => value === null));
+
+const crossScanAppraisal = applyLatestAppraisals(
+  [{ticker: "CBA.AX", scan_id: 900}],
+  [{ticker: "CBA.AX", action: "label", label: "confirmed", note: "Checked", event_at_utc: "2026-07-24T00:00:00Z"}]
+)[0];
+assert.equal(crossScanAppraisal.scan_id, 900);
+assert.equal(crossScanAppraisal.label, "confirmed");
+assert.equal(crossScanAppraisal.personal_note, "Checked");
+
+const clearedAppraisal = applyLatestAppraisals(
+  [{ticker: "CBA.AX", scan_id: 901}],
+  [{ticker: "CBA.AX", action: "clear", label: null, event_at_utc: "2026-07-24T01:00:00Z"}]
+)[0];
+assert.equal(clearedAppraisal.label, null);
+assert.equal(clearedAppraisal.appraised_at_utc, null);
 
 const manualUsRefresh = manualRefreshPayload({market: "US", limit: 10, workers: 8});
 assert.equal(manualUsRefresh.market, "us");
