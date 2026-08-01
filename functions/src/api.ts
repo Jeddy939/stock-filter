@@ -21,6 +21,7 @@ import {
   yahooUrl
 } from "./market";
 import {requiresAppCheck} from "./request-policy";
+import {ipRateLimit} from "./ip-rate-limit";
 import {normalizeScreenConfig, screenConfigHash} from "./screen-config";
 
 interface JobRow {
@@ -76,6 +77,8 @@ interface RefreshTickerBatchPayload {
 }
 
 const apiApp = express();
+apiApp.disable("x-powered-by");
+apiApp.use(ipRateLimit);
 apiApp.use(cors({origin: true}));
 apiApp.use(express.json({limit: "5mb"}));
 
