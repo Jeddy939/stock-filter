@@ -594,6 +594,15 @@ export function defaultScheduledFetchPayload(marketInput: unknown): Record<strin
   };
 }
 
+export function normalizeAnalysisTicker(market: "asx" | "us", value: unknown): string {
+  let ticker = String(value ?? "").trim().toUpperCase();
+  if (market === "asx" && ticker && !ticker.endsWith(".AX")) ticker = `${ticker}.AX`;
+  if (!/^[A-Z0-9^][A-Z0-9.^=-]{0,19}$/.test(ticker)) {
+    throw new ApiError(400, "Enter a valid stock ticker");
+  }
+  return ticker;
+}
+
 export function manualRefreshPayload(input: Record<string, unknown>): Record<string, unknown> {
   const requestedMarket = strictMarket(input.market);
   if (requestedMarket === "all") throw new ApiError(400, "Market must be asx or us");
@@ -1702,12 +1711,10 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
     GROUP BY label
     ORDER BY CASE label
       WHEN 'winner' THEN 1
-      WHEN 'potential_winner' THEN 2
-      WHEN 'needs_confirmation' THEN 3
-      WHEN 'confirmed' THEN 4
-      WHEN 'maybe' THEN 5
-      WHEN 'bad' THEN 6
-      ELSE 7
+      WHEN 'needs_confirmation' THEN 2
+      WHEN 'maybe' THEN 3
+      WHEN 'bad' THEN 4
+      ELSE 5
     END
     `,
     [market, horizon]
@@ -1716,7 +1723,7 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
 }));
 
 apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
-  await requireAuth(req, db());
+  const user = await requireAuth(req, db());
   const market = strictMarket(req.query.market);
   const interval = String(req.query.interval ?? "daily").trim().toLowerCase();
   if (interval === "hourly") {
@@ -1744,6 +1751,7 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
         signal_date, close_price AS signal_price
       FROM rating_events
       WHERE market = $1
+        AND firebase_uid = $2
       ORDER BY firebase_uid, market, ticker, event_at_utc DESC, id DESC
     ), active_labels AS (
       SELECT *
@@ -1772,7 +1780,7 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
          AND ph.ticker = labelled.ticker
          AND ph.price_date >= labelled.signal_date
          AND ph.close_price IS NOT NULL
-        WHERE ($2::int IS NULL OR ph.price_date >= CURRENT_DATE - ($2::int * INTERVAL '1 day'))
+        WHERE ($3::int IS NULL OR ph.price_date >= CURRENT_DATE - ($3::int * INTERVAL '1 day'))
       ), category_points AS (
         SELECT point_date, label, ROUND(AVG(return_percent)::numeric, 4) AS return_percent,
                COUNT(*)::int AS sample_count
@@ -1793,15 +1801,15 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
       ) combined
       ORDER BY point_date, label
       `,
-      [market, days]
+      [market, user.uid, days]
     ),
     db().query(
       `
       ${activeLabelsCte}, analysis_window AS (
         SELECT CASE
           WHEN COUNT(*) = 0 THEN NULL::date
-          WHEN $3::int IS NULL THEN MIN(signal_date)
-          ELSE GREATEST(MIN(signal_date), CURRENT_DATE - $3::int)
+          WHEN $4::int IS NULL THEN MIN(signal_date)
+          ELSE GREATEST(MIN(signal_date), CURRENT_DATE - $4::int)
         END AS start_date
         FROM active_labels
       ), source_bars AS (
@@ -1809,7 +1817,7 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
         FROM price_history
         WHERE market = $1
           AND provider = 'yfinance'
-          AND ticker = $2
+          AND ticker = $3
           AND close_price IS NOT NULL
           AND price_date >= (SELECT start_date FROM analysis_window)
       ), ranked AS (
@@ -1830,7 +1838,7 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
       FROM normalized
       ORDER BY point_date
       `,
-      [market, benchmarkTicker, days]
+      [market, user.uid, benchmarkTicker, days]
     ),
     db().query(
       `
@@ -1841,7 +1849,7 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
              MAX(signal_date)::text AS latest_signal_date
       FROM active_labels
       `,
-      [market]
+      [market, user.uid]
     )
   ]);
 
@@ -1856,7 +1864,7 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
     });
     series.set(label, points);
   }
-  const categoryOrder = ["winner", "potential_winner", "needs_confirmation", "confirmed", "maybe", "bad", "all_picks"];
+  const categoryOrder = ["winner", "needs_confirmation", "maybe", "bad", "all_picks"];
   const seriesPayload = categoryOrder.map((label) => ({label, points: series.get(label) ?? []}));
   const benchmarkPoints = benchmarkResult.rows.map((row) => ({
     date: row.date,
@@ -1884,7 +1892,7 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
 }));
 
 apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
-  await requireAuth(req, db());
+  const user = await requireAuth(req, db());
   const requestedMarket = strictMarket(req.query.market, true);
   const market = requestedMarket === "all" ? null : requestedMarket;
   const horizon = analysisHorizon(req.query.horizon);
@@ -1896,9 +1904,10 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
     WITH latest_events AS (
       SELECT DISTINCT ON (firebase_uid, market, ticker)
         id, firebase_uid, market, ticker, action, label, event_at_utc, signal_date,
-        close_price AS signal_price
+        close_price AS signal_price, scan_id, source_id
       FROM rating_events
-      WHERE ($1::text IS NULL OR market = $1)
+      WHERE firebase_uid = $5
+        AND ($1::text IS NULL OR market = $1)
       ORDER BY firebase_uid, market, ticker, event_at_utc DESC, id DESC
     ), latest_labels AS (
       SELECT * FROM latest_events
@@ -1907,7 +1916,7 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
         AND ($2::text IS NULL OR label = $2)
     )
     SELECT
-      labelled.market, labelled.ticker, labelled.label,
+      labelled.market, labelled.ticker, labelled.label, labelled.scan_id, labelled.source_id,
       labelled.event_at_utc, labelled.signal_date, labelled.signal_price,
       CASE WHEN $3::int = 0 THEN latest.close_price ELSE outcome.price_at_horizon END AS latest_price,
       CASE WHEN $3::int = 0 THEN latest.price_date ELSE NULL END AS latest_date,
@@ -1935,9 +1944,154 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
     ORDER BY return_percent ASC NULLS LAST, labelled.event_at_utc DESC
     LIMIT $4
     `,
-    [market, requestedLabel || null, horizon, limit]
+    [market, requestedLabel || null, horizon, limit, user.uid]
   );
   res.json({ok: true, market: requestedMarket, horizon_days: horizon, picks: result.rows});
+}));
+
+apiApp.post("/api/analysis/pick", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAnalyst(user);
+  const market = strictMarket(req.body.market) as "asx" | "us";
+  const ticker = normalizeAnalysisTicker(market, req.body.ticker);
+  const label = String(req.body.label ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (!VALID_LABELS.has(label)) throw new ApiError(400, "Invalid rating label");
+
+  const client = await db().connect();
+  try {
+    await client.query("BEGIN");
+    const latestEventResult = await client.query(
+        `
+        SELECT id, action, label, event_at_utc, signal_date, close_price, scan_id, source_id,
+               cache_file, provider, query, note, rank, market_cap, avg_volume, volume_ratio,
+               sector, industry, result_json
+        FROM rating_events
+        WHERE firebase_uid = $1 AND market = $2 AND ticker = $3
+        ORDER BY event_at_utc DESC, id DESC
+        LIMIT 1
+        `,
+        [user.uid, market, ticker]
+      );
+    const latestPriceResult = await client.query(
+        `
+        SELECT price_date, close_price
+        FROM price_history
+        WHERE market = $1 AND provider = 'yfinance' AND ticker = $2 AND close_price IS NOT NULL
+        ORDER BY price_date DESC
+        LIMIT 1
+        `,
+        [market, ticker]
+      );
+    const metricResult = await client.query(
+        `
+        SELECT market_cap, avg_volume_52 AS avg_volume, volume_ratio_52 AS volume_ratio,
+               sector, industry
+        FROM weekly_metrics
+        WHERE market = $1 AND provider = 'yfinance' AND ticker = $2
+        ORDER BY week_date DESC
+        LIMIT 1
+        `,
+        [market, ticker]
+      );
+    const latestPrice = latestPriceResult.rows[0];
+    if (!latestPrice) throw new ApiError(404, `${ticker} has no cached ${market.toUpperCase()} price data`);
+
+    const previous = latestEventResult.rows[0];
+    const previousIsActive = previous?.action === "label" && previous?.label;
+    const metric = metricResult.rows[0] ?? {};
+    const signalDate = previousIsActive && previous.signal_date ? previous.signal_date : latestPrice.price_date;
+    const signalPrice = previousIsActive && numberOrNull(previous.close_price) !== null
+      ? numberOrNull(previous.close_price)
+      : numberOrNull(latestPrice.close_price);
+    if (signalPrice === null || signalPrice <= 0) throw new ApiError(409, `${ticker} has no usable cached close price`);
+
+    const scanId = previousIsActive ? numberOrNull(previous.scan_id) : null;
+    const sourceId = previousIsActive ? numberOrNull(previous.source_id) : null;
+    const eventResultJson = previousIsActive && previous.result_json
+      ? previous.result_json
+      : {manual_pick: true, added_from: "analysis"};
+
+    if (scanId !== null && sourceId !== null) {
+      await client.query(
+        `
+        INSERT INTO user_picks
+          (firebase_uid, scan_id, source_id, market, ticker, label, created_at_utc, updated_at_utc)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+        ON CONFLICT (firebase_uid, scan_id, source_id, ticker) DO UPDATE SET
+          label = EXCLUDED.label,
+          updated_at_utc = NOW()
+        `,
+        [user.uid, scanId, sourceId, market, ticker, label]
+      );
+      await client.query(
+        `
+        INSERT INTO user_appraisals
+          (firebase_uid, scan_id, source_id, market, ticker, label, note, appraised_at_utc)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        ON CONFLICT (firebase_uid, scan_id, source_id, ticker) DO UPDATE SET
+          label = EXCLUDED.label,
+          note = COALESCE(EXCLUDED.note, user_appraisals.note),
+          appraised_at_utc = NOW()
+        `,
+        [user.uid, scanId, sourceId, market, ticker, label, previous.note ?? null]
+      );
+    }
+
+    const inserted = await client.query(
+      `
+      INSERT INTO rating_events
+        (event_at_utc, action, rated_by, market, cache_file, scan_id, provider, query,
+         ticker, label, note, rank, signal_date, close_price, market_cap, avg_volume,
+         volume_ratio, sector, industry, result_json, yahoo_url, source_id,
+         firebase_uid, user_email)
+      VALUES
+        (clock_timestamp(), 'label', $1, $2, $3, $4, $5, $6,
+         $7, $8, $9, $10, $11, $12, $13, $14,
+         $15, $16, $17, $18::jsonb, $19, $20, $21, $22)
+      RETURNING id, event_at_utc
+      `,
+      [
+        user.email ?? user.display_name ?? "anonymous",
+        market,
+        previous?.cache_file ?? MARKET_DEFAULTS[market].cache_file,
+        scanId,
+        previous?.provider ?? "yfinance",
+        previous?.query ?? null,
+        ticker,
+        label,
+        previous?.note ?? null,
+        previous?.rank ?? null,
+        signalDate,
+        signalPrice,
+        previous?.market_cap ?? metric.market_cap ?? null,
+        previous?.avg_volume ?? metric.avg_volume ?? null,
+        previous?.volume_ratio ?? metric.volume_ratio ?? null,
+        previous?.sector ?? metric.sector ?? null,
+        previous?.industry ?? metric.industry ?? null,
+        JSON.stringify(eventResultJson),
+        yahooUrl(ticker),
+        sourceId,
+        user.uid,
+        user.email
+      ]
+    );
+    await client.query("COMMIT");
+    res.json({
+      ok: true,
+      market,
+      ticker,
+      label,
+      signal_date: dateOnly(signalDate),
+      signal_price: signalPrice,
+      event: inserted.rows[0],
+      user
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }));
 
 apiApp.get("/api/analysis/insights", asyncRoute(async (req, res) => {
@@ -2002,7 +2156,7 @@ apiApp.get("/api/analysis/insights", asyncRoute(async (req, res) => {
            ROUND(return_percent::numeric, 2) AS return_percent,
            sector, industry, market_cap, avg_volume, volume_ratio
     FROM performance
-    WHERE label IN ('winner', 'potential_winner')
+    WHERE label = 'winner'
       AND return_percent < 0
     ORDER BY return_percent ASC, event_at_utc DESC
     LIMIT $3
@@ -2023,7 +2177,7 @@ apiApp.get("/api/analysis/insights", asyncRoute(async (req, res) => {
              ROUND(AVG(market_cap)::numeric, 0) AS average_market_cap,
              ROUND(AVG(volume_ratio)::numeric, 2) AS average_volume_ratio
       FROM performance
-      WHERE label IN ('winner', 'potential_winner')
+      WHERE label = 'winner'
       GROUP BY COALESCE(NULLIF(sector, ''), 'Unknown'), label
       UNION ALL
       SELECT 'Industry' AS dimension, COALESCE(NULLIF(industry, ''), 'Unknown') AS group_name, label,
@@ -2035,7 +2189,7 @@ apiApp.get("/api/analysis/insights", asyncRoute(async (req, res) => {
              ROUND(AVG(market_cap)::numeric, 0) AS average_market_cap,
              ROUND(AVG(volume_ratio)::numeric, 2) AS average_volume_ratio
       FROM performance
-      WHERE label IN ('winner', 'potential_winner')
+      WHERE label = 'winner'
       GROUP BY COALESCE(NULLIF(industry, ''), 'Unknown'), label
       UNION ALL
       SELECT 'Market Cap' AS dimension, market_cap_bucket AS group_name, label,
@@ -2047,7 +2201,7 @@ apiApp.get("/api/analysis/insights", asyncRoute(async (req, res) => {
              ROUND(AVG(market_cap)::numeric, 0) AS average_market_cap,
              ROUND(AVG(volume_ratio)::numeric, 2) AS average_volume_ratio
       FROM performance
-      WHERE label IN ('winner', 'potential_winner')
+      WHERE label = 'winner'
       GROUP BY market_cap_bucket, label
     )
     SELECT *,

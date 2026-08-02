@@ -200,17 +200,9 @@
       background: #246d42;
       border-color: #49b973;
     }
-    .label-btn.active[data-label="potential_winner"] {
-      background: #285f6d;
-      border-color: #58b8ce;
-    }
     .label-btn.active[data-label="needs_confirmation"] {
       background: #70451f;
       border-color: #df914f;
-    }
-    .label-btn.active[data-label="confirmed"] {
-      background: #225f50;
-      border-color: #55c3a2;
     }
     .label-btn.active[data-label="maybe"] {
       background: #6d5422;
@@ -221,9 +213,7 @@
       border-color: #d87268;
     }
     tr.label-winner td:first-child { border-left: 3px solid var(--accent); }
-    tr.label-potential_winner td:first-child { border-left: 3px solid var(--accent-2); }
     tr.label-needs_confirmation td:first-child { border-left: 3px solid #df914f; }
-    tr.label-confirmed td:first-child { border-left: 3px solid #55c3a2; }
     tr.label-maybe td:first-child { border-left: 3px solid var(--warn); }
     tr.label-bad td:first-child { border-left: 3px solid var(--bad); }
     .appraisal-current,
@@ -240,9 +230,7 @@
     }
     .appraisal-current { flex-basis: 100%; width: fit-content; }
     .appraisal-current[data-label="winner"], .company-appraisal[data-label="winner"] { color: #8fe1a9; border-color: #246d42; }
-    .appraisal-current[data-label="potential_winner"], .company-appraisal[data-label="potential_winner"] { color: #8dd7ff; border-color: #285f6d; }
     .appraisal-current[data-label="needs_confirmation"], .company-appraisal[data-label="needs_confirmation"] { color: #f2c14e; border-color: #70451f; }
-    .appraisal-current[data-label="confirmed"], .company-appraisal[data-label="confirmed"] { color: #78d9bd; border-color: #225f50; }
     .appraisal-current[data-label="maybe"], .company-appraisal[data-label="maybe"] { color: #dfc47c; border-color: #6d5422; }
     .appraisal-current[data-label="bad"], .company-appraisal[data-label="bad"] { color: #ef9a92; border-color: #73342f; }
     .analysis-sort {
@@ -277,9 +265,7 @@
       white-space: nowrap;
     }
     .analysis-category-pill[data-label="winner"] { color: #8fe1a9; border-color: #246d42; background: rgba(36, 109, 66, .18); }
-    .analysis-category-pill[data-label="potential_winner"] { color: #8dd7ff; border-color: #285f6d; background: rgba(40, 95, 109, .18); }
     .analysis-category-pill[data-label="needs_confirmation"] { color: #f2c14e; border-color: #70451f; background: rgba(112, 69, 31, .2); }
-    .analysis-category-pill[data-label="confirmed"] { color: #78d9bd; border-color: #225f50; background: rgba(34, 95, 80, .2); }
     .analysis-category-pill[data-label="maybe"] { color: #dfc47c; border-color: #6d5422; background: rgba(109, 84, 34, .18); }
     .analysis-category-pill[data-label="bad"] { color: #ef9a92; border-color: #73342f; background: rgba(115, 52, 47, .18); }
     tr.incomplete-ma td { background: rgba(242, 193, 78, 0.06); }
@@ -687,19 +673,13 @@
       text-align: center;
       pointer-events: none;
     }
-    .analysis-lower-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-      gap: 18px;
-      margin-bottom: 18px;
-    }
     .analysis-subsection { min-width: 0; }
-    .analysis-subsection .results-wrap { max-height: 290px; }
     .analysis-review {
       border: 1px solid #5d4a1f;
       border-radius: 6px;
       overflow: hidden;
       background: #12150f;
+      margin-bottom: 18px;
     }
     .analysis-review > .analysis-section-head {
       margin: 0;
@@ -709,6 +689,30 @@
       background: #2b2716;
     }
     .analysis-review > .analysis-section-head h3 { color: #f5d874; }
+    .analysis-review > .analysis-section-head > div:first-child {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+    }
+    .analysis-manual-add {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-left: auto;
+    }
+    .analysis-manual-add input {
+      width: 150px;
+      min-height: 32px;
+      text-transform: uppercase;
+    }
+    .analysis-manual-add button { min-height: 32px; }
+    .analysis-manual-status {
+      min-height: 0;
+      padding: 0 12px;
+      background: #2b2716;
+    }
+    .analysis-manual-status:not(:empty) { padding-bottom: 8px; }
     .analysis-review-chart-head {
       display: flex;
       align-items: center;
@@ -760,17 +764,57 @@
     .analysis-review tr[data-review-ticker]:hover td { background: rgba(242, 193, 78, .06); }
     .analysis-review tr[data-review-ticker].selected td { background: rgba(242, 193, 78, .11); }
     .analysis-review tr[data-review-ticker].selected td:first-child { border-left: 3px solid #f2c14e; }
+    .analysis-review-decision {
+      display: flex;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .analysis-review-decision button {
+      min-height: 29px;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .analysis-review-decision [data-confirm-label="winner"] { color: #8fe1a9; border-color: #246d42; }
+    .analysis-review-decision [data-confirm-label="bad"] { color: #ef9a92; border-color: #73342f; }
     .analysis-picks {
       padding-top: 12px;
       border-top: 1px solid var(--line);
     }
-    .analysis-picks .results-wrap {
-      position: relative;
-      max-height: min(56vh, 620px);
-      overflow: auto;
-      scrollbar-gutter: stable;
+    .analysis-pick-groups { display: grid; gap: 18px; }
+    .analysis-pick-group {
+      min-width: 0;
       border: 1px solid var(--line);
       border-radius: 6px;
+      overflow: hidden;
+    }
+    .analysis-pick-group-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #151b19;
+    }
+    .analysis-pick-group-head h4 { margin: 0; font-size: 15px; }
+    .analysis-pick-group-head span { color: var(--muted); font-size: 12px; }
+    .analysis-pick-group[data-group="winner"] { border-color: #246d42; }
+    .analysis-pick-group[data-group="winner"] .analysis-pick-group-head { background: rgba(36, 109, 66, .16); }
+    .analysis-pick-group[data-group="winner"] h4 { color: #8fe1a9; }
+    .analysis-pick-group[data-group="maybe"] { border-color: #6d5422; }
+    .analysis-pick-group[data-group="maybe"] .analysis-pick-group-head { background: rgba(109, 84, 34, .16); }
+    .analysis-pick-group[data-group="maybe"] h4 { color: #dfc47c; }
+    .analysis-pick-group[data-group="bad"] { border-color: #73342f; }
+    .analysis-pick-group[data-group="bad"] .analysis-pick-group-head { background: rgba(115, 52, 47, .16); }
+    .analysis-pick-group[data-group="bad"] h4 { color: #ef9a92; }
+    .analysis-picks .results-wrap {
+      position: relative;
+      max-height: min(42vh, 430px);
+      overflow: auto;
+      scrollbar-gutter: stable;
+      border: 0;
+      border-radius: 0;
     }
     .analysis-picks table {
       min-width: 880px;
@@ -788,37 +832,29 @@
     }
     .analysis-picks th:nth-child(1) { width: 8%; }
     .analysis-picks th:nth-child(2) { width: 12%; }
-    .analysis-picks th:nth-child(3) { width: 18%; }
-    .analysis-picks th:nth-child(4) { width: 15%; }
-    .analysis-picks th:nth-child(5) { width: 11%; }
-    .analysis-picks th:nth-child(6) { width: 11%; }
-    .analysis-picks th:nth-child(7) { width: 11%; }
-    .analysis-picks th:nth-child(8) { width: 14%; }
-    .analysis-picks th:nth-child(n+5) .analysis-sort {
+    .analysis-picks th:nth-child(3) { width: 17%; }
+    .analysis-picks th:nth-child(4) { width: 12%; }
+    .analysis-picks th:nth-child(5) { width: 12%; }
+    .analysis-picks th:nth-child(6) { width: 12%; }
+    .analysis-picks th:nth-child(7) { width: 17%; }
+    .analysis-picks th:nth-child(n+4) .analysis-sort {
       justify-content: flex-end;
       text-align: right;
     }
     .analysis-picks tr.label-winner td { background: rgba(36, 109, 66, .055); }
-    .analysis-picks tr.label-potential_winner td { background: rgba(40, 95, 109, .055); }
-    .analysis-picks tr.label-needs_confirmation td { background: rgba(112, 69, 31, .075); }
-    .analysis-picks tr.label-confirmed td { background: rgba(34, 95, 80, .065); }
     .analysis-picks tr.label-maybe td { background: rgba(109, 84, 34, .055); }
     .analysis-picks tr.label-bad td { background: rgba(115, 52, 47, .055); }
-    .analysis-picks-filter { width: 170px; min-height: 31px; }
     .analysis-insight-grid {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
       gap: 12px;
       margin-bottom: 14px;
     }
-    .analysis-picks table td:nth-child(5), .analysis-picks table td:nth-child(6),
-    .analysis-picks table td:nth-child(7), .analysis-picks table th:nth-child(5),
-    .analysis-picks table th:nth-child(6), .analysis-picks table th:nth-child(7) { text-align: right; }
-    .analysis-review table td:nth-child(5), .analysis-review table td:nth-child(6),
-    .analysis-review table th:nth-child(5), .analysis-review table th:nth-child(6),
-    .analysis-patterns table td:nth-child(5), .analysis-patterns table td:nth-child(6),
-    .analysis-patterns table td:nth-child(7), .analysis-patterns table th:nth-child(5),
-    .analysis-patterns table th:nth-child(6), .analysis-patterns table th:nth-child(7) { text-align: right; }
+    .analysis-picks table td:nth-child(4), .analysis-picks table td:nth-child(5),
+    .analysis-picks table td:nth-child(6), .analysis-picks table th:nth-child(4),
+    .analysis-picks table th:nth-child(5), .analysis-picks table th:nth-child(6) { text-align: right; }
+    .analysis-review table td:nth-child(4), .analysis-review table td:nth-child(5),
+    .analysis-review table th:nth-child(4), .analysis-review table th:nth-child(5) { text-align: right; }
     .return-positive { color: var(--accent); }
     .return-negative { color: var(--bad); }
     .return-neutral { color: var(--muted); }
@@ -1156,6 +1192,17 @@
     body.cloud-mode main { display: block; }
     body.cloud-mode aside { padding: 10px 14px; }
     body.cloud-mode .panel { margin-bottom: 10px; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
     @media (max-width: 940px) {
       main, body.cloud-mode main { display: block; }
       aside, body.cloud-mode aside { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -1172,7 +1219,6 @@
       .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .chart-controls { grid-template-columns: 1fr 1fr; }
       .analysis-insight-grid { grid-template-columns: 1fr; }
-      .analysis-lower-grid { grid-template-columns: 1fr; }
       .analysis-page { padding: 12px; }
     }
     @media (max-width: 520px) {
@@ -1221,7 +1267,9 @@
       .analysis-review-chart-title { align-items: flex-start; flex-direction: column; gap: 2px; }
       .analysis-statusbar { align-items: flex-start; flex-direction: column; gap: 4px; }
       .analysis-section-head { align-items: flex-start; flex-direction: column; gap: 3px; }
-      .analysis-picks-filter { width: 100%; }
+      .analysis-review > .analysis-section-head > div:first-child { align-items: flex-start; flex-direction: column; gap: 2px; }
+      .analysis-manual-add { width: 100%; margin-left: 0; }
+      .analysis-manual-add input { flex: 1; width: auto; min-width: 0; }
       main {
         min-height: calc(100vh - 82px);
       }
@@ -1593,6 +1641,37 @@
       <span>Benchmark <strong id="analysisBenchmarkName">-</strong></span>
       <span>Signals <strong id="analysisSignalRange">-</strong></span>
     </div>
+    <section class="analysis-subsection analysis-review" aria-labelledby="analysisReviewHeading">
+      <div class="analysis-section-head">
+        <div>
+          <h3 id="analysisReviewHeading">Needs confirmation</h3>
+          <span class="status-line" id="analysisReviewMeta"></span>
+        </div>
+        <form class="analysis-manual-add" id="analysisManualForm">
+          <label class="sr-only" for="analysisManualTicker">Ticker to add for confirmation</label>
+          <input id="analysisManualTicker" type="text" maxlength="20" autocomplete="off" placeholder="Add ticker">
+          <button id="analysisAddNeeds" type="submit">Add for review</button>
+        </form>
+      </div>
+      <div class="analysis-manual-status status-line" id="analysisManualStatus" aria-live="polite"></div>
+      <div class="analysis-review-chart-head">
+        <div class="analysis-review-chart-title">
+          <strong id="analysisReviewChartTitle">Select a stock to review</strong>
+          <span id="analysisReviewChartMeta">Daily candles, one year</span>
+        </div>
+        <button id="analysisReviewOpenMarket" type="button" hidden>Open full chart</button>
+      </div>
+      <div class="analysis-review-chart-box">
+        <canvas id="analysisReviewChart" role="img" aria-label="Price chart for the selected stock needing confirmation"></canvas>
+        <div class="analysis-review-chart-empty" id="analysisReviewChartEmpty">Select a stock in the table to view its chart.</div>
+      </div>
+      <div class="results-wrap">
+        <table>
+          <thead><tr><th>Market</th><th>Ticker</th><th>Selected</th><th>Return</th><th>Price date</th><th>Decision</th></tr></thead>
+          <tbody id="analysisReviewBody"><tr><td colspan="6" style="text-align:left;color:var(--muted)">No stocks currently need confirmation.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
     <section class="analysis-chart-section" aria-labelledby="analysisChartHeading">
       <div class="analysis-section-head">
         <h3 id="analysisChartHeading">Category return since appraisal</h3>
@@ -1604,73 +1683,54 @@
         <div class="analysis-chart-empty" id="analysisChartEmpty">No priced appraisals are available for this market and range.</div>
       </div>
     </section>
-    <div class="analysis-lower-grid">
-      <section class="analysis-subsection analysis-review">
-        <div class="analysis-section-head">
-          <h3>Needs confirmation</h3>
-          <span class="status-line" id="analysisReviewMeta"></span>
-        </div>
-        <div class="analysis-review-chart-head">
-          <div class="analysis-review-chart-title">
-            <strong id="analysisReviewChartTitle">Select a stock to review</strong>
-            <span id="analysisReviewChartMeta">Daily candles, one year</span>
-          </div>
-          <button id="analysisReviewOpenMarket" type="button" hidden>Open full chart</button>
-        </div>
-        <div class="analysis-review-chart-box">
-          <canvas id="analysisReviewChart" role="img" aria-label="Price chart for the selected stock needing confirmation"></canvas>
-          <div class="analysis-review-chart-empty" id="analysisReviewChartEmpty">Select a stock in the table to view its chart.</div>
-        </div>
-        <div class="results-wrap">
-          <table>
-            <thead><tr><th>Market</th><th>Ticker</th><th>Appraisal</th><th>Selected</th><th>Return</th><th>Price date</th></tr></thead>
-            <tbody id="analysisReviewBody"><tr><td colspan="6" style="text-align:left;color:var(--muted)">No stocks currently need confirmation.</td></tr></tbody>
-          </table>
-        </div>
-      </section>
-      <section class="analysis-subsection analysis-patterns">
-        <div class="analysis-section-head">
-          <h3>Winner and potential-winner trends</h3>
-          <span class="status-line" id="analysisPatternMeta"></span>
-        </div>
-        <div class="results-wrap">
-          <table>
-            <thead><tr><th>Type</th><th>Group</th><th>Appraisal</th><th>Picks</th><th>Hit Rate</th><th>Avg Return</th><th>Avg Cap</th></tr></thead>
-            <tbody id="analysisPatternBody"><tr><td colspan="7" style="text-align:left;color:var(--muted)">No pattern data loaded.</td></tr></tbody>
-          </table>
-        </div>
-      </section>
-    </div>
-    <section class="analysis-picks">
+    <section class="analysis-picks" aria-labelledby="analysisPicksHeading">
       <div class="analysis-section-head">
-        <h3>Current picks</h3>
-        <div class="actions" style="margin:0">
-          <select class="analysis-picks-filter" id="analysisLabelFilter" aria-label="Filter picks by appraisal">
-            <option value="">All appraisal groups</option>
-            <option value="winner">Winner</option>
-            <option value="potential_winner">Potential winner</option>
-            <option value="needs_confirmation">Needs confirmation</option>
-            <option value="confirmed">Confirmed</option>
-            <option value="maybe">Maybe</option>
-            <option value="bad">Bad</option>
-          </select>
-          <span class="status-line" id="analysisPickMeta"></span>
-        </div>
+        <h3 id="analysisPicksHeading">Current picks</h3>
+        <span class="status-line" id="analysisPickMeta"></span>
       </div>
-      <div class="results-wrap">
-        <table>
-          <thead id="analysisPicksHead"><tr>
-            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="market">Market</button></th>
-            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="ticker">Ticker</button></th>
-            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="label">Appraisal</button></th>
-            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="event_at_utc">Selected</button></th>
-            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="signal_price">Signal</button></th>
-            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="latest_price">Price</button></th>
-            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="return_percent">Return</button></th>
-            <th aria-sort="none"><button class="analysis-sort" type="button" data-sort-key="latest_date">Date</button></th>
-          </tr></thead>
-          <tbody id="analysisPicksBody"><tr><td colspan="8" style="text-align:left;color:var(--muted)">No appraisals loaded.</td></tr></tbody>
-        </table>
+      <div class="analysis-pick-groups">
+        <section class="analysis-pick-group" data-group="winner">
+          <div class="analysis-pick-group-head"><h4>Winner</h4><span id="analysisWinnerMeta"></span></div>
+          <div class="results-wrap">
+            <table><thead><tr>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="market">Market</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="ticker">Ticker</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="event_at_utc">Selected</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="signal_price">Signal</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="latest_price">Price</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="return_percent">Return</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="latest_date">Date</button></th>
+            </tr></thead><tbody id="analysisWinnerBody"></tbody></table>
+          </div>
+        </section>
+        <section class="analysis-pick-group" data-group="maybe">
+          <div class="analysis-pick-group-head"><h4>Maybe</h4><span id="analysisMaybeMeta"></span></div>
+          <div class="results-wrap">
+            <table><thead><tr>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="market">Market</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="ticker">Ticker</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="event_at_utc">Selected</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="signal_price">Signal</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="latest_price">Price</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="return_percent">Return</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="latest_date">Date</button></th>
+            </tr></thead><tbody id="analysisMaybeBody"></tbody></table>
+          </div>
+        </section>
+        <section class="analysis-pick-group" data-group="bad">
+          <div class="analysis-pick-group-head"><h4>Bad</h4><span id="analysisBadMeta"></span></div>
+          <div class="results-wrap">
+            <table><thead><tr>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="market">Market</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="ticker">Ticker</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="event_at_utc">Selected</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="signal_price">Signal</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="latest_price">Price</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="return_percent">Return</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="latest_date">Date</button></th>
+            </tr></thead><tbody id="analysisBadBody"></tbody></table>
+          </div>
+        </section>
       </div>
     </section>
   </section>
@@ -1812,7 +1872,11 @@
     let lastAnalysisReviewPicks = [];
     let lastReviewChart = null;
     let reviewChartRequestToken = 0;
-    let analysisPickSort = {key: "return_percent", direction: "asc"};
+    const analysisGroupSort = {
+      winner: {key: "return_percent", direction: "desc"},
+      maybe: {key: "return_percent", direction: "desc"},
+      bad: {key: "return_percent", direction: "asc"}
+    };
     let lastFeedbackItems = [];
     let currentScanId = null;
     let lastExportStoragePath = null;
@@ -1840,9 +1904,7 @@
     };
     const analysisSeriesColors = {
       winner: "#54d693",
-      potential_winner: "#7dcfff",
       needs_confirmation: "#f2c14e",
-      confirmed: "#78d9bd",
       maybe: "#b58cff",
       bad: "#ff7b72",
       all_picks: "#f2f5f3",
@@ -2407,6 +2469,34 @@
           }
         });
       });
+      document.querySelectorAll("#analysisReviewBody [data-confirm-label]").forEach((button) => {
+        button.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          const tableRow = button.closest("tr[data-review-ticker]");
+          if (!tableRow) return;
+          const buttons = tableRow.querySelectorAll("[data-confirm-label]");
+          buttons.forEach((item) => { item.disabled = true; });
+          $("analysisManualStatus").textContent = `Saving ${tableRow.dataset.reviewTicker} as ${labelText(button.dataset.confirmLabel)}...`;
+          $("analysisManualStatus").className = "analysis-manual-status status-line warn";
+          try {
+            await api("/api/analysis/pick", {
+              method: "POST",
+              body: JSON.stringify({
+                market: tableRow.dataset.reviewMarket,
+                ticker: tableRow.dataset.reviewTicker,
+                label: button.dataset.confirmLabel
+              })
+            });
+            $("analysisManualStatus").textContent = `${tableRow.dataset.reviewTicker} moved to ${labelText(button.dataset.confirmLabel)}.`;
+            $("analysisManualStatus").className = "analysis-manual-status status-line ok";
+            await loadAnalysis();
+          } catch (error) {
+            $("analysisManualStatus").textContent = error.message;
+            $("analysisManualStatus").className = "analysis-manual-status status-line bad";
+            buttons.forEach((item) => { item.disabled = false; });
+          }
+        });
+      });
     }
 
     function renderAnalysisReview(reviewPicks) {
@@ -2419,10 +2509,13 @@
       >
         <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
         <td><span class="ticker">${escapeHtml(row.ticker)}</span></td>
-        <td><span class="analysis-category-pill" data-label="${escapeHtml(row.label)}">${labelText(row.label)}</span></td>
         <td>${row.event_at_utc ? new Date(row.event_at_utc).toLocaleDateString() : "-"}</td>
         <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
         <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
+        <td><div class="analysis-review-decision">
+          <button type="button" data-confirm-label="winner" title="Confirm ${escapeHtml(row.ticker)} as a winner">Winner</button>
+          <button type="button" data-confirm-label="bad" title="Confirm ${escapeHtml(row.ticker)} as bad">Bad</button>
+        </div></td>
       </tr>`).join("") : '<tr><td colspan="6" style="text-align:left;color:var(--muted)">No stocks currently need confirmation.</td></tr>';
       $("analysisReviewMeta").textContent = `${fmt.format(reviewPicks.length)} awaiting review`;
       bindAnalysisReviewRows();
@@ -2443,17 +2536,6 @@
     }
 
     function analysisPickSortValue(row, key) {
-      if (key === "label") {
-        const order = {
-          winner: 1,
-          confirmed: 2,
-          potential_winner: 3,
-          needs_confirmation: 4,
-          maybe: 5,
-          bad: 6
-        };
-        return order[row.label] ?? 99;
-      }
       if (["event_at_utc", "latest_date"].includes(key)) {
         const value = key === "latest_date" ? (row.latest_date || row.measured_at_utc) : row[key];
         const time = value ? new Date(value).getTime() : NaN;
@@ -2468,8 +2550,8 @@
       return value || null;
     }
 
-    function sortedAnalysisPicks(picks) {
-      const {key, direction} = analysisPickSort;
+    function sortedAnalysisPicks(picks, sortState) {
+      const {key, direction} = sortState;
       const multiplier = direction === "desc" ? -1 : 1;
       return picks.map((row, index) => ({row, index})).sort((left, right) => {
         const a = analysisPickSortValue(left.row, key);
@@ -2484,55 +2566,61 @@
       }).map((item) => item.row);
     }
 
-    function syncAnalysisSortHeaders() {
-      document.querySelectorAll(".analysis-sort").forEach((button) => {
-        const active = button.dataset.sortKey === analysisPickSort.key;
+    function syncAnalysisSortHeaders(group) {
+      const sortState = analysisGroupSort[group];
+      document.querySelectorAll(`.analysis-sort[data-analysis-group="${group}"]`).forEach((button) => {
+        const active = button.dataset.sortKey === sortState.key;
         const heading = button.closest("th");
         button.toggleAttribute("data-direction", active);
-        if (active) button.dataset.direction = analysisPickSort.direction;
+        if (active) button.dataset.direction = sortState.direction;
         else delete button.dataset.direction;
-        heading?.setAttribute("aria-sort", active ? (analysisPickSort.direction === "asc" ? "ascending" : "descending") : "none");
+        heading?.setAttribute("aria-sort", active ? (sortState.direction === "asc" ? "ascending" : "descending") : "none");
       });
     }
 
-    function changeAnalysisPickSort(key) {
-      if (analysisPickSort.key === key) {
-        analysisPickSort.direction = analysisPickSort.direction === "asc" ? "desc" : "asc";
+    function changeAnalysisPickSort(group, key) {
+      const sortState = analysisGroupSort[group];
+      if (!sortState) return;
+      if (sortState.key === key) {
+        sortState.direction = sortState.direction === "asc" ? "desc" : "asc";
       } else {
-        analysisPickSort = {
-          key,
-          direction: ["event_at_utc", "latest_date", "return_percent"].includes(key) ? "desc" : "asc"
-        };
+        sortState.key = key;
+        sortState.direction = ["event_at_utc", "latest_date", "return_percent"].includes(key) ? "desc" : "asc";
       }
       renderAnalysisPicks();
     }
 
-    function renderAnalysisPicks() {
-      const label = $("analysisLabelFilter").value;
-      const filtered = label ? lastAnalysisPicks.filter((row) => row.label === label) : lastAnalysisPicks;
-      const picks = sortedAnalysisPicks(filtered);
-      $("analysisPicksBody").innerHTML = picks.length ? picks.map((row) => `<tr class="label-${escapeHtml(row.label || "")}">
+    function analysisPickRows(picks, label) {
+      return picks.length ? picks.map((row) => `<tr class="label-${label}">
         <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
         <td><a class="ticker analysis-chart-link" href="#" data-market="${escapeHtml(row.market)}" data-ticker="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</a></td>
-        <td><button class="analysis-category-pill" type="button" data-analysis-label-filter="${escapeHtml(row.label)}" data-label="${escapeHtml(row.label)}" title="Show ${labelText(row.label)} picks">${labelText(row.label)}</button></td>
         <td>${row.event_at_utc ? new Date(row.event_at_utc).toLocaleDateString() : "-"}</td>
         <td>${Number.isFinite(Number(row.signal_price)) ? Number(row.signal_price).toFixed(2) : "-"}</td>
         <td>${Number.isFinite(Number(row.latest_price)) ? Number(row.latest_price).toFixed(2) : "-"}</td>
         <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
         <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
-      </tr>`).join("") : '<tr><td colspan="8" style="text-align:left;color:var(--muted)">No active picks match this appraisal group.</td></tr>';
-      $("analysisPickMeta").textContent = `${fmt.format(picks.length)} of ${fmt.format(lastAnalysisPicks.length)}`;
-      syncAnalysisSortHeaders();
-      bindAnalysisChartLinks();
-      document.querySelectorAll("#analysisPicksBody [data-analysis-label-filter]").forEach((button) => {
-        button.addEventListener("click", () => {
-          $("analysisLabelFilter").value = button.dataset.analysisLabelFilter;
-          renderAnalysisPicks();
-        });
-      });
+      </tr>`).join("") : `<tr><td colspan="7" style="text-align:left;color:var(--muted)">No ${labelText(label).toLowerCase()} picks.</td></tr>`;
     }
 
-    function renderAnalysis(payload, picks, reviewPicks, insights = {}) {
+    function renderAnalysisPicks() {
+      const groups = [
+        ["winner", "analysisWinnerBody", "analysisWinnerMeta"],
+        ["maybe", "analysisMaybeBody", "analysisMaybeMeta"],
+        ["bad", "analysisBadBody", "analysisBadMeta"]
+      ];
+      let visibleCount = 0;
+      groups.forEach(([label, bodyId, metaId]) => {
+        const picks = sortedAnalysisPicks(lastAnalysisPicks.filter((row) => row.label === label), analysisGroupSort[label]);
+        visibleCount += picks.length;
+        $(bodyId).innerHTML = analysisPickRows(picks, label);
+        $(metaId).textContent = `${fmt.format(picks.length)} ${picks.length === 1 ? "pick" : "picks"}`;
+        syncAnalysisSortHeaders(label);
+      });
+      $("analysisPickMeta").textContent = `${fmt.format(visibleCount)} active picks`;
+      bindAnalysisChartLinks();
+    }
+
+    function renderAnalysis(payload, picks, reviewPicks) {
       lastAnalysisPayload = payload;
       lastAnalysisPicks = picks;
       const coverage = payload.coverage || {};
@@ -2553,18 +2641,6 @@
       drawAnalysisChart();
 
       renderAnalysisReview(reviewPicks);
-
-      const patterns = insights.patterns || [];
-      $("analysisPatternBody").innerHTML = patterns.length ? patterns.map((row) => {
-        const hitRate = Number.isFinite(Number(row.hit_rate_percent)) ? `${Number(row.hit_rate_percent).toFixed(1)}%` : "-";
-        return `<tr>
-          <td>${escapeHtml(row.dimension)}</td><td>${escapeHtml(row.group_name)}</td><td>${labelText(row.label)}</td>
-          <td>${fmt.format(Number(row.pick_count || 0))}</td><td>${hitRate}</td>
-          <td class="${returnClass(row.average_return_percent)}">${returnText(row.average_return_percent)}</td>
-          <td>${shortMoney(row.average_market_cap)}</td>
-        </tr>`;
-      }).join("") : '<tr><td colspan="7" style="text-align:left;color:var(--muted)">More winner and potential-winner picks are needed before common trends can be measured.</td></tr>';
-      $("analysisPatternMeta").textContent = `${fmt.format(patterns.length)} measured groups`;
       renderAnalysisPicks();
     }
 
@@ -2575,19 +2651,47 @@
       const interval = encodeURIComponent($("analysisInterval").value);
       const range = encodeURIComponent($("analysisRange").value);
       try {
-        const [timeseriesPayload, picksPayload, reviewPayload, insightsPayload] = await Promise.all([
+        const [timeseriesPayload, picksPayload, reviewPayload] = await Promise.all([
           api(`/api/analysis/timeseries?market=${market}&interval=${interval}&range=${range}`),
           api(`/api/analysis/picks?market=${market}&horizon=0&limit=5000`),
-          api(`/api/analysis/picks?market=${market}&label=needs_confirmation&horizon=0&limit=5000`),
-          api(`/api/analysis/insights?market=${market}&horizon=0`)
+          api(`/api/analysis/picks?market=${market}&label=needs_confirmation&horizon=0&limit=5000`)
         ]);
-        renderAnalysis(timeseriesPayload, picksPayload.picks || [], reviewPayload.picks || [], insightsPayload);
+        renderAnalysis(timeseriesPayload, picksPayload.picks || [], reviewPayload.picks || []);
         $("analysisStatus").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
         $("analysisStatus").className = "status-line ok";
       } catch (error) {
         $("analysisStatus").textContent = error.message;
         $("analysisStatus").className = "status-line bad";
         $("analysisChartMeta").textContent = "Performance data could not be loaded";
+      }
+    }
+
+    async function addAnalysisNeedsConfirmation(event) {
+      event.preventDefault();
+      const button = $("analysisAddNeeds");
+      const ticker = $("analysisManualTicker").value.trim();
+      if (!ticker) {
+        $("analysisManualStatus").textContent = "Enter a ticker to add.";
+        $("analysisManualStatus").className = "analysis-manual-status status-line bad";
+        return;
+      }
+      button.disabled = true;
+      $("analysisManualStatus").textContent = `Adding ${ticker.toUpperCase()} for review...`;
+      $("analysisManualStatus").className = "analysis-manual-status status-line warn";
+      try {
+        const payload = await api("/api/analysis/pick", {
+          method: "POST",
+          body: JSON.stringify({market: $("analysisMarket").value, ticker, label: "needs_confirmation"})
+        });
+        $("analysisManualTicker").value = "";
+        $("analysisManualStatus").textContent = `${payload.ticker} added to Needs Confirmation.`;
+        $("analysisManualStatus").className = "analysis-manual-status status-line ok";
+        await loadAnalysis();
+      } catch (error) {
+        $("analysisManualStatus").textContent = error.message;
+        $("analysisManualStatus").className = "analysis-manual-status status-line bad";
+      } finally {
+        button.disabled = false;
       }
     }
 
@@ -3480,9 +3584,7 @@
 
     function labelText(label) {
       if (label === "winner") return "Winner";
-      if (label === "potential_winner") return "Potential Winner";
       if (label === "needs_confirmation") return "Needs Confirmation";
-      if (label === "confirmed") return "Confirmed";
       if (label === "maybe") return "Maybe";
       if (label === "bad") return "Bad";
       return "";
@@ -3492,7 +3594,6 @@
       const labels = [
         ["winner", "Winner", "Winner"],
         ["needs_confirmation", "Needs confirm", "Needs Confirmation"],
-        ["confirmed", "Confirmed", "Confirmed"],
         ["maybe", "Maybe", "Maybe"],
         ["bad", "Bad", "Bad"]
       ];
@@ -3515,7 +3616,7 @@
     function applyRowLabel(ticker, label) {
       const row = document.querySelector(`tr[data-ticker="${ticker}"]`);
       if (!row) return;
-      row.classList.remove("label-winner", "label-potential_winner", "label-needs_confirmation", "label-confirmed", "label-maybe", "label-bad");
+      row.classList.remove("label-winner", "label-needs_confirmation", "label-maybe", "label-bad");
       if (label) row.classList.add(`label-${label}`);
       const current = row.querySelector(".appraisal-current");
       if (current) {
@@ -3672,7 +3773,7 @@
       });
     });
     $("analysisRange").addEventListener("change", loadAnalysis);
-    $("analysisLabelFilter").addEventListener("change", renderAnalysisPicks);
+    $("analysisManualForm").addEventListener("submit", addAnalysisNeedsConfirmation);
     $("analysisReviewOpenMarket").addEventListener("click", () => {
       const market = $("analysisReviewOpenMarket").dataset.market;
       const ticker = $("analysisReviewOpenMarket").dataset.ticker;
@@ -3683,7 +3784,7 @@
       loadChart(ticker, true);
     });
     document.querySelectorAll(".analysis-sort").forEach((button) => {
-      button.addEventListener("click", () => changeAnalysisPickSort(button.dataset.sortKey));
+      button.addEventListener("click", () => changeAnalysisPickSort(button.dataset.analysisGroup, button.dataset.sortKey));
     });
     $("marketSelect").addEventListener("change", applyMarketDefaults);
     $("marketAsx").addEventListener("click", () => setMarket("asx"));

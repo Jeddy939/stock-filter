@@ -1,8 +1,6 @@
 export const VALID_LABELS = new Set([
   "winner",
-  "potential_winner",
   "needs_confirmation",
-  "confirmed",
   "maybe",
   "bad"
 ]);

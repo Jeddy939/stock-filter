@@ -6,19 +6,18 @@ const {
   normalizeCompanyProfile,
   VALID_LABELS
 } = require("../lib/market.js");
-const {applyLatestAppraisals, buildChartSeries, manualRefreshPayload} = require("../lib/api.js");
+const {applyLatestAppraisals, buildChartSeries, manualRefreshPayload, normalizeAnalysisTicker} = require("../lib/api.js");
 const {normalizeFeedbackInput, normalizeFeedbackStatus} = require("../lib/feedback.js");
 
 assert.deepEqual([...VALID_LABELS], [
   "winner",
-  "potential_winner",
   "needs_confirmation",
-  "confirmed",
   "maybe",
   "bad"
 ]);
 assert.equal(VALID_LABELS.has("needs_confirmation"), true);
-assert.equal(VALID_LABELS.has("confirmed"), true);
+assert.equal(VALID_LABELS.has("potential_winner"), false);
+assert.equal(VALID_LABELS.has("confirmed"), false);
 assert.equal(VALID_LABELS.has("needs confirmation"), false);
 assert.equal(VALID_LABELS.has("clear"), false);
 
@@ -87,10 +86,10 @@ assert.ok(youngWeeklyChart.movingAverages["180"].every((value) => value === null
 
 const crossScanAppraisal = applyLatestAppraisals(
   [{ticker: "CBA.AX", scan_id: 900}],
-  [{ticker: "CBA.AX", action: "label", label: "confirmed", note: "Checked", event_at_utc: "2026-07-24T00:00:00Z"}]
+  [{ticker: "CBA.AX", action: "label", label: "winner", note: "Checked", event_at_utc: "2026-07-24T00:00:00Z"}]
 )[0];
 assert.equal(crossScanAppraisal.scan_id, 900);
-assert.equal(crossScanAppraisal.label, "confirmed");
+assert.equal(crossScanAppraisal.label, "winner");
 assert.equal(crossScanAppraisal.personal_note, "Checked");
 
 const clearedAppraisal = applyLatestAppraisals(
@@ -109,6 +108,10 @@ assert.equal(manualUsRefresh.workers, 1);
 assert.equal(manualUsRefresh.scheduled, false);
 assert.equal(manualUsRefresh.manual, true);
 assert.throws(() => manualRefreshPayload({}), /Market must be asx or us/);
+assert.equal(normalizeAnalysisTicker("asx", "cba"), "CBA.AX");
+assert.equal(normalizeAnalysisTicker("asx", "CBA.AX"), "CBA.AX");
+assert.equal(normalizeAnalysisTicker("us", "ibrx"), "IBRX");
+assert.throws(() => normalizeAnalysisTicker("us", "bad ticker!"), /valid stock ticker/);
 
 assert.deepEqual(normalizeFeedbackInput({
   category: " Data ",
