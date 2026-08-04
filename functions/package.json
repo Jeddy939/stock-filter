@@ -10,7 +10,8 @@
     "build": "tsc",
     "serve": "npm run build && firebase emulators:start --only functions,hosting",
     "deploy": "npm run build && firebase deploy --only functions",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "npm run build && node test/screen-config.test.cjs && node test/request-policy.test.cjs && node test/market.test.cjs && node test/analysis-ui.test.cjs && node test/ip-rate-limit.test.cjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -91,6 +91,15 @@ def _date_string(value) -> str:
     return _coerce_date(value).isoformat()
 
 
+def _history_download_end(value=None, now=None) -> datetime:
+    """Return the exclusive yfinance cutoff at a stable UTC date boundary."""
+
+    if value:
+        return datetime.combine(_coerce_date(value), datetime.min.time())
+    reference = now or datetime.now(timezone.utc)
+    return datetime.combine(_coerce_date(reference) + timedelta(days=1), datetime.min.time())
+
+
 def _cache_connect(cache_file: str) -> sqlite3.Connection:
     """Open and initialize the SQLite cache."""
 
@@ -621,6 +630,9 @@ def _normalize_ticker(raw_ticker: str, is_asx_list: bool) -> str:
     ticker = re.sub(r"\s+", "", ticker)
     if ticker.startswith("ASX:"):
         ticker = ticker[4:]
+    if ticker.startswith("^"):
+        index_symbol = re.sub(r"[^A-Z0-9.\-]", "", ticker[1:])
+        return f"^{index_symbol}" if index_symbol else ""
     ticker = re.sub(r"[^A-Z0-9.\-]", "", ticker)
 
     if not ticker or ticker in _HEADER_TOKENS:
@@ -892,6 +904,19 @@ def _download_stooq_historical_data(
     return historical_data, missing_tickers
 
 
+def _extract_single_ticker_frame(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    """Flatten either yfinance MultiIndex orientation for one ticker."""
+
+    if data is None or data.empty:
+        return pd.DataFrame()
+    if not isinstance(data.columns, pd.MultiIndex):
+        return data.dropna(how="all")
+    for level in range(data.columns.nlevels):
+        if ticker in set(data.columns.get_level_values(level)):
+            return data.xs(ticker, axis=1, level=level).dropna(how="all")
+    return pd.DataFrame()
+
+
 def _extract_histories_from_frame(chunk: List[str], data: pd.DataFrame) -> Dict[str, pd.DataFrame]:
     """Normalises the output of ``yfinance.download`` into ticker keyed frames."""
 
@@ -903,15 +928,13 @@ def _extract_histories_from_frame(chunk: List[str], data: pd.DataFrame) -> Dict[
 
     histories: Dict[str, pd.DataFrame] = {}
     if isinstance(data.columns, pd.MultiIndex):
-        available = set(data.columns.get_level_values(0))
         for ticker in chunk:
-            if ticker in available:
-                hist = data[ticker].dropna(how="all")
-                if not hist.empty:
-                    histories[ticker] = hist
-    else:
+            hist = _extract_single_ticker_frame(data, ticker)
+            if not hist.empty:
+                histories[ticker] = hist
+    elif chunk:
         ticker = chunk[0]
-        hist = data.dropna(how="all")
+        hist = _extract_single_ticker_frame(data, ticker)
         if not hist.empty:
             histories[ticker] = hist
 
@@ -972,7 +995,7 @@ def _download_chunk_sequential(
                 failures.add(ticker)
                 break
             else:
-                data = data.dropna(how="all")
+                data = _extract_single_ticker_frame(data, ticker)
                 if data.empty:
                     failures.add(ticker)
                 else:
@@ -1371,6 +1394,7 @@ def fetch_stock_data(
     max_rate_limit_retries: int = DEFAULT_RATE_LIMIT_RETRIES,
     stop_on_rate_limit: bool = DEFAULT_STOP_ON_RATE_LIMIT,
     export_json: bool = True,
+    history_end_date: Optional[str] = None,
 ) -> bool:
     """Fetches historical and info data for tickers and saves to ``output``.
 
@@ -1397,6 +1421,9 @@ def fetch_stock_data(
     history_refresh_days:
         Number of days before the latest cached bar to refetch so recent bars
         can be corrected or adjusted.
+    history_end_date:
+        Exclusive history cutoff shared by every batch. Defaults to tomorrow's
+        UTC date so yfinance includes the latest completed daily session.
     prune_missing_tickers:
         Create a new ticker file without attempted missing-history tickers.
         The source ticker file is left unchanged.
@@ -1447,7 +1474,7 @@ def fetch_stock_data(
     start_time = time.time()
 
     print("\n--- Step 1 of 3: Batch fetching historical data ---")
-    end_date = datetime.now()
+    end_date = _history_download_end(history_end_date)
     start_date = end_date - pd.DateOffset(years=years)
     start_dt = start_date.to_pydatetime() if hasattr(start_date, "to_pydatetime") else start_date
     end_dt = end_date.to_pydatetime() if hasattr(end_date, "to_pydatetime") else end_date

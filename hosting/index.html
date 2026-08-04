@@ -20,6 +20,7 @@
       --shadow: rgba(0, 0, 0, .25);
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body {
       margin: 0;
       font: 14px/1.45 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
@@ -31,16 +32,14 @@
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      padding: 14px 20px;
+      padding: 8px 14px;
       border-bottom: 1px solid var(--line);
       background: #12161b;
-      position: sticky;
-      top: 0;
-      z-index: 2;
+      position: static;
     }
     h1 {
       margin: 0;
-      font-size: 18px;
+      font-size: 17px;
       font-weight: 650;
       letter-spacing: 0;
     }
@@ -71,10 +70,10 @@
       border-radius: 6px;
       box-shadow: 0 3px 12px var(--shadow);
     }
-    .metric { padding: 12px; min-height: 78px; }
+    .metric { padding: 8px 10px; min-height: 58px; }
     .metric span { color: var(--muted); display: block; font-size: 12px; }
-    .metric strong { display: block; font-size: 22px; margin-top: 6px; }
-    .panel { padding: 14px; margin-bottom: 14px; }
+    .metric strong { display: block; font-size: 18px; margin-top: 3px; }
+    .panel { padding: 10px; margin-bottom: 10px; }
     .panel h2 {
       margin: 0 0 12px;
       font-size: 14px;
@@ -87,7 +86,7 @@
       font-size: 12px;
       margin: 9px 0 4px;
     }
-    input, select {
+    input, select, textarea {
       width: 100%;
       background: #0e1217;
       color: var(--text);
@@ -97,6 +96,7 @@
       padding: 6px 9px;
       font: inherit;
     }
+    textarea { resize: vertical; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
     .actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
@@ -117,7 +117,7 @@
       background: var(--panel-2);
       color: var(--text);
       border-radius: 5px;
-      min-height: 36px;
+      min-height: 32px;
       padding: 7px 12px;
       font: inherit;
       cursor: pointer;
@@ -135,6 +135,21 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+    #topStatus {
+      min-height: 24px;
+      max-width: min(44vw, 620px);
+      padding: 2px 5px;
+      border: 0;
+      background: transparent;
+      text-align: left;
+    }
+    #topStatus:disabled { opacity: 1; cursor: default; }
+    #topStatus.is-clickable {
+      cursor: pointer;
+      text-decoration: underline;
+      text-decoration-style: dotted;
+      text-underline-offset: 3px;
     }
     table {
       width: 100%;
@@ -171,8 +186,9 @@
     .label-cell {
       display: flex;
       gap: 5px;
-      justify-content: flex-end;
+      justify-content: flex-start;
       align-items: center;
+      flex-wrap: wrap;
     }
     .label-btn {
       min-height: 28px;
@@ -184,9 +200,9 @@
       background: #246d42;
       border-color: #49b973;
     }
-    .label-btn.active[data-label="potential_winner"] {
-      background: #285f6d;
-      border-color: #58b8ce;
+    .label-btn.active[data-label="needs_confirmation"] {
+      background: #70451f;
+      border-color: #df914f;
     }
     .label-btn.active[data-label="maybe"] {
       background: #6d5422;
@@ -197,9 +213,61 @@
       border-color: #d87268;
     }
     tr.label-winner td:first-child { border-left: 3px solid var(--accent); }
-    tr.label-potential_winner td:first-child { border-left: 3px solid var(--accent-2); }
+    tr.label-needs_confirmation td:first-child { border-left: 3px solid #df914f; }
     tr.label-maybe td:first-child { border-left: 3px solid var(--warn); }
     tr.label-bad td:first-child { border-left: 3px solid var(--bad); }
+    .appraisal-current,
+    .company-appraisal {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 7px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .appraisal-current { flex-basis: 100%; width: fit-content; }
+    .appraisal-current[data-label="winner"], .company-appraisal[data-label="winner"] { color: #8fe1a9; border-color: #246d42; }
+    .appraisal-current[data-label="needs_confirmation"], .company-appraisal[data-label="needs_confirmation"] { color: #f2c14e; border-color: #70451f; }
+    .appraisal-current[data-label="maybe"], .company-appraisal[data-label="maybe"] { color: #dfc47c; border-color: #6d5422; }
+    .appraisal-current[data-label="bad"], .company-appraisal[data-label="bad"] { color: #ef9a92; border-color: #73342f; }
+    .analysis-sort {
+      width: 100%;
+      min-height: 28px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .analysis-sort:hover { color: var(--text); background: transparent; }
+    .analysis-sort[data-direction]::after {
+      content: "";
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+    }
+    .analysis-sort[data-direction="asc"]::after { border-bottom: 6px solid currentColor; }
+    .analysis-sort[data-direction="desc"]::after { border-top: 6px solid currentColor; }
+    .analysis-category-pill {
+      min-height: 24px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .analysis-category-pill[data-label="winner"] { color: #8fe1a9; border-color: #246d42; background: rgba(36, 109, 66, .18); }
+    .analysis-category-pill[data-label="needs_confirmation"] { color: #f2c14e; border-color: #70451f; background: rgba(112, 69, 31, .2); }
+    .analysis-category-pill[data-label="maybe"] { color: #dfc47c; border-color: #6d5422; background: rgba(109, 84, 34, .18); }
+    .analysis-category-pill[data-label="bad"] { color: #ef9a92; border-color: #73342f; background: rgba(115, 52, 47, .18); }
     tr.incomplete-ma td { background: rgba(242, 193, 78, 0.06); }
     tr.incomplete-ma td:nth-child(7) { color: var(--warn); }
     .results-wrap { max-height: calc(100vh - 210px); overflow: auto; border-radius: 6px; }
@@ -387,6 +455,18 @@
       background: var(--accent);
       transition: width .2s ease;
     }
+    .progress-fill.indeterminate {
+      width: 35%;
+      animation: progressSlide 1.4s ease-in-out infinite;
+    }
+    @keyframes progressSlide {
+      0% { transform: translateX(-100%); }
+      50% { transform: translateX(120%); }
+      100% { transform: translateX(260%); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .progress-fill.indeterminate { animation: none; transform: none; }
+    }
     .progress-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -447,6 +527,13 @@
     }
     .admin-panel { border-color: #3b6452; }
     .admin-panel h2 { color: #b7e5c9; }
+    .admin-section {
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .admin-section h3 { margin: 0 0 8px; font-size: 12px; color: var(--text); }
+    .manual-refresh-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
     .admin-status { display: block; min-height: 18px; white-space: normal; }
     .upload-progress {
       height: 7px;
@@ -485,46 +572,652 @@
     }
     .analysis-page {
       min-height: calc(100vh - 58px);
-      padding: 16px;
+      padding: 14px 18px 24px;
       background: var(--bg);
     }
     .analysis-heading {
       display: flex;
-      align-items: center;
+      align-items: flex-end;
       justify-content: space-between;
       gap: 12px;
-      margin: 0 0 14px;
+      margin: 0 0 12px;
     }
-    .analysis-heading h2 { margin: 0; font-size: 18px; }
-    .analysis-tools { display: flex; gap: 8px; align-items: center; }
-    .analysis-tools select { width: 150px; }
-    .analysis-summary { margin-bottom: 14px; }
-    .analysis-summary table td, .analysis-summary table th { text-align: left; }
+    .analysis-heading h2 { margin: 0; font-size: 20px; }
+    .analysis-heading p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+    .analysis-tools { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+    .analysis-tools select { width: 112px; min-height: 34px; }
+    .analysis-segment {
+      display: inline-flex;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #0d1312;
+    }
+    .analysis-segment button {
+      min-height: 28px;
+      padding: 4px 10px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .analysis-segment button.active {
+      background: #1b3529;
+      color: var(--text);
+    }
+    .analysis-segment button:disabled { cursor: not-allowed; opacity: .42; }
+    .analysis-statusbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px 16px;
+      min-height: 33px;
+      margin-bottom: 10px;
+      padding: 6px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .analysis-statusbar strong { color: var(--text); font-weight: 600; }
+    .analysis-chart-section {
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .analysis-section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .analysis-section-head h3 { margin: 0; font-size: 14px; }
+    .analysis-section-head span { color: var(--muted); font-size: 11px; }
+    .analysis-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px 14px;
+      margin-bottom: 7px;
+    }
+    .analysis-legend label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .analysis-legend input { width: 14px; height: 14px; margin: 0; }
+    .analysis-legend-swatch { width: 14px; height: 2px; background: var(--series-color); }
+    .analysis-chart-wrap {
+      position: relative;
+      width: 100%;
+      height: 410px;
+      min-height: 280px;
+      background: #0b1110;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    #analysisChart { display: block; width: 100%; height: 100%; }
+    .analysis-chart-empty {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      color: var(--muted);
+      text-align: center;
+      pointer-events: none;
+    }
+    .analysis-subsection { min-width: 0; }
+    .analysis-review {
+      border: 1px solid #5d4a1f;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #12150f;
+      margin-bottom: 18px;
+    }
+    .analysis-review > .analysis-section-head {
+      margin: 0;
+      padding: 9px 12px;
+      border-bottom: 1px solid #5d4a1f;
+      border-left: 4px solid #f2c14e;
+      background: #2b2716;
+    }
+    .analysis-review > .analysis-section-head h3 { color: #f5d874; }
+    .analysis-review > .analysis-section-head > div:first-child {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+    }
+    .analysis-manual-add {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-left: auto;
+    }
+    .analysis-manual-add input {
+      width: 150px;
+      min-height: 32px;
+      text-transform: uppercase;
+    }
+    .analysis-manual-add button { min-height: 32px; }
+    .analysis-manual-status {
+      min-height: 0;
+      padding: 0 12px;
+      background: #2b2716;
+    }
+    .analysis-manual-status:not(:empty) { padding-bottom: 8px; }
+    .analysis-review-chart-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .analysis-review-chart-title {
+      display: flex;
+      align-items: baseline;
+      gap: 9px;
+      min-width: 0;
+    }
+    .analysis-review-chart-title strong { color: var(--text); }
+    .analysis-review-chart-title span {
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .analysis-review-chart-box {
+      position: relative;
+      width: 100%;
+      height: 330px;
+      min-height: 260px;
+      background: #0c1110;
+      border-bottom: 1px solid var(--line);
+      overflow: hidden;
+    }
+    #analysisReviewChart { display: block; width: 100%; height: 100%; }
+    .analysis-review-chart-empty {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      color: var(--muted);
+      text-align: center;
+      pointer-events: none;
+    }
+    .analysis-review .results-wrap {
+      max-height: 320px;
+      border-radius: 0;
+    }
+    .analysis-review table { min-width: 900px; border: 0; border-radius: 0; }
+    .analysis-review th:first-child { width: 190px; }
+    .analysis-review th:last-child { width: 150px; }
+    .analysis-review tr[data-review-ticker] { cursor: pointer; }
+    .analysis-review tr[data-review-ticker]:hover td { background: rgba(242, 193, 78, .06); }
+    .analysis-review tr[data-review-ticker].selected td { background: rgba(242, 193, 78, .11); }
+    .analysis-review tr[data-review-ticker].selected td:first-child { border-left: 3px solid #f2c14e; }
+    .analysis-review-decision {
+      display: flex;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .analysis-review-decision button {
+      min-height: 29px;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .analysis-review-decision [data-confirm-label="winner"] { color: #8fe1a9; border-color: #246d42; }
+    .analysis-review-decision [data-confirm-label="bad"] { color: #ef9a92; border-color: #73342f; }
+    .analysis-picks {
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+    .analysis-pick-groups { display: grid; gap: 18px; }
+    .analysis-pick-group {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .analysis-pick-group-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #151b19;
+    }
+    .analysis-pick-group-head h4 { margin: 0; font-size: 15px; }
+    .analysis-pick-group-head span { color: var(--muted); font-size: 12px; }
+    .analysis-pick-group[data-group="winner"] { border-color: #246d42; }
+    .analysis-pick-group[data-group="winner"] .analysis-pick-group-head { background: rgba(36, 109, 66, .16); }
+    .analysis-pick-group[data-group="winner"] h4 { color: #8fe1a9; }
+    .analysis-pick-group[data-group="maybe"] { border-color: #6d5422; }
+    .analysis-pick-group[data-group="maybe"] .analysis-pick-group-head { background: rgba(109, 84, 34, .16); }
+    .analysis-pick-group[data-group="maybe"] h4 { color: #dfc47c; }
+    .analysis-pick-group[data-group="bad"] { border-color: #73342f; }
+    .analysis-pick-group[data-group="bad"] .analysis-pick-group-head { background: rgba(115, 52, 47, .16); }
+    .analysis-pick-group[data-group="bad"] h4 { color: #ef9a92; }
+    .analysis-picks .results-wrap {
+      position: relative;
+      max-height: min(42vh, 430px);
+      overflow: auto;
+      scrollbar-gutter: stable;
+      border: 0;
+      border-radius: 0;
+    }
+    .analysis-picks table {
+      min-width: 880px;
+      border: 0;
+      border-radius: 0;
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow: visible;
+    }
+    .analysis-picks thead { position: sticky; top: 0; z-index: 5; }
+    .analysis-picks th {
+      top: 0;
+      z-index: 5;
+      box-shadow: 0 1px 0 var(--line);
+    }
+    .analysis-picks th:nth-child(1) { width: 8%; }
+    .analysis-picks th:nth-child(2) { width: 12%; }
+    .analysis-picks th:nth-child(3) { width: 17%; }
+    .analysis-picks th:nth-child(4) { width: 12%; }
+    .analysis-picks th:nth-child(5) { width: 12%; }
+    .analysis-picks th:nth-child(6) { width: 12%; }
+    .analysis-picks th:nth-child(7) { width: 17%; }
+    .analysis-picks th:nth-child(n+4) .analysis-sort {
+      justify-content: flex-end;
+      text-align: right;
+    }
+    .analysis-picks tr.label-winner td { background: rgba(36, 109, 66, .055); }
+    .analysis-picks tr.label-maybe td { background: rgba(109, 84, 34, .055); }
+    .analysis-picks tr.label-bad td { background: rgba(115, 52, 47, .055); }
     .analysis-insight-grid {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
       gap: 12px;
       margin-bottom: 14px;
     }
-    .analysis-picks table td:nth-child(5), .analysis-picks table td:nth-child(6),
-    .analysis-picks table td:nth-child(7), .analysis-picks table th:nth-child(5),
-    .analysis-picks table th:nth-child(6), .analysis-picks table th:nth-child(7) { text-align: right; }
+    .analysis-picks table td:nth-child(4), .analysis-picks table td:nth-child(5),
+    .analysis-picks table td:nth-child(6), .analysis-picks table th:nth-child(4),
+    .analysis-picks table th:nth-child(5), .analysis-picks table th:nth-child(6) { text-align: right; }
     .analysis-review table td:nth-child(5), .analysis-review table td:nth-child(6),
-    .analysis-review table th:nth-child(5), .analysis-review table th:nth-child(6),
-    .analysis-patterns table td:nth-child(5), .analysis-patterns table td:nth-child(6),
-    .analysis-patterns table td:nth-child(7), .analysis-patterns table th:nth-child(5),
-    .analysis-patterns table th:nth-child(6), .analysis-patterns table th:nth-child(7) { text-align: right; }
+    .analysis-review table th:nth-child(5), .analysis-review table th:nth-child(6) { text-align: right; }
     .return-positive { color: var(--accent); }
     .return-negative { color: var(--bad); }
     .return-neutral { color: var(--muted); }
+    body.auth-pending header,
+    body.auth-pending main,
+    body.auth-pending .analysis-page,
+    body.signed-out header,
+    body.signed-out main,
+    body.signed-out .analysis-page {
+      display: none;
+    }
+    body.authenticated #loginScreen { display: none; }
+    .login-screen {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: #0b0f12;
+    }
+    .login-card {
+      width: min(420px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #12171c;
+      padding: 22px;
+    }
+    .login-card h1 { font-size: 22px; margin-bottom: 8px; }
+    .login-card p { color: var(--muted); margin: 0 0 16px; }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .icon-button {
+      width: 38px;
+      min-width: 38px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+    }
+    .feedback-button { position: relative; }
+    .feedback-badge {
+      display: inline-grid;
+      place-items: center;
+      min-width: 17px;
+      height: 17px;
+      margin-left: 5px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: var(--bad);
+      color: #fff;
+      font-size: 10px;
+      line-height: 1;
+    }
+    .app-tabs { display: flex; gap: 4px; border: 1px solid var(--line); border-radius: 6px; padding: 3px; background: #0f1318; }
+    .app-tabs button { border: 0; min-height: 30px; padding: 5px 10px; background: transparent; }
+    .app-tabs button.active { background: #213126; color: #dff5e8; }
+    .role-pill, .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 8px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    body.cloud-mode .local-data-controls,
+    body.authenticated .local-data-controls {
+      display: none !important;
+    }
+    main {
+      display: block;
+      min-height: calc(100vh - 58px);
+    }
+    aside {
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+      padding: 10px 14px;
+      overflow: visible;
+      background: #101419;
+    }
+    section.workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas:
+        "strip"
+        "metrics"
+        "chart"
+        "results";
+      gap: 12px;
+      padding: 12px 14px;
+      overflow: visible;
+    }
+    aside .panel { margin-bottom: 0; }
+    .screen-panel {
+      display: grid;
+      grid-template-columns: auto minmax(180px, 1fr) auto auto auto;
+      align-items: end;
+      gap: 10px;
+      padding: 8px;
+    }
+    .screen-panel h2,
+    .screen-panel label {
+      margin: 0;
+    }
+    .screen-toolbar {
+      display: contents;
+    }
+    .market-segment {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3px;
+      width: 144px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 3px;
+      background: #0e1217;
+    }
+    .market-segment button {
+      min-height: 30px;
+      border: 0;
+      padding: 4px 8px;
+      background: transparent;
+    }
+    .market-segment button.active {
+      background: #1f382a;
+      color: #dff5e8;
+    }
+    .market-data-strip {
+      grid-area: strip;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .market-data-card {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      padding: 6px 9px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 38px;
+      cursor: help;
+    }
+    .market-data-card strong { font-size: 12px; letter-spacing: .04em; }
+    .market-last-run { color: var(--muted); font-size: 11px; }
+    .market-last-run b { color: var(--text); margin-left: 5px; font-size: 12px; font-weight: 600; }
+    .market-data-tooltip {
+      position: absolute;
+      left: 0;
+      top: calc(100% + 5px);
+      z-index: 8;
+      display: none;
+      width: max-content;
+      max-width: min(460px, calc(100vw - 28px));
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #10151a;
+      box-shadow: 0 8px 22px var(--shadow);
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+      white-space: normal;
+      pointer-events: none;
+    }
+    .market-data-card:hover .market-data-tooltip,
+    .market-data-card:focus .market-data-tooltip { display: block; }
+    .market-data-card.is-running {
+      cursor: pointer;
+      border-color: #3a7e5b;
+    }
+    .market-data-card.is-running .market-last-run b { color: var(--accent); }
+    .market-refresh-state {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    .market-refresh-state.bad { color: var(--bad); }
+    .metrics { grid-area: metrics; margin-bottom: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    #resultsPanel {
+      grid-area: results;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    #chartPanel { grid-area: chart; min-width: 0; }
+    #resultsPanel .results-wrap {
+      flex: 1 1 auto;
+      min-height: 0;
+      max-height: none;
+    }
+    .advanced-settings {
+      grid-column: 1 / -1;
+      border-top: 1px solid var(--line);
+      padding-top: 8px;
+    }
+    .advanced-settings summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12px;
+      list-style: none;
+    }
+    .advanced-settings summary::-webkit-details-marker { display: none; }
+    .advanced-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(90px, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .ma-period-toggles {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .ma-period-toggles .ma-toggle { margin: 0; }
+    .modal {
+      align-items: stretch;
+      justify-content: flex-end;
+      background: rgba(0, 0, 0, .18);
+    }
+    .modal.feedback-modal {
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: rgba(3, 7, 6, .72);
+    }
+    .feedback-window {
+      width: min(620px, 100%);
+      max-height: min(760px, calc(100vh - 32px));
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      box-shadow: 0 18px 55px rgba(0, 0, 0, .45);
+    }
+    .feedback-body { padding: 14px 16px 16px; overflow: auto; }
+    .feedback-body textarea { min-height: 120px; }
+    .feedback-form-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .feedback-admin {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+    .feedback-admin-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .feedback-admin-head h3 { margin: 0; font-size: 13px; }
+    .feedback-admin-head select { width: 125px; min-height: 30px; }
+    .feedback-list { margin-top: 8px; border-top: 1px solid var(--line); }
+    .feedback-item { padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .feedback-item-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .feedback-item p { margin: 5px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .feedback-item .actions { margin-top: 6px; }
+    .feedback-item button { min-height: 27px; padding: 3px 8px; font-size: 11px; }
+    .progress-window {
+      width: 360px;
+      max-height: 100vh;
+      height: 100vh;
+      border-radius: 0;
+      border-top: 0;
+      border-bottom: 0;
+      border-right: 0;
+    }
+    .progress-steps {
+      display: grid;
+      gap: 6px;
+      margin: 12px 0;
+    }
+    .progress-step {
+      display: grid;
+      grid-template-columns: 20px 1fr;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .progress-step.active { color: var(--text); }
+    .progress-step.done { color: var(--accent); }
+    .progress-step-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+    }
+    .progress-events {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .progress-event {
+      border-left: 2px solid var(--line);
+      padding-left: 8px;
+      color: var(--muted);
+    }
+    .progress-event strong { color: var(--text); display: block; }
+    .progress-event.running { border-left-color: var(--accent-2); }
+    .progress-event.succeeded { border-left-color: var(--accent); }
+    .progress-event.failed { border-left-color: var(--bad); }
+    details.technical-details {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
     body.cloud-mode .local-data-controls { display: none; }
     body.cloud-mode .online-source { display: flex; }
-    body.cloud-mode main { grid-template-columns: minmax(270px, 320px) minmax(0, 1fr); }
-    body.cloud-mode aside { padding: 12px; }
+    body.cloud-mode main { display: block; }
+    body.cloud-mode aside { padding: 10px 14px; }
     body.cloud-mode .panel { margin-bottom: 10px; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
     @media (max-width: 940px) {
-      main, body.cloud-mode main { grid-template-columns: 1fr; }
+      main, body.cloud-mode main { display: block; }
       aside, body.cloud-mode aside { border-right: 0; border-bottom: 1px solid var(--line); }
+      section.workspace {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+          "strip"
+          "metrics"
+          "chart"
+          "results";
+      }
+      .screen-panel { grid-template-columns: 1fr 1fr; }
+      .market-data-strip { grid-template-columns: 1fr; }
       .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
       .chart-controls { grid-template-columns: 1fr 1fr; }
       .analysis-insight-grid { grid-template-columns: 1fr; }
@@ -545,29 +1238,73 @@
       .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .chart-controls { grid-template-columns: 1fr; }
       .chart-box { height: 330px; }
+      section.workspace { padding: 10px; }
+      .screen-panel { grid-template-columns: 1fr; }
+      .screen-panel h2 { display: none; }
+      .screen-panel .status-line { white-space: normal; }
+      .market-segment { width: 100%; }
+      .advanced-grid { grid-template-columns: 1fr 1fr; }
+      .results-wrap { max-height: none; }
+      .modal { align-items: flex-end; justify-content: stretch; }
+      .modal.feedback-modal { align-items: flex-end; justify-content: stretch; padding: 0; }
+      .feedback-window {
+        width: 100%;
+        max-height: 88vh;
+        border-radius: 6px 6px 0 0;
+        border-bottom: 0;
+      }
+      .progress-window {
+        width: 100%;
+        height: min(82vh, 680px);
+        border-radius: 6px 6px 0 0;
+        border: 1px solid var(--line);
+        border-bottom: 0;
+      }
       .analysis-heading { align-items: flex-start; flex-direction: column; }
       .analysis-tools { width: 100%; }
-      .analysis-tools select { flex: 1; width: auto; }
+      .analysis-tools select { flex: 1; width: auto; min-width: 88px; }
+      .analysis-chart-wrap { height: 310px; }
+      .analysis-review-chart-box { height: 290px; }
+      .analysis-review-chart-head { align-items: flex-start; }
+      .analysis-review-chart-title { align-items: flex-start; flex-direction: column; gap: 2px; }
+      .analysis-statusbar { align-items: flex-start; flex-direction: column; gap: 4px; }
+      .analysis-section-head { align-items: flex-start; flex-direction: column; gap: 3px; }
+      .analysis-review > .analysis-section-head > div:first-child { align-items: flex-start; flex-direction: column; gap: 2px; }
+      .analysis-manual-add { width: 100%; margin-left: 0; }
+      .analysis-manual-add input { flex: 1; width: auto; min-width: 0; }
       main {
         min-height: calc(100vh - 82px);
       }
     }
   </style>
 </head>
-<body>
+<body class="auth-pending">
+  <section class="login-screen" id="loginScreen">
+    <div class="login-card">
+      <h1>Moneymaker Markets</h1>
+      <p>Sign in with your invited account to view shared screens, charts, and your private appraisals.</p>
+      <label for="authEmail">Email</label>
+      <input id="authEmail" type="email" placeholder="you@example.com" autocomplete="username">
+      <label for="authPassword">Password</label>
+      <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password">
+      <div class="actions">
+        <button class="primary" id="authSignIn" type="button">Sign in</button>
+        <button id="authCreate" type="button">Set/reset password</button>
+      </div>
+      <p class="status-line" id="loginStatus">Checking sign-in state...</p>
+    </div>
+  </section>
   <header>
-    <h1>Moneymaker Stock Filter</h1>
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-      <nav class="app-tabs" id="appTabs" aria-label="Application views" hidden>
+    <h1>Moneymaker Markets</h1>
+    <div class="topbar-actions">
+      <nav class="app-tabs" id="appTabs" aria-label="Application views">
         <button id="marketTab" class="active" type="button" aria-pressed="true">Market</button>
         <button id="analysisTab" type="button" aria-pressed="false">Analysis</button>
       </nav>
-      <span class="status-line" id="topStatus">Connecting to market data...</span>
+      <button class="status-line" id="topStatus" type="button" disabled>Connecting to market data...</button>
       <span class="role-pill" id="authRole" hidden></span>
-      <input id="authEmail" type="email" placeholder="Email" autocomplete="username" style="width:180px">
-      <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password" style="width:140px">
-      <button id="authSignIn" type="button">Sign in</button>
-      <button id="authCreate" type="button">Set/reset password</button>
+      <button class="feedback-button" id="openFeedback" type="button">Feedback<span class="feedback-badge" id="feedbackBadge" hidden>0</span></button>
+      <button class="icon-button" id="openOperations" type="button" title="Operations" aria-label="Operations">Ops</button>
       <button id="authSignOut" type="button" hidden>Sign out</button>
     </div>
   </header>
@@ -670,67 +1407,77 @@
         </div>
       </div>
 
-      <div class="panel">
-        <h2>Market Screen</h2>
-        <label for="marketSelect">Market</label>
-        <div class="market-switch">
-          <select id="marketSelect">
+      <div class="panel screen-panel">
+        <div>
+          <h2>Market Screen</h2>
+          <select id="marketSelect" hidden>
             <option value="asx">ASX market</option>
             <option value="us">US market</option>
           </select>
-          <button id="refreshStatus" type="button">Refresh data</button>
-        </div>
-        <div class="online-source">Screening the automatically updated online database</div>
-        <div class="grid-2">
-          <div>
-            <label for="volumeMultiplier">Volume multiplier</label>
-            <input id="volumeMultiplier" type="number" step="0.1" value="2.0">
-          </div>
-          <div>
-            <label for="lookbackWeeks">Lookback weeks</label>
-            <input id="lookbackWeeks" type="number" min="1" value="1">
+          <div class="market-segment" aria-label="Market">
+            <button id="marketAsx" class="active" type="button">ASX</button>
+            <button id="marketUs" type="button">US</button>
           </div>
         </div>
-        <div class="grid-2">
-          <div>
-            <label for="minCap">Min cap M</label>
-            <input id="minCap" type="number" step="1" value="0">
-          </div>
-          <div>
-            <label for="maxCap">Max cap M</label>
-            <input id="maxCap" type="number" step="1" value="0">
-          </div>
+        <div>
+          <label for="query">Ticker search</label>
+          <input id="query" placeholder="CBA, IBRX, AAPL">
         </div>
-        <label>Moving averages weeks (0 off)</label>
-        <div class="grid-4">
-          <input id="maShort" type="number" value="90">
-          <input id="maIntermediate" type="number" value="180">
-          <input id="maMedium" type="number" value="360">
-          <input id="maLong" type="number" value="700" title="Set to 0 to turn off the 700-week moving average">
-        </div>
-        <div class="grid-2">
-          <div>
-            <label for="query">Ticker search</label>
-            <input id="query" placeholder="CBA">
+        <button id="loadSharedScan" type="button">Load latest</button>
+        <button class="secondary" id="runFilter">Run fresh screen</button>
+        <span class="status-line" id="filterStatus">Ready</span>
+        <details class="advanced-settings" id="advancedSettings">
+          <summary>Advanced screen settings</summary>
+          <div class="advanced-grid">
+            <div>
+              <label for="volumeMultiplier">Volume</label>
+              <input id="volumeMultiplier" type="number" step="0.1" value="2.0">
+            </div>
+            <div>
+              <label for="lookbackWeeks">Lookback</label>
+              <input id="lookbackWeeks" type="number" min="1" value="1">
+            </div>
+            <div>
+              <label for="minCap">Min cap M</label>
+              <input id="minCap" type="number" step="1" value="0">
+            </div>
+            <div>
+              <label for="maxCap">Max cap M</label>
+              <input id="maxCap" type="number" step="1" value="0">
+            </div>
+            <div>
+              <label for="scanLimit">Limit</label>
+              <input id="scanLimit" type="number" min="1" value="250" disabled>
+            </div>
+            <label class="inline-check">
+              <input id="useScanLimit" type="checkbox">
+              Limit scan
+            </label>
           </div>
-          <div>
-            <label for="scanLimit">Scan limit</label>
-            <input id="scanLimit" type="number" min="1" value="250" disabled>
+          <label>Moving averages</label>
+          <div class="ma-period-toggles">
+            <label class="ma-toggle"><input class="screen-ma-check" type="checkbox" value="90" data-target="maShort" checked>90</label>
+            <label class="ma-toggle"><input class="screen-ma-check" type="checkbox" value="180" data-target="maIntermediate" checked>180</label>
+            <label class="ma-toggle"><input class="screen-ma-check" type="checkbox" value="360" data-target="maMedium" checked>360</label>
+            <label class="ma-toggle"><input class="screen-ma-check" type="checkbox" value="700" data-target="maLong" checked>700</label>
           </div>
-        </div>
-        <label class="inline-check">
-          <input id="useScanLimit" type="checkbox">
-          Limit scan to first N tickers
-        </label>
-        <div class="actions">
-          <button id="loadSharedScan" type="button">Load latest</button>
-          <button class="secondary" id="runFilter">Run Filter</button>
-          <span class="status-line" id="filterStatus">Ready</span>
-        </div>
+          <input id="maShort" type="hidden" value="90">
+          <input id="maIntermediate" type="hidden" value="180">
+          <input id="maMedium" type="hidden" value="360">
+          <input id="maLong" type="hidden" value="700">
+        </details>
       </div>
 
       <div class="panel admin-panel" id="adminPanel" hidden>
         <h2>Data Operations</h2>
+        <section class="admin-section" aria-labelledby="marketRefreshHeading">
+          <h3 id="marketRefreshHeading">Market data</h3>
+          <div class="manual-refresh-actions">
+            <button id="refreshAsxData" type="button" title="Queue an incremental ASX market-data update">Update ASX</button>
+            <button id="refreshUsData" type="button" title="Queue an incremental US market-data update">Update US</button>
+          </div>
+          <span class="status-line admin-status" id="manualRefreshStatus">No manual update running</span>
+        </section>
         <label for="importDatabaseFile">SQLite database</label>
         <input id="importDatabaseFile" type="file" accept=".sqlite,.sqlite3,.db,application/x-sqlite3">
         <label class="inline-check">
@@ -767,6 +1514,16 @@
     </aside>
 
     <section class="workspace">
+      <div class="market-data-strip" id="marketDataStrip" aria-live="polite">
+        <div class="market-data-card" tabindex="0" aria-label="ASX market status">
+          <strong>ASX</strong><span class="market-last-run">Data through<b>-</b></span>
+          <div class="market-data-tooltip" role="tooltip">Latest bar: -<br>Tickers: -<br>Weekly rows: -<br>Next refresh: -</div>
+        </div>
+        <div class="market-data-card" tabindex="0" aria-label="US market status">
+          <strong>US</strong><span class="market-last-run">Data through<b>-</b></span>
+          <div class="market-data-tooltip" role="tooltip">Latest bar: -<br>Tickers: -<br>Weekly rows: -<br>Next refresh: -</div>
+        </div>
+      </div>
       <div class="metrics">
         <div class="metric"><span>Covered stocks</span><strong id="metricTickers">0</strong></div>
         <div class="metric"><span>Weekly metric rows</span><strong id="metricRows">0</strong></div>
@@ -822,7 +1579,7 @@
           <canvas id="priceChart"></canvas>
         </div>
       </div>
-      <div class="panel">
+      <div class="panel" id="resultsPanel">
         <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
           <h2 style="margin:0">Results</h2>
           <span class="status-line" id="resultMeta">No scan yet</span>
@@ -838,7 +1595,7 @@
                 <th style="width:110px">Avg Volume</th>
                 <th style="width:95px">Volume Ratio</th>
                 <th style="width:150px">MA Data</th>
-                <th style="width:260px">Label</th>
+                <th style="width:390px">Appraisal</th>
               </tr>
             </thead>
             <tbody id="resultsBody">
@@ -852,81 +1609,176 @@
 
   <section class="analysis-page" id="analysisPage" hidden>
     <div class="analysis-heading">
-      <h2>Rating Analysis</h2>
+      <div>
+        <h2>Pick performance</h2>
+        <p>Performance begins at each appraisal price. Lines show the average return of the available picks in each group.</p>
+      </div>
       <div class="analysis-tools">
-        <select id="analysisMarket" aria-label="Analysis market">
-          <option value="all">All markets</option>
-          <option value="asx">ASX</option>
-          <option value="us">US</option>
+        <input id="analysisMarket" type="hidden" value="asx">
+        <input id="analysisInterval" type="hidden" value="daily">
+        <div class="analysis-segment" aria-label="Analysis market">
+          <button class="active" id="analysisMarketAsx" type="button" aria-pressed="true">ASX</button>
+          <button id="analysisMarketUs" type="button" aria-pressed="false">US</button>
+        </div>
+        <div class="analysis-segment" aria-label="Performance interval">
+          <button class="active" id="analysisDaily" type="button" aria-pressed="true">Daily</button>
+          <button id="analysisWeekly" type="button" aria-pressed="false">Weekly</button>
+          <button id="analysisHourly" type="button" disabled title="Hourly bars are not stored in the current database">Hourly</button>
+        </div>
+        <select id="analysisRange" aria-label="Performance range">
+          <option value="all" selected>Since first pick</option>
+          <option value="3m">3 months</option>
+          <option value="6m">6 months</option>
+          <option value="1y">1 year</option>
+          <option value="2y">2 years</option>
+          <option value="5y">5 years</option>
         </select>
-        <select id="analysisHorizon" aria-label="Analysis horizon">
-          <option value="0">Current</option>
-          <option value="30">30 days</option>
-          <option value="90">90 days</option>
-          <option value="180">180 days</option>
-          <option value="360">360 days</option>
-        </select>
-        <button id="recalculateOutcomes" type="button">Recalculate</button>
         <button id="refreshAnalysis" type="button">Refresh</button>
       </div>
     </div>
-    <div class="metrics analysis-metrics">
-      <div class="metric"><span>Active picks</span><strong id="analysisPickCount">-</strong></div>
-      <div class="metric"><span>Priced picks</span><strong id="analysisPricedCount">-</strong></div>
-      <div class="metric"><span>Positive picks</span><strong id="analysisPositiveRate">-</strong></div>
-      <div class="metric"><span>Average return</span><strong id="analysisAverageReturn">-</strong></div>
+    <div class="analysis-statusbar" aria-live="polite">
+      <span id="analysisStatus">Open Analysis to load online appraisal performance.</span>
+      <span>Active picks <strong id="analysisPickCount">-</strong></span>
+      <span>Unique tickers <strong id="analysisTickerCount">-</strong></span>
+      <span>Benchmark <strong id="analysisBenchmarkName">-</strong></span>
+      <span>Signals <strong id="analysisSignalRange">-</strong></span>
     </div>
-    <div class="panel analysis-summary">
-      <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
-        <h2 style="margin:0">Performance by Appraisal</h2>
-        <span class="status-line" id="analysisStatus">Load analysis to view active appraisals.</span>
-      </div>
-      <div class="results-wrap">
-        <table>
-          <thead><tr><th>Appraisal</th><th>Picks</th><th>Priced</th><th>Positive</th><th>Hit Rate</th><th>Average Return</th><th>Median Return</th><th>Average Age</th></tr></thead>
-          <tbody id="analysisSummaryBody"><tr><td colspan="8" style="text-align:left;color:var(--muted)">No analysis loaded.</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="analysis-insight-grid">
-      <div class="panel analysis-review">
-        <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
-          <h2 style="margin:0">Needs Review</h2>
+    <section class="analysis-subsection analysis-review" aria-labelledby="analysisReviewHeading">
+      <div class="analysis-section-head">
+        <div>
+          <h3 id="analysisReviewHeading">Needs confirmation</h3>
           <span class="status-line" id="analysisReviewMeta"></span>
         </div>
-        <div class="results-wrap">
-          <table>
-            <thead><tr><th>Market</th><th>Ticker</th><th>Appraisal</th><th>Sector</th><th>Return</th><th>Date</th></tr></thead>
-            <tbody id="analysisReviewBody"><tr><td colspan="6" style="text-align:left;color:var(--muted)">No underperformers loaded.</td></tr></tbody>
-          </table>
-        </div>
+        <form class="analysis-manual-add" id="analysisManualForm">
+          <label class="sr-only" for="analysisManualTicker">Ticker to add for confirmation</label>
+          <input id="analysisManualTicker" type="text" maxlength="20" autocomplete="off" placeholder="Add ticker">
+          <button id="analysisAddNeeds" type="submit">Add for review</button>
+        </form>
       </div>
-      <div class="panel analysis-patterns">
-        <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
-          <h2 style="margin:0">Common Patterns</h2>
-          <span class="status-line" id="analysisPatternMeta"></span>
+      <div class="analysis-manual-status status-line" id="analysisManualStatus" aria-live="polite"></div>
+      <div class="analysis-review-chart-head">
+        <div class="analysis-review-chart-title">
+          <strong id="analysisReviewChartTitle">Select a stock to review</strong>
+          <span id="analysisReviewChartMeta">Daily candles, one year</span>
         </div>
-        <div class="results-wrap">
-          <table>
-            <thead><tr><th>Type</th><th>Group</th><th>Appraisal</th><th>Picks</th><th>Hit Rate</th><th>Avg Return</th><th>Avg Cap</th></tr></thead>
-            <tbody id="analysisPatternBody"><tr><td colspan="7" style="text-align:left;color:var(--muted)">No pattern data loaded.</td></tr></tbody>
-          </table>
-        </div>
+        <button id="analysisReviewOpenMarket" type="button" hidden>Open full chart</button>
       </div>
-    </div>
-    <div class="panel analysis-picks">
-      <div class="actions" style="justify-content:space-between;margin-top:0;margin-bottom:10px">
-        <h2 style="margin:0">Current Appraisals</h2>
-        <span class="status-line" id="analysisPickMeta"></span>
+      <div class="analysis-review-chart-box">
+        <canvas id="analysisReviewChart" role="img" aria-label="Price chart for the selected stock needing confirmation"></canvas>
+        <div class="analysis-review-chart-empty" id="analysisReviewChartEmpty">Select a stock in the table to view its chart.</div>
       </div>
       <div class="results-wrap">
         <table>
-          <thead><tr><th>Market</th><th>Ticker</th><th>Appraisal</th><th>Selected</th><th>Signal</th><th>Price</th><th>Return</th><th>Date</th></tr></thead>
-          <tbody id="analysisPicksBody"><tr><td colspan="8" style="text-align:left;color:var(--muted)">No appraisals loaded.</td></tr></tbody>
+          <thead><tr><th>Owner</th><th>Market</th><th>Ticker</th><th>Selected</th><th>Return</th><th>Price date</th><th>Decision</th></tr></thead>
+          <tbody id="analysisReviewBody"><tr><td colspan="7" style="text-align:left;color:var(--muted)">No stocks currently need confirmation.</td></tr></tbody>
         </table>
       </div>
-    </div>
+    </section>
+    <section class="analysis-chart-section" aria-labelledby="analysisChartHeading">
+      <div class="analysis-section-head">
+        <h3 id="analysisChartHeading">Category return since appraisal</h3>
+        <span id="analysisChartMeta">Waiting for performance data</span>
+      </div>
+      <div class="analysis-legend" id="analysisLegend"></div>
+      <div class="analysis-chart-wrap">
+        <canvas id="analysisChart" role="img" aria-label="Average return of appraisal groups compared with all picks and the market benchmark"></canvas>
+        <div class="analysis-chart-empty" id="analysisChartEmpty">No priced appraisals are available for this market and range.</div>
+      </div>
+    </section>
+    <section class="analysis-picks" aria-labelledby="analysisPicksHeading">
+      <div class="analysis-section-head">
+        <h3 id="analysisPicksHeading">Current picks</h3>
+        <span class="status-line" id="analysisPickMeta"></span>
+      </div>
+      <div class="analysis-pick-groups">
+        <section class="analysis-pick-group" data-group="winner">
+          <div class="analysis-pick-group-head"><h4>Winner</h4><span id="analysisWinnerMeta"></span></div>
+          <div class="results-wrap">
+            <table><thead><tr>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="market">Market</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="ticker">Ticker</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="event_at_utc">Selected</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="signal_price">Signal</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="latest_price">Price</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="return_percent">Return</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="latest_date">Date</button></th>
+            </tr></thead><tbody id="analysisWinnerBody"></tbody></table>
+          </div>
+        </section>
+        <section class="analysis-pick-group" data-group="maybe">
+          <div class="analysis-pick-group-head"><h4>Maybe</h4><span id="analysisMaybeMeta"></span></div>
+          <div class="results-wrap">
+            <table><thead><tr>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="market">Market</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="ticker">Ticker</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="event_at_utc">Selected</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="signal_price">Signal</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="latest_price">Price</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="return_percent">Return</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="latest_date">Date</button></th>
+            </tr></thead><tbody id="analysisMaybeBody"></tbody></table>
+          </div>
+        </section>
+        <section class="analysis-pick-group" data-group="bad">
+          <div class="analysis-pick-group-head"><h4>Bad</h4><span id="analysisBadMeta"></span></div>
+          <div class="results-wrap">
+            <table><thead><tr>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="market">Market</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="ticker">Ticker</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="event_at_utc">Selected</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="signal_price">Signal</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="latest_price">Price</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="return_percent">Return</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="latest_date">Date</button></th>
+            </tr></thead><tbody id="analysisBadBody"></tbody></table>
+          </div>
+        </section>
+      </div>
+    </section>
   </section>
+
+  <div class="modal feedback-modal hidden" id="feedbackModal" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle">
+    <div class="feedback-window">
+      <div class="progress-head">
+        <h2 id="feedbackTitle">Send feedback</h2>
+        <button id="closeFeedback" type="button">Close</button>
+      </div>
+      <div class="feedback-body">
+        <label for="feedbackCategory">Type</label>
+        <select id="feedbackCategory">
+          <option value="bug">Something is broken</option>
+          <option value="data">Stock data or screen result</option>
+          <option value="usability">Hard to use</option>
+          <option value="idea">Feature idea</option>
+          <option value="other">Other</option>
+        </select>
+        <label for="feedbackMessage">What happened, or what should change?</label>
+        <textarea id="feedbackMessage" maxlength="4000" placeholder="Include the ticker and what you expected when reporting a screen result."></textarea>
+        <div class="feedback-form-meta">
+          <span>Current market, ticker, page and screen size are attached automatically.</span>
+          <span id="feedbackCharacterCount">0 / 4000</span>
+        </div>
+        <div class="actions">
+          <button class="primary" id="submitFeedback" type="button">Send feedback</button>
+        </div>
+        <p class="status-line" id="feedbackStatus" aria-live="polite"></p>
+
+        <section class="feedback-admin" id="feedbackAdminSection" hidden>
+          <div class="feedback-admin-head">
+            <h3>Feedback inbox</h3>
+            <select id="feedbackStatusFilter" aria-label="Feedback status">
+              <option value="new">New</option>
+              <option value="reviewed">Reviewed</option>
+              <option value="planned">Planned</option>
+              <option value="done">Done</option>
+              <option value="all">All</option>
+            </select>
+          </div>
+          <div class="feedback-list" id="feedbackList"><p class="status-line">Open the inbox to load feedback.</p></div>
+        </section>
+      </div>
+    </div>
+  </div>
 
   <div class="modal hidden" id="progressModal" role="dialog" aria-modal="true" aria-labelledby="progressTitle">
     <div class="progress-window">
@@ -944,7 +1796,17 @@
           <div class="progress-tile"><span>Count</span><strong id="progressCount">0</strong></div>
           <div class="progress-tile"><span>Complete</span><strong id="progressPercent">0%</strong></div>
         </div>
-        <pre class="log" id="modalFetchLog"></pre>
+        <div class="progress-grid">
+          <div class="progress-tile"><span>Started</span><strong id="progressStarted">-</strong></div>
+          <div class="progress-tile"><span>Elapsed</span><strong id="progressElapsed">-</strong></div>
+          <div class="progress-tile"><span>Snapshot</span><strong id="progressSnapshot">-</strong></div>
+        </div>
+        <div class="progress-steps" id="progressSteps" aria-live="polite"></div>
+        <div class="progress-events" id="progressEvents"></div>
+        <details class="technical-details">
+          <summary>Technical details</summary>
+          <pre class="log" id="modalFetchLog"></pre>
+        </details>
       </div>
     </div>
   </div>
@@ -986,16 +1848,12 @@
           if (user) {
             $("authEmail").value = user.email || "";
             $("authSignOut").hidden = false;
-            $("authSignIn").hidden = true;
-            $("authCreate").hidden = true;
-            $("authPassword").hidden = true;
+            $("loginStatus").textContent = `Signed in as ${user.email || "user"}`;
             if (currentUserProfile?.user) $("topStatus").textContent = `Signed in as ${currentUserProfile.user.email || "anonymous"}`;
             else $("topStatus").textContent = `Signed in as ${user.email || "user"}`;
           } else {
             $("authSignOut").hidden = true;
-            $("authSignIn").hidden = false;
-            $("authCreate").hidden = false;
-            $("authPassword").hidden = false;
+            $("loginStatus").textContent = "Sign in with an invited email account";
             $("topStatus").textContent = "Sign in with an invited email account";
           }
         });
@@ -1011,14 +1869,48 @@
     let lastCandles = [];
     let lastChartTicker = "";
     let lastMovingAverages = {};
+    let lastAnalysisPayload = null;
+    let lastAnalysisPicks = [];
+    let lastAnalysisReviewPicks = [];
+    let lastReviewChart = null;
+    let reviewChartRequestToken = 0;
+    const analysisGroupSort = {
+      winner: {key: "return_percent", direction: "desc"},
+      maybe: {key: "return_percent", direction: "desc"},
+      bad: {key: "return_percent", direction: "asc"}
+    };
+    let lastFeedbackItems = [];
     let currentScanId = null;
     let lastExportStoragePath = null;
+    let activeFilterAfterEventId = 0;
+    let marketStatusTimer = null;
+    let activeRefreshPollToken = 0;
+    const FILTER_JOB_STORAGE_KEY = "moneymaker.activeFilterJobId";
+    const progressStageOrder = [
+      "Queued",
+      "Starting worker",
+      "Loading market snapshot",
+      "Applying screen criteria",
+      "Ranking matches",
+      "Saving screen",
+      "Loading results",
+      "Complete"
+    ];
+    const refreshStageOrder = ["Queued", "Starting worker", "Fetching batches", "Updating market data", "Complete"];
     const maColors = {
       "30": "#f2c14e",
       "90": "#8dd7ff",
       "180": "#b58cff",
       "360": "#ff9f7a",
       "700": "#d9e672"
+    };
+    const analysisSeriesColors = {
+      winner: "#54d693",
+      needs_confirmation: "#f2c14e",
+      maybe: "#b58cff",
+      bad: "#ff7b72",
+      all_picks: "#f2f5f3",
+      benchmark: "#8c9b94"
     };
     const marketDefaults = {
       asx: {
@@ -1049,7 +1941,19 @@
       return fmt.format(Math.round(value));
     }
 
-    function renderCompanyProfile(company, ticker) {
+    function appendCompanyAppraisal(box, appraisal) {
+      if (!appraisal?.label) return;
+      const badge = document.createElement("span");
+      badge.className = "company-appraisal";
+      badge.dataset.label = appraisal.label;
+      badge.textContent = `Your appraisal: ${labelText(appraisal.label)}`;
+      if (appraisal.appraised_at_utc) {
+        badge.title = `Last changed ${formatBrisbane(appraisal.appraised_at_utc)}`;
+      }
+      box.appendChild(badge);
+    }
+
+    function renderCompanyProfile(company, ticker, appraisal = null) {
       const box = $("companyProfile");
       box.replaceChildren();
       if (!company || (!company.summary && !company.name && !company.sector && !company.industry)) {
@@ -1057,6 +1961,7 @@
         const p = document.createElement("p");
         p.textContent = `${ticker || "Ticker"}: no cached company description yet. Run a fetch with company info enabled to fill this in.`;
         box.appendChild(p);
+        appendCompanyAppraisal(box, appraisal);
         if (company && company.yahoo_url) {
           const meta = document.createElement("div");
           meta.className = "company-meta";
@@ -1075,6 +1980,7 @@
       const heading = document.createElement("h3");
       heading.textContent = company.name || ticker;
       box.appendChild(heading);
+      appendCompanyAppraisal(box, appraisal);
 
       const metaParts = [company.sector, company.industry, company.country].filter(Boolean);
       if (metaParts.length || company.website || company.yahoo_url) {
@@ -1132,6 +2038,108 @@
       sync();
     }
 
+    function syncScreenMaInputs() {
+      document.querySelectorAll(".screen-ma-check").forEach((input) => {
+        const target = input.dataset.target;
+        if (target && $(target)) $(target).value = input.checked ? input.value : "0";
+      });
+    }
+
+    function setMarket(market) {
+      $("marketSelect").value = market;
+      applyMarketDefaults();
+    }
+
+    function showSignedOut(message = "Sign in with an invited email account") {
+      document.body.classList.remove("auth-pending", "authenticated");
+      document.body.classList.add("signed-out");
+      $("loginStatus").textContent = message;
+    }
+
+    function showAuthenticated() {
+      document.body.classList.remove("auth-pending", "signed-out");
+      document.body.classList.add("authenticated");
+    }
+
+    function formatBrisbane(value, withTime = true) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return new Intl.DateTimeFormat("en-AU", {
+        timeZone: "Australia/Brisbane",
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        ...(withTime ? {hour: "2-digit", minute: "2-digit", hour12: false} : {})
+      }).format(date);
+    }
+
+    function elapsedText(seconds) {
+      const total = Math.max(0, Number(seconds || 0));
+      if (!Number.isFinite(total) || total === 0) return "-";
+      const minutes = Math.floor(total / 60);
+      const secs = Math.round(total % 60);
+      return minutes ? `${minutes}m ${secs}s` : `${secs}s`;
+    }
+
+    function renderMarketStatusStrip(markets) {
+      const strip = $("marketDataStrip");
+      strip.innerHTML = ["asx", "us"].map((market) => {
+        const item = markets?.[market] || {};
+        const refresh = item.latest_refresh || {};
+        const refreshTimestamp = item.last_successful_refresh_at_utc || item.database_refreshed_at_utc;
+        const running = ["queued", "running"].includes(String(refresh.status));
+        const dataThrough = item.latest_bar_date || formatBrisbane(refreshTimestamp, false);
+        const visibleValue = running
+          ? `${fmt.format(Number(refresh.completed_tickers || 0))} / ${fmt.format(Number(refresh.total_tickers || 0))}`
+          : dataThrough;
+        const details = [
+          `Data through: ${dataThrough || "-"}`,
+          `Last successful update: ${formatBrisbane(refreshTimestamp)}`,
+          `Tickers: ${fmt.format(Number(item.covered_tickers || 0))}`,
+          `Weekly rows: ${fmt.format(Number(item.weekly_metric_rows || 0))}`,
+          `Next refresh: ${formatBrisbane(item.next_scheduled_refresh_at_utc)}`
+        ];
+        if (refresh.status) details.push(`Latest attempt: ${refresh.status} at ${formatBrisbane(refresh.finished_at_utc || refresh.started_at_utc)}`);
+        if (refresh.status === "failed") details.push(`Failure: ${refresh.error || "Refresh failed"}`);
+        if (running) details.unshift("Click to view live batch activity");
+        return `<div class="market-data-card ${running ? "is-running" : ""}" data-market-card="${market}" data-refresh-id="${escapeHtml(refresh.id || "")}">
+          <strong>${market.toUpperCase()}</strong>
+          <span class="market-last-run">${running ? "Updating" : "Data through"}<b>${escapeHtml(visibleValue || "-")}</b></span>
+          ${refresh.status === "failed" ? '<span class="market-refresh-state bad">Update failed</span>' : ""}
+          <div class="market-data-tooltip" role="tooltip">${details.map(escapeHtml).join("<br>")}</div>
+        </div>`;
+      }).join("");
+      strip.querySelectorAll(".market-data-card").forEach((card) => {
+        card.tabIndex = 0;
+        const running = card.classList.contains("is-running");
+        const item = markets?.[card.dataset.marketCard] || {};
+        const failed = item.latest_refresh?.status === "failed";
+        card.setAttribute("aria-label", `${card.dataset.marketCard.toUpperCase()} data through ${item.latest_bar_date || "unknown"}. ${failed ? "Latest update failed. " : ""}${running ? "Click to view live refresh activity." : "Hover or focus for details."}`);
+        if (running) {
+          card.setAttribute("role", "button");
+          card.addEventListener("click", () => openLiveRefresh(card.dataset.marketCard, card.dataset.refreshId));
+          card.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              openLiveRefresh(card.dataset.marketCard, card.dataset.refreshId);
+            }
+          });
+        }
+      });
+      syncManualRefreshButtons(markets);
+    }
+
+    function syncManualRefreshButtons(markets = {}) {
+      const isAdmin = currentUserProfile?.user?.role === "admin";
+      [["asx", "refreshAsxData"], ["us", "refreshUsData"]].forEach(([market, id]) => {
+        const running = ["queued", "running"].includes(String(markets?.[market]?.latest_refresh?.status));
+        const button = $(id);
+        button.disabled = !isAdmin || running;
+        button.textContent = running ? `${market.toUpperCase()} updating` : `Update ${market.toUpperCase()}`;
+      });
+    }
+
     async function api(path, options = {}) {
       const getToken = await authReady;
       const headers = new Headers(options.headers || {});
@@ -1169,16 +2177,20 @@
         const role = user.role || "viewer";
         $("authRole").textContent = role;
         $("authRole").hidden = false;
-        $("adminPanel").hidden = role !== "admin";
-        $("appTabs").hidden = role !== "admin";
+        $("adminPanel").hidden = true;
+        $("openOperations").hidden = role !== "admin";
+        $("feedbackAdminSection").hidden = role !== "admin";
+        $("appTabs").hidden = false;
         const canRunScans = role === "admin" || role === "analyst";
         $("runFilter").disabled = !canRunScans;
         $("runFilter").title = canRunScans ? "" : "An analyst account is required to run a new scan";
         if (user.email) $("topStatus").textContent = `Signed in as ${user.email}`;
+        if (role === "admin") loadFeedbackInbox().catch((error) => console.warn("Could not load feedback inbox", error));
       } catch (error) {
         $("authRole").hidden = true;
         $("adminPanel").hidden = true;
-        $("appTabs").hidden = true;
+        $("openOperations").hidden = true;
+        $("appTabs").hidden = false;
         console.warn("Could not load user profile", error);
       }
     }
@@ -1224,71 +2236,150 @@
       return `$${fmt.format(Math.round(number))}`;
     }
 
-    function renderAnalysis(summary, picks, insights = {}) {
-      const horizon = Number($("analysisHorizon").value || 0);
-      const horizonText = horizon ? `${horizon} day measured performance` : "Current price performance";
-      const totalPicks = summary.reduce((total, row) => total + Number(row.pick_count || 0), 0);
-      const pricedPicks = summary.reduce((total, row) => total + Number(row.priced_count || 0), 0);
-      const positivePicks = summary.reduce((total, row) => total + Number(row.positive_count || 0), 0);
-      const weightedReturn = summary.reduce((total, row) =>
-        total + Number(row.average_return_percent || 0) * Number(row.priced_count || 0), 0);
-      $("analysisPickCount").textContent = fmt.format(totalPicks);
-      $("analysisPricedCount").textContent = fmt.format(pricedPicks);
-      $("analysisPositiveRate").textContent = pricedPicks ? `${((positivePicks / pricedPicks) * 100).toFixed(1)}%` : "-";
-      const averageReturn = pricedPicks ? weightedReturn / pricedPicks : null;
-      $("analysisAverageReturn").textContent = returnText(averageReturn);
-      $("analysisAverageReturn").className = returnClass(averageReturn);
+    function analysisPickWindow(payload) {
+      const times = (payload?.series || [])
+        .flatMap((series) => series.points || [])
+        .map((point) => new Date(`${point.date}T00:00:00Z`).getTime())
+        .filter(Number.isFinite);
+      return times.length ? {start: Math.min(...times), end: Math.max(...times)} : null;
+    }
 
-      $("analysisSummaryBody").innerHTML = summary.length ? summary.map((row) => {
-        const priced = Number(row.priced_count || 0);
-        const positive = Number(row.positive_count || 0);
-        const hitRate = priced ? `${((positive / priced) * 100).toFixed(1)}%` : "-";
-        return `<tr>
-          <td>${labelText(row.label)}</td><td>${fmt.format(Number(row.pick_count || 0))}</td>
-          <td>${fmt.format(priced)}</td><td>${fmt.format(positive)}</td><td>${hitRate}</td>
-          <td class="${returnClass(row.average_return_percent)}">${returnText(row.average_return_percent)}</td>
-          <td class="${returnClass(row.median_return_percent)}">${returnText(row.median_return_percent)}</td>
-          <td>${Number(row.average_age_days || 0).toFixed(0)}d</td>
-        </tr>`;
-      }).join("") : '<tr><td colspan="8" style="text-align:left;color:var(--muted)">No current appraisals with price history.</td></tr>';
+    function benchmarkPointsInPickWindow(payload, pickWindow) {
+      if (!pickWindow) return [];
+      const points = (payload?.benchmark?.points || []).filter((point) => {
+        const time = new Date(`${point.date}T00:00:00Z`).getTime();
+        return Number.isFinite(time) && time >= pickWindow.start && time <= pickWindow.end;
+      });
+      const baseline = Number(points[0]?.return_percent);
+      const baselineFactor = 1 + baseline / 100;
+      if (!Number.isFinite(baseline) || baselineFactor <= 0) return points;
+      return points.map((point) => {
+        const value = Number(point.return_percent);
+        return {
+          ...point,
+          return_percent: Number.isFinite(value)
+            ? (((1 + value / 100) / baselineFactor) - 1) * 100
+            : point.return_percent
+        };
+      });
+    }
 
-      const underperformers = insights.underperformers || [];
-      $("analysisReviewBody").innerHTML = underperformers.length ? underperformers.map((row) => `<tr>
-        <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
-        <td><a class="ticker analysis-chart-link" href="#" data-market="${escapeHtml(row.market)}" data-ticker="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</a></td>
-        <td>${labelText(row.label)}</td>
-        <td>${escapeHtml(row.sector || row.industry || "Unknown")}</td>
-        <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
-        <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
-      </tr>`).join("") : '<tr><td colspan="6" style="text-align:left;color:var(--muted)">No winner or potential-winner picks are underperforming for this view.</td></tr>';
-      $("analysisReviewMeta").textContent = `${fmt.format(underperformers.length)} weak high-conviction picks`;
+    function analysisSources(payload) {
+      const sources = (payload?.series || []).map((series) => ({...series, name: labelText(series.label)}));
+      const benchmark = payload?.benchmark || {};
+      const pickWindow = analysisPickWindow(payload);
+      sources.push({
+        label: "benchmark",
+        name: benchmark.name || "Market benchmark",
+        points: benchmarkPointsInPickWindow(payload, pickWindow)
+      });
+      return sources;
+    }
 
-      const patterns = insights.patterns || [];
-      $("analysisPatternBody").innerHTML = patterns.length ? patterns.map((row) => {
-        const hitRate = Number.isFinite(Number(row.hit_rate_percent)) ? `${Number(row.hit_rate_percent).toFixed(1)}%` : "-";
-        return `<tr>
-          <td>${escapeHtml(row.dimension)}</td>
-          <td>${escapeHtml(row.group_name)}</td>
-          <td>${labelText(row.label)}</td>
-          <td>${fmt.format(Number(row.pick_count || 0))}</td>
-          <td>${hitRate}</td>
-          <td class="${returnClass(row.average_return_percent)}">${returnText(row.average_return_percent)}</td>
-          <td>${shortMoney(row.average_market_cap)}</td>
-        </tr>`;
-      }).join("") : '<tr><td colspan="7" style="text-align:left;color:var(--muted)">No winner or potential-winner pattern groups found.</td></tr>';
-      $("analysisPatternMeta").textContent = `${fmt.format(patterns.length)} grouped signals`;
+    function renderAnalysisLegend(payload) {
+      const previous = new Map(Array.from(document.querySelectorAll(".analysis-series-toggle"))
+        .map((input) => [input.value, input.checked]));
+      $("analysisLegend").innerHTML = analysisSources(payload).map((series) => {
+        const latest = series.points.at(-1);
+        const count = Number(latest?.sample_count || 0);
+        const suffix = series.label === "benchmark" ? "" : ` (${fmt.format(count)})`;
+        const enabled = series.points.length > 0;
+        const checked = enabled && (previous.has(series.label) ? previous.get(series.label) : true);
+        return `<label style="--series-color:${analysisSeriesColors[series.label] || "#ffffff"}">
+          <input class="analysis-series-toggle" type="checkbox" value="${escapeHtml(series.label)}" ${checked ? "checked" : ""} ${enabled ? "" : "disabled"}>
+          <span class="analysis-legend-swatch"></span>${escapeHtml(series.name)}${suffix}
+        </label>`;
+      }).join("");
+      document.querySelectorAll(".analysis-series-toggle").forEach((input) => input.addEventListener("change", drawAnalysisChart));
+    }
 
-      $("analysisPicksBody").innerHTML = picks.length ? picks.map((row) => `<tr>
-        <td>${String(row.market || "").toUpperCase()}</td>
-        <td><a class="ticker analysis-chart-link" href="#" data-market="${row.market}" data-ticker="${row.ticker}">${row.ticker}</a></td>
-        <td>${labelText(row.label)}</td>
-        <td>${row.event_at_utc ? new Date(row.event_at_utc).toLocaleDateString() : "-"}</td>
-        <td>${Number.isFinite(Number(row.signal_price)) ? Number(row.signal_price).toFixed(2) : "-"}</td>
-        <td>${Number.isFinite(Number(row.latest_price)) ? Number(row.latest_price).toFixed(2) : "-"}</td>
-        <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
-        <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
-      </tr>`).join("") : '<tr><td colspan="8" style="text-align:left;color:var(--muted)">No active appraisals found.</td></tr>';
-      $("analysisPickMeta").textContent = `${fmt.format(picks.length)} active appraisals - ${horizonText}`;
+    function drawAnalysisChart() {
+      const canvas = $("analysisChart");
+      const payload = lastAnalysisPayload;
+      if (!canvas || !payload || $("analysisPage").hidden) return;
+      const bounds = canvas.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return;
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.round(bounds.width * ratio);
+      canvas.height = Math.round(bounds.height * ratio);
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, bounds.width, bounds.height);
+
+      const visible = new Set(Array.from(document.querySelectorAll(".analysis-series-toggle:checked")).map((input) => input.value));
+      const sources = analysisSources(payload).filter((series) => visible.has(series.label) && series.points.length);
+      const values = sources.flatMap((series) => series.points.map((point) => Number(point.return_percent)).filter(Number.isFinite));
+      const pickWindow = analysisPickWindow(payload);
+      const times = pickWindow ? [pickWindow.start, pickWindow.end] : [];
+      const empty = $("analysisChartEmpty");
+      empty.hidden = values.length > 0;
+      if (!values.length || !times.length) return;
+
+      const margin = {top: 16, right: 20, bottom: 32, left: 58};
+      const plotWidth = Math.max(10, bounds.width - margin.left - margin.right);
+      const plotHeight = Math.max(10, bounds.height - margin.top - margin.bottom);
+      const minTime = Math.min(...times);
+      const maxTime = Math.max(...times);
+      let minValue = Math.min(0, ...values);
+      let maxValue = Math.max(0, ...values);
+      const valueSpan = Math.max(1, maxValue - minValue);
+      minValue -= valueSpan * .08;
+      maxValue += valueSpan * .08;
+      const x = (time) => margin.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * plotWidth;
+      const y = (value) => margin.top + ((maxValue - value) / Math.max(1, maxValue - minValue)) * plotHeight;
+
+      ctx.font = '11px system-ui, -apple-system, "Segoe UI", sans-serif';
+      ctx.textBaseline = "middle";
+      for (let index = 0; index <= 5; index += 1) {
+        const value = maxValue - ((maxValue - minValue) * index / 5);
+        const py = y(value);
+        ctx.beginPath();
+        ctx.strokeStyle = Math.abs(value) < valueSpan / 10 ? "#43534c" : "#22302b";
+        ctx.lineWidth = 1;
+        ctx.moveTo(margin.left, py);
+        ctx.lineTo(bounds.width - margin.right, py);
+        ctx.stroke();
+        ctx.fillStyle = "#87968f";
+        ctx.textAlign = "right";
+        ctx.fillText(`${value.toFixed(valueSpan < 10 ? 1 : 0)}%`, margin.left - 8, py);
+      }
+
+      const dateFormat = new Intl.DateTimeFormat("en-AU", {day: "2-digit", month: "short", year: "2-digit", timeZone: "UTC"});
+      [0, .5, 1].forEach((position) => {
+        const time = minTime + (maxTime - minTime) * position;
+        ctx.fillStyle = "#87968f";
+        ctx.textAlign = position === 0 ? "left" : position === 1 ? "center" : "right";
+        ctx.fillText(dateFormat.format(new Date(time)), margin.left + plotWidth * position, bounds.height - 12);
+      });
+
+      for (const series of sources) {
+        const points = series.points
+          .map((point) => ({time: new Date(`${point.date}T00:00:00Z`).getTime(), value: Number(point.return_percent)}))
+          .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value));
+        if (!points.length) continue;
+        const stride = Math.max(1, Math.ceil(points.length / Math.max(1, plotWidth * 1.5)));
+        ctx.beginPath();
+        ctx.strokeStyle = analysisSeriesColors[series.label] || "#ffffff";
+        ctx.lineWidth = ["winner", "all_picks"].includes(series.label) ? 2.2 : 1.6;
+        ctx.setLineDash(series.label === "benchmark" ? [6, 5] : series.label === "all_picks" ? [3, 3] : []);
+        let started = false;
+        points.forEach((point, index) => {
+          if (index % stride && index !== points.length - 1) return;
+          const px = x(point.time);
+          const py = y(point.value);
+          if (!started) {
+            ctx.moveTo(px, py);
+            started = true;
+          } else {
+            ctx.lineTo(px, py);
+          }
+        });
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+
+    function bindAnalysisChartLinks() {
       document.querySelectorAll(".analysis-chart-link").forEach((link) => {
         link.addEventListener("click", (event) => {
           event.preventDefault();
@@ -1300,63 +2391,435 @@
       });
     }
 
+    function reviewChartParams(row) {
+      return new URLSearchParams({
+        market: row.market,
+        cache_file: marketDefaults[row.market]?.cacheFile || "stock_cache.sqlite",
+        provider: "yfinance",
+        ticker: row.ticker,
+        interval: "daily",
+        range: "1y",
+        ma: "30,90,180,360,700"
+      });
+    }
+
+    function setSelectedReviewRow(ownerUid, market, ticker) {
+      document.querySelectorAll("#analysisReviewBody tr[data-review-ticker]").forEach((row) => {
+        const selected = row.dataset.reviewOwner === ownerUid
+          && row.dataset.reviewMarket === market
+          && row.dataset.reviewTicker === ticker;
+        row.classList.toggle("selected", selected);
+        row.setAttribute("aria-selected", String(selected));
+      });
+    }
+
+    async function loadAnalysisReviewChart(row) {
+      if (!row?.ticker || !row?.market) return;
+      const requestToken = ++reviewChartRequestToken;
+      setSelectedReviewRow(row.firebase_uid, row.market, row.ticker);
+      $("analysisReviewChartTitle").textContent = row.ticker;
+      $("analysisReviewChartMeta").textContent = "Loading daily candles...";
+      $("analysisReviewChartEmpty").hidden = true;
+      $("analysisReviewOpenMarket").hidden = true;
+      try {
+        const payload = await api(`/api/chart?${reviewChartParams(row).toString()}`);
+        if (requestToken !== reviewChartRequestToken) return;
+        lastReviewChart = {
+          candles: payload.candles || [],
+          ticker: payload.ticker || row.ticker,
+          movingAverages: payload.moving_averages || {},
+          interval: payload.interval || "daily",
+          range: payload.range || "1y",
+          market: payload.market || row.market,
+          ownerUid: row.firebase_uid
+        };
+        drawCandles(lastReviewChart.candles, lastReviewChart.ticker, lastReviewChart.movingAverages, {
+          canvas: $("analysisReviewChart"),
+          interval: lastReviewChart.interval,
+          range: lastReviewChart.range,
+          trackState: false
+        });
+        $("analysisReviewChartMeta").textContent = payload.count
+          ? `${labelText(row.label)} | ${returnText(row.return_percent)} | ${payload.start} to ${payload.end}`
+          : `${row.ticker} has no cached candle data`;
+        $("analysisReviewChartEmpty").textContent = payload.count
+          ? ""
+          : "No cached candle data is available for this stock.";
+        $("analysisReviewChartEmpty").hidden = !!payload.count;
+        $("analysisReviewOpenMarket").dataset.market = row.market;
+        $("analysisReviewOpenMarket").dataset.ticker = row.ticker;
+        $("analysisReviewOpenMarket").hidden = false;
+      } catch (error) {
+        if (requestToken !== reviewChartRequestToken) return;
+        lastReviewChart = null;
+        $("analysisReviewChartMeta").textContent = error.message;
+        $("analysisReviewChartEmpty").textContent = "The review chart could not be loaded.";
+        $("analysisReviewChartEmpty").hidden = false;
+      }
+    }
+
+    function bindAnalysisReviewRows() {
+      document.querySelectorAll("#analysisReviewBody tr[data-review-ticker]").forEach((tableRow) => {
+        const select = () => {
+          const pick = lastAnalysisReviewPicks.find((row) =>
+            row.firebase_uid === tableRow.dataset.reviewOwner
+            && row.market === tableRow.dataset.reviewMarket
+            && row.ticker === tableRow.dataset.reviewTicker
+          );
+          if (pick) loadAnalysisReviewChart(pick);
+        };
+        tableRow.addEventListener("click", select);
+        tableRow.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            select();
+          }
+        });
+      });
+      document.querySelectorAll("#analysisReviewBody [data-confirm-label]").forEach((button) => {
+        button.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          const tableRow = button.closest("tr[data-review-ticker]");
+          if (!tableRow) return;
+          const buttons = tableRow.querySelectorAll("[data-confirm-label]");
+          buttons.forEach((item) => { item.disabled = true; });
+          $("analysisManualStatus").textContent = `Saving ${tableRow.dataset.reviewTicker} as ${labelText(button.dataset.confirmLabel)}...`;
+          $("analysisManualStatus").className = "analysis-manual-status status-line warn";
+          try {
+            await api("/api/analysis/pick", {
+              method: "POST",
+              body: JSON.stringify({
+                market: tableRow.dataset.reviewMarket,
+                ticker: tableRow.dataset.reviewTicker,
+                label: button.dataset.confirmLabel,
+                target_uid: tableRow.dataset.reviewOwner
+              })
+            });
+            $("analysisManualStatus").textContent = `${tableRow.dataset.reviewTicker} moved to ${labelText(button.dataset.confirmLabel)}.`;
+            $("analysisManualStatus").className = "analysis-manual-status status-line ok";
+            await loadAnalysis();
+          } catch (error) {
+            $("analysisManualStatus").textContent = error.message;
+            $("analysisManualStatus").className = "analysis-manual-status status-line bad";
+            buttons.forEach((item) => { item.disabled = false; });
+          }
+        });
+      });
+    }
+
+    function renderAnalysisReview(reviewPicks) {
+      lastAnalysisReviewPicks = reviewPicks;
+      $("analysisReviewBody").innerHTML = reviewPicks.length ? reviewPicks.map((row) => `<tr
+        data-review-owner="${escapeHtml(row.firebase_uid)}"
+        data-review-market="${escapeHtml(row.market)}"
+        data-review-ticker="${escapeHtml(row.ticker)}"
+        tabindex="0"
+        aria-selected="false"
+      >
+        <td title="${escapeHtml(row.owner_email || "Team member")}">${escapeHtml(row.owner_email || "Team member")}</td>
+        <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
+        <td><span class="ticker">${escapeHtml(row.ticker)}</span></td>
+        <td>${row.event_at_utc ? new Date(row.event_at_utc).toLocaleDateString() : "-"}</td>
+        <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
+        <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
+        <td><div class="analysis-review-decision">
+          <button type="button" data-confirm-label="winner" title="Confirm ${escapeHtml(row.ticker)} as a winner">Winner</button>
+          <button type="button" data-confirm-label="bad" title="Confirm ${escapeHtml(row.ticker)} as bad">Bad</button>
+        </div></td>
+      </tr>`).join("") : '<tr><td colspan="7" style="text-align:left;color:var(--muted)">No stocks currently need confirmation.</td></tr>';
+      $("analysisReviewMeta").textContent = `${fmt.format(reviewPicks.length)} awaiting review`;
+      bindAnalysisReviewRows();
+      if (reviewPicks.length) {
+        const selected = lastReviewChart
+          ? reviewPicks.find((row) => row.firebase_uid === lastReviewChart.ownerUid
+            && row.market === lastReviewChart.market && row.ticker === lastReviewChart.ticker)
+          : null;
+        loadAnalysisReviewChart(selected || reviewPicks[0]);
+      } else {
+        reviewChartRequestToken += 1;
+        lastReviewChart = null;
+        $("analysisReviewChartTitle").textContent = "No stocks awaiting review";
+        $("analysisReviewChartMeta").textContent = "Needs Confirmation picks will appear here.";
+        $("analysisReviewChartEmpty").textContent = "No stocks currently need confirmation.";
+        $("analysisReviewChartEmpty").hidden = false;
+        $("analysisReviewOpenMarket").hidden = true;
+      }
+    }
+
+    function analysisPickSortValue(row, key) {
+      if (["event_at_utc", "latest_date"].includes(key)) {
+        const value = key === "latest_date" ? (row.latest_date || row.measured_at_utc) : row[key];
+        const time = value ? new Date(value).getTime() : NaN;
+        return Number.isFinite(time) ? time : null;
+      }
+      if (["signal_price", "latest_price", "return_percent"].includes(key)) {
+        if (row[key] === null || row[key] === undefined || row[key] === "") return null;
+        const value = Number(row[key]);
+        return Number.isFinite(value) ? value : null;
+      }
+      const value = String(row[key] ?? "").trim().toLowerCase();
+      return value || null;
+    }
+
+    function sortedAnalysisPicks(picks, sortState) {
+      const {key, direction} = sortState;
+      const multiplier = direction === "desc" ? -1 : 1;
+      return picks.map((row, index) => ({row, index})).sort((left, right) => {
+        const a = analysisPickSortValue(left.row, key);
+        const b = analysisPickSortValue(right.row, key);
+        if (a === null && b === null) return left.index - right.index;
+        if (a === null) return 1;
+        if (b === null) return -1;
+        const comparison = typeof a === "string" && typeof b === "string"
+          ? a.localeCompare(b, undefined, {numeric: true})
+          : Number(a) - Number(b);
+        return comparison ? comparison * multiplier : left.index - right.index;
+      }).map((item) => item.row);
+    }
+
+    function syncAnalysisSortHeaders(group) {
+      const sortState = analysisGroupSort[group];
+      document.querySelectorAll(`.analysis-sort[data-analysis-group="${group}"]`).forEach((button) => {
+        const active = button.dataset.sortKey === sortState.key;
+        const heading = button.closest("th");
+        button.toggleAttribute("data-direction", active);
+        if (active) button.dataset.direction = sortState.direction;
+        else delete button.dataset.direction;
+        heading?.setAttribute("aria-sort", active ? (sortState.direction === "asc" ? "ascending" : "descending") : "none");
+      });
+    }
+
+    function changeAnalysisPickSort(group, key) {
+      const sortState = analysisGroupSort[group];
+      if (!sortState) return;
+      if (sortState.key === key) {
+        sortState.direction = sortState.direction === "asc" ? "desc" : "asc";
+      } else {
+        sortState.key = key;
+        sortState.direction = ["event_at_utc", "latest_date", "return_percent"].includes(key) ? "desc" : "asc";
+      }
+      renderAnalysisPicks();
+    }
+
+    function analysisPickRows(picks, label) {
+      return picks.length ? picks.map((row) => `<tr class="label-${label}">
+        <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
+        <td><a class="ticker analysis-chart-link" href="#" data-market="${escapeHtml(row.market)}" data-ticker="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</a></td>
+        <td>${row.event_at_utc ? new Date(row.event_at_utc).toLocaleDateString() : "-"}</td>
+        <td>${Number.isFinite(Number(row.signal_price)) ? Number(row.signal_price).toFixed(2) : "-"}</td>
+        <td>${Number.isFinite(Number(row.latest_price)) ? Number(row.latest_price).toFixed(2) : "-"}</td>
+        <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
+        <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
+      </tr>`).join("") : `<tr><td colspan="7" style="text-align:left;color:var(--muted)">No ${labelText(label).toLowerCase()} picks.</td></tr>`;
+    }
+
+    function renderAnalysisPicks() {
+      const groups = [
+        ["winner", "analysisWinnerBody", "analysisWinnerMeta"],
+        ["maybe", "analysisMaybeBody", "analysisMaybeMeta"],
+        ["bad", "analysisBadBody", "analysisBadMeta"]
+      ];
+      let visibleCount = 0;
+      groups.forEach(([label, bodyId, metaId]) => {
+        const picks = sortedAnalysisPicks(lastAnalysisPicks.filter((row) => row.label === label), analysisGroupSort[label]);
+        visibleCount += picks.length;
+        $(bodyId).innerHTML = analysisPickRows(picks, label);
+        $(metaId).textContent = `${fmt.format(picks.length)} ${picks.length === 1 ? "pick" : "picks"}`;
+        syncAnalysisSortHeaders(label);
+      });
+      $("analysisPickMeta").textContent = `${fmt.format(visibleCount)} active picks`;
+      bindAnalysisChartLinks();
+    }
+
+    function renderAnalysis(payload, picks, reviewPicks) {
+      lastAnalysisPayload = payload;
+      lastAnalysisPicks = picks;
+      const coverage = payload.coverage || {};
+      $("analysisPickCount").textContent = fmt.format(Number(coverage.active_pick_count || 0));
+      $("analysisTickerCount").textContent = fmt.format(Number(coverage.ticker_count || 0));
+      $("analysisBenchmarkName").textContent = payload.benchmark?.available
+        ? payload.benchmark.name
+        : `${payload.benchmark?.name || "Benchmark"} not loaded`;
+      const firstSignal = coverage.earliest_signal_date || "-";
+      const lastSignal = coverage.latest_signal_date || "-";
+      $("analysisSignalRange").textContent = firstSignal === lastSignal ? firstSignal : `${firstSignal} to ${lastSignal}`;
+
+      renderAnalysisLegend(payload);
+      const pickWindow = analysisPickWindow(payload);
+      $("analysisChartMeta").textContent = pickWindow
+        ? `${payload.interval === "weekly" ? "Weekly" : "Daily"} picks, ${new Date(pickWindow.start).toISOString().slice(0, 10)} to ${new Date(pickWindow.end).toISOString().slice(0, 10)}`
+        : payload.benchmark?.unavailable_reason || "No priced picks in this range";
+      drawAnalysisChart();
+
+      renderAnalysisReview(reviewPicks);
+      renderAnalysisPicks();
+    }
+
     async function loadAnalysis() {
-      $("analysisStatus").textContent = "Loading online appraisal outcomes...";
+      $("analysisStatus").textContent = "Loading pick performance...";
       $("analysisStatus").className = "status-line warn";
       const market = encodeURIComponent($("analysisMarket").value);
-      const horizon = encodeURIComponent($("analysisHorizon").value);
+      const interval = encodeURIComponent($("analysisInterval").value);
+      const range = encodeURIComponent($("analysisRange").value);
       try {
-        const [summaryPayload, picksPayload, insightsPayload] = await Promise.all([
-          api(`/api/analysis/summary?market=${market}&horizon=${horizon}`),
-          api(`/api/analysis/picks?market=${market}&horizon=${horizon}&limit=250`),
-          api(`/api/analysis/insights?market=${market}&horizon=${horizon}`)
+        const [timeseriesPayload, picksPayload, reviewPayload] = await Promise.all([
+          api(`/api/analysis/timeseries?market=${market}&interval=${interval}&range=${range}`),
+          api(`/api/analysis/picks?market=${market}&horizon=0&limit=5000`),
+          api(`/api/analysis/picks?market=${market}&label=needs_confirmation&scope=team&horizon=0&limit=5000`)
         ]);
-        renderAnalysis(summaryPayload.summary || [], picksPayload.picks || [], insightsPayload);
-        $("analysisStatus").textContent = Number($("analysisHorizon").value || 0)
-          ? `${$("analysisHorizon").value} day measured performance`
-          : "Current price performance";
+        renderAnalysis(timeseriesPayload, picksPayload.picks || [], reviewPayload.picks || []);
+        $("analysisStatus").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
         $("analysisStatus").className = "status-line ok";
       } catch (error) {
         $("analysisStatus").textContent = error.message;
         $("analysisStatus").className = "status-line bad";
+        $("analysisChartMeta").textContent = "Performance data could not be loaded";
       }
     }
 
-    async function pollOutcomeJob(jobId) {
-      try {
-        const payload = await api(`/api/job?type=rating-outcomes&job_id=${encodeURIComponent(jobId)}`);
-        const job = payload.job || {};
-        $("analysisStatus").textContent = job.error || job.detail || job.message || "Recalculating outcomes...";
-        $("analysisStatus").className = `status-line ${job.success === false ? "bad" : job.running ? "warn" : "ok"}`;
-        if (job.running) {
-          setTimeout(() => pollOutcomeJob(jobId), 3500);
-          return;
-        }
-        $("recalculateOutcomes").disabled = false;
-        if (job.success) loadAnalysis();
-      } catch (error) {
-        $("analysisStatus").textContent = error.message;
-        $("analysisStatus").className = "status-line bad";
-        $("recalculateOutcomes").disabled = false;
+    async function addAnalysisNeedsConfirmation(event) {
+      event.preventDefault();
+      const button = $("analysisAddNeeds");
+      const ticker = $("analysisManualTicker").value.trim();
+      if (!ticker) {
+        $("analysisManualStatus").textContent = "Enter a ticker to add.";
+        $("analysisManualStatus").className = "analysis-manual-status status-line bad";
+        return;
       }
-    }
-
-    async function recalculateOutcomes() {
-      $("recalculateOutcomes").disabled = true;
-      $("analysisStatus").textContent = "Starting outcome recalculation...";
-      $("analysisStatus").className = "status-line warn";
+      button.disabled = true;
+      $("analysisManualStatus").textContent = `Adding ${ticker.toUpperCase()} for review...`;
+      $("analysisManualStatus").className = "analysis-manual-status status-line warn";
       try {
-        const response = await api("/api/admin/recalculate-rating-outcomes", {
+        const payload = await api("/api/analysis/pick", {
           method: "POST",
-          body: JSON.stringify({market: $("analysisMarket").value, horizons: [30, 90, 180, 360]})
+          body: JSON.stringify({market: $("analysisMarket").value, ticker, label: "needs_confirmation"})
         });
-        const job = response.job || {};
-        $("analysisStatus").textContent = job.detail || "Outcome recalculation queued.";
-        pollOutcomeJob(job.id);
+        $("analysisManualTicker").value = "";
+        $("analysisManualStatus").textContent = `${payload.ticker} added to Needs Confirmation.`;
+        $("analysisManualStatus").className = "analysis-manual-status status-line ok";
+        await loadAnalysis();
       } catch (error) {
-        $("analysisStatus").textContent = error.message;
-        $("analysisStatus").className = "status-line bad";
-        $("recalculateOutcomes").disabled = false;
+        $("analysisManualStatus").textContent = error.message;
+        $("analysisManualStatus").className = "analysis-manual-status status-line bad";
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function feedbackContext() {
+      const analysis = !$("analysisPage").hidden;
+      const ticker = String(lastChartTicker || $("chartTicker").value || "").trim().toUpperCase();
+      return {
+        category: $("feedbackCategory").value,
+        message: $("feedbackMessage").value,
+        page_path: window.location.pathname,
+        market: analysis ? $("analysisMarket").value : $("marketSelect").value,
+        ticker,
+        context: {
+          view: analysis ? "analysis" : "market",
+          scan_id: currentScanId,
+          viewport: `${window.innerWidth}x${window.innerHeight}`,
+          url_query: window.location.search.slice(0, 500)
+        }
+      };
+    }
+
+    function renderFeedbackInbox(payload) {
+      lastFeedbackItems = payload.feedback || [];
+      const counts = Object.fromEntries((payload.counts || []).map((item) => [item.status, Number(item.count || 0)]));
+      const newCount = counts.new || 0;
+      $("feedbackBadge").textContent = newCount > 99 ? "99+" : String(newCount);
+      $("feedbackBadge").hidden = newCount === 0;
+      $("feedbackList").innerHTML = lastFeedbackItems.length ? lastFeedbackItems.map((item) => {
+        const location = [String(item.market || "").toUpperCase(), item.ticker].filter(Boolean).join(" / ");
+        return `<article class="feedback-item" data-feedback-id="${Number(item.id)}">
+          <div class="feedback-item-head">
+            <span>#${Number(item.id)} · ${escapeHtml(item.category)}${location ? ` · ${escapeHtml(location)}` : ""}</span>
+            <time>${item.created_at_utc ? new Date(item.created_at_utc).toLocaleString() : ""}</time>
+          </div>
+          <p>${escapeHtml(item.message)}</p>
+          <div class="feedback-item-head"><span>${escapeHtml(item.user_email || "Unknown user")}</span><span>${escapeHtml(item.status)}</span></div>
+          <div class="actions">
+            <button type="button" data-feedback-copy="${Number(item.id)}">Copy</button>
+            ${item.status === "new" ? `<button type="button" data-feedback-status="reviewed" data-feedback-id="${Number(item.id)}">Mark reviewed</button>` : ""}
+            ${item.status !== "done" ? `<button type="button" data-feedback-status="done" data-feedback-id="${Number(item.id)}">Mark done</button>` : ""}
+          </div>
+        </article>`;
+      }).join("") : '<p class="status-line">No feedback matches this status.</p>';
+
+      document.querySelectorAll("[data-feedback-status]").forEach((button) => button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await api(`/api/admin/feedback/${button.dataset.feedbackId}`, {
+            method: "PATCH",
+            body: JSON.stringify({status: button.dataset.feedbackStatus})
+          });
+          await loadFeedbackInbox();
+        } catch (error) {
+          $("feedbackStatus").textContent = error.message;
+          $("feedbackStatus").className = "status-line bad";
+          button.disabled = false;
+        }
+      }));
+      document.querySelectorAll("[data-feedback-copy]").forEach((button) => button.addEventListener("click", async () => {
+        const item = lastFeedbackItems.find((entry) => Number(entry.id) === Number(button.dataset.feedbackCopy));
+        if (!item) return;
+        const text = [
+          `MoneyMaker feedback #${item.id}`,
+          `${item.category} · ${item.status} · ${item.user_email || "Unknown user"}`,
+          [item.market && String(item.market).toUpperCase(), item.ticker].filter(Boolean).join(" / "),
+          item.message,
+          item.page_path ? `Page: ${item.page_path}` : ""
+        ].filter(Boolean).join("\n");
+        try {
+          await navigator.clipboard.writeText(text);
+          button.textContent = "Copied";
+          setTimeout(() => { button.textContent = "Copy"; }, 1200);
+        } catch (_) {
+          $("feedbackStatus").textContent = "Clipboard access was blocked by the browser.";
+        }
+      }));
+    }
+
+    async function loadFeedbackInbox() {
+      if (currentUserProfile?.user?.role !== "admin") return;
+      const status = encodeURIComponent($("feedbackStatusFilter").value || "new");
+      renderFeedbackInbox(await api(`/api/admin/feedback?status=${status}&limit=100`));
+    }
+
+    function openFeedbackDialog() {
+      $("feedbackModal").classList.remove("hidden");
+      $("feedbackAdminSection").hidden = currentUserProfile?.user?.role !== "admin";
+      $("feedbackMessage").focus();
+      if (currentUserProfile?.user?.role === "admin") {
+        loadFeedbackInbox().catch((error) => {
+          $("feedbackList").innerHTML = `<p class="status-line bad">${escapeHtml(error.message)}</p>`;
+        });
+      }
+    }
+
+    function closeFeedbackDialog() {
+      $("feedbackModal").classList.add("hidden");
+      $("openFeedback").focus();
+    }
+
+    async function submitFeedback() {
+      const button = $("submitFeedback");
+      button.disabled = true;
+      $("feedbackStatus").textContent = "Sending...";
+      $("feedbackStatus").className = "status-line warn";
+      try {
+        const payload = await api("/api/feedback", {method: "POST", body: JSON.stringify(feedbackContext())});
+        $("feedbackMessage").value = "";
+        $("feedbackCharacterCount").textContent = "0 / 4000";
+        $("feedbackStatus").textContent = `Feedback #${payload.feedback.id} sent.`;
+        $("feedbackStatus").className = "status-line ok";
+        if (currentUserProfile?.user?.role === "admin") await loadFeedbackInbox();
+      } catch (error) {
+        $("feedbackStatus").textContent = error.message;
+        $("feedbackStatus").className = "status-line bad";
+      } finally {
+        button.disabled = false;
       }
     }
 
@@ -1383,40 +2846,76 @@
       $("tickerFile").value = defaults.tickerFile;
       $("provider").value = defaults.provider;
       $("chartTicker").value = defaults.chartTicker;
+      $("marketAsx").classList.toggle("active", $("marketSelect").value === "asx");
+      $("marketUs").classList.toggle("active", $("marketSelect").value === "us");
       $("tickerSourceStatus").textContent = $("marketSelect").value === "us"
         ? "US uses Nasdaq Trader tickers and a separate SQLite cache"
         : "ASX uses the existing local ticker files and cache";
-      loadTickerFiles();
       refreshStatus().catch((error) => {
         $("topStatus").textContent = error.message;
         $("topStatus").className = "status-line bad";
-      }).finally(() => loadChart());
+      }).then(() => loadSharedScan()).finally(() => loadChart());
     }
 
     async function refreshStatus() {
-      const cache = encodeURIComponent($("cacheFile").value.trim() || "stock_cache.sqlite");
-      const market = encodeURIComponent($("marketSelect").value);
-      const payload = await api(`/api/status?market=${market}&cache_file=${cache}`);
-      const s = payload.status;
-      $("metricTickers").textContent = fmt.format(s.ticker_count || 0);
-      $("metricRows").textContent = fmt.format(s.history_rows || 0);
-      $("metricLatest").textContent = s.latest_date || "-";
-      $("cachePill").textContent = s.exists ? `${s.size_mb} MB` : "No cache";
-      $("cachePill").className = `pill ${s.exists ? "ok" : "warn"}`;
-      const refresh = payload.refresh || null;
-      if (refresh && refresh.running) {
-        $("topStatus").textContent = `${String(refresh.market || $("marketSelect").value).toUpperCase()} refresh running: ${fmt.format(refresh.current || 0)} / ${fmt.format(refresh.total || 0)} tickers, ${refresh.log || ""}`.trim();
-        $("topStatus").className = "status-line warn";
+      const payload = await api("/api/markets/status");
+      const markets = payload.markets || {};
+      renderMarketStatusStrip(markets);
+      const market = $("marketSelect").value;
+      const s = markets[market] || {};
+      $("metricTickers").textContent = fmt.format(s.covered_tickers || 0);
+      $("metricRows").textContent = fmt.format(s.weekly_metric_rows || 0);
+      $("metricLatest").textContent = s.latest_bar_date || "-";
+      const refresh = s.latest_refresh || null;
+      const topStatus = $("topStatus");
+      topStatus.disabled = true;
+      topStatus.classList.remove("is-clickable");
+      topStatus.dataset.refreshId = "";
+      topStatus.dataset.market = "";
+      if (refresh && ["queued", "running"].includes(String(refresh.status))) {
+        topStatus.textContent = `${market.toUpperCase()} refresh ${refresh.status}: ${fmt.format(refresh.completed_tickers || 0)} / ${fmt.format(refresh.total_tickers || 0)} tickers - view live`;
+        topStatus.className = "status-line warn is-clickable";
+        topStatus.disabled = false;
+        topStatus.dataset.refreshId = refresh.id || "";
+        topStatus.dataset.market = market;
+      } else if (refresh && refresh.status === "failed") {
+        $("topStatus").textContent = `${market.toUpperCase()} update failed; data through ${s.latest_bar_date || "unknown"}`;
+        $("topStatus").className = "status-line bad";
       } else {
-        $("topStatus").textContent = s.exists
-          ? `${fmt.format(s.ticker_count || 0)} stocks online, ${fmt.format(s.history_rows || 0)} weekly metric rows, latest ${s.latest_date || "-"}`
-          : "No online market data found";
-        $("topStatus").className = `status-line ${s.exists ? "ok" : "warn"}`;
+        $("topStatus").textContent = `${market.toUpperCase()} data through ${s.latest_bar_date || "unknown"}; updated ${formatBrisbane(s.last_successful_refresh_at_utc || s.database_refreshed_at_utc, false)}`;
+        $("topStatus").className = "status-line ok";
       }
-      if (s.tickers && s.tickers.length && !$("chartTicker").value.trim()) {
-        $("chartTicker").value = s.tickers[0];
+      if (marketStatusTimer) clearTimeout(marketStatusTimer);
+      const hasRunningRefresh = Object.values(markets).some((item) =>
+        ["queued", "running"].includes(String(item?.latest_refresh?.status))
+      );
+      if (hasRunningRefresh) {
+        marketStatusTimer = setTimeout(() => refreshStatus().catch(() => {}), 5000);
       }
-      updateJob(refresh && refresh.running ? refresh : payload.job);
+      return markets;
+    }
+
+    async function startManualMarketRefresh(market) {
+      const status = $("manualRefreshStatus");
+      status.textContent = `Queueing ${market.toUpperCase()} update...`;
+      status.className = "status-line admin-status warn";
+      $(market === "asx" ? "refreshAsxData" : "refreshUsData").disabled = true;
+      try {
+        const response = await api("/api/admin/refresh-market", {
+          method: "POST",
+          body: JSON.stringify({market})
+        });
+        const refreshId = response.refresh_job_id || response.job?.summary?.refresh_job_id || "";
+        status.textContent = response.skipped
+          ? `${market.toUpperCase()} update is already running`
+          : `${market.toUpperCase()} update queued`;
+        await refreshStatus();
+        if (refreshId) openLiveRefresh(market, refreshId);
+      } catch (error) {
+        status.textContent = error.message;
+        status.className = "status-line admin-status bad";
+        refreshStatus().catch(() => syncManualRefreshButtons());
+      }
     }
 
     async function loadTickerFiles() {
@@ -1502,10 +3001,13 @@
       });
       try {
         const payload = await api(`/api/chart?${params.toString()}`);
-        renderCompanyProfile(payload.company || {}, payload.ticker || selectedTicker);
+        renderCompanyProfile(payload.company || {}, payload.ticker || selectedTicker, payload.appraisal || null);
         drawCandles(payload.candles || [], payload.ticker, payload.moving_averages || {});
+        const unavailable = Object.entries(payload.moving_average_availability || {})
+          .filter(([, detail]) => !detail.available)
+          .map(([period, detail]) => `MA ${period} needs ${detail.required_bars} ${payload.interval} bars; ${detail.cached_bars} cached`);
         $("chartStatus").textContent = payload.count
-          ? `${payload.ticker} ${payload.interval} candles, ${payload.start} to ${payload.end}`
+          ? `${payload.ticker} ${payload.interval} candles, ${payload.start} to ${payload.end}${unavailable.length ? `. ${unavailable.join(". ")}` : ""}`
           : `${payload.ticker || selectedTicker}: no cached candles`;
       } catch (error) {
         renderCompanyProfile({}, selectedTicker);
@@ -1516,12 +3018,16 @@
       }
     }
 
-    function drawCandles(candles, ticker, movingAverages = {}) {
-      lastCandles = candles;
-      lastChartTicker = ticker || lastChartTicker;
-      lastMovingAverages = movingAverages || {};
-      const canvas = $("priceChart");
+    function drawCandles(candles, ticker, movingAverages = {}, options = {}) {
+      if (options.trackState !== false) {
+        lastCandles = candles;
+        lastChartTicker = ticker || lastChartTicker;
+        lastMovingAverages = movingAverages || {};
+      }
+      const canvas = options.canvas || $("priceChart");
       const box = canvas.parentElement;
+      const interval = options.interval || $("chartInterval").value;
+      const range = options.range || $("chartRange").value;
       const dpr = window.devicePixelRatio || 1;
       const width = Math.max(320, box.clientWidth);
       const height = Math.max(260, box.clientHeight);
@@ -1643,7 +3149,7 @@
       ctx.font = "13px Segoe UI, sans-serif";
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
-      ctx.fillText(`${ticker} ${$("chartInterval").value.toUpperCase()} ${$("chartRange").value.toUpperCase()}`, pad.left, 8);
+      ctx.fillText(`${ticker} ${interval.toUpperCase()} ${range.toUpperCase()}`, pad.left, 8);
 
       let legendX = pad.left;
       Object.entries(movingAverages || {}).forEach(([period, values]) => {
@@ -1666,19 +3172,113 @@
       });
     }
 
+    function renderProgressSteps(stage, success, stages = progressStageOrder) {
+      const currentIndex = stages.findIndex((item) => item.toLowerCase() === String(stage || "").toLowerCase());
+      const doneIndex = success ? stages.length - 1 : currentIndex;
+      $("progressSteps").innerHTML = stages.map((item, index) => {
+        const statusClass = index < doneIndex ? "done" : index === currentIndex ? "active" : "";
+        return `<div class="progress-step ${statusClass}"><span class="progress-step-dot">${index + 1}</span><span>${item}</span></div>`;
+      }).join("");
+    }
+
+    function appendProgressEvents(events = []) {
+      if (!events.length) return;
+      const box = $("progressEvents");
+      for (const event of events.slice(-20)) {
+        const row = document.createElement("div");
+        row.className = "progress-event";
+        const at = event.created_at_utc ? formatBrisbane(event.created_at_utc) : "";
+        row.innerHTML = `<strong>${escapeHtml(event.stage || event.stage_code || "Working")} ${at ? `at ${escapeHtml(at)}` : ""}</strong>${escapeHtml(event.message || event.status || "")}`;
+        box.appendChild(row);
+      }
+      while (box.children.length > 30) box.removeChild(box.firstElementChild);
+    }
+
     function updateProgress(job, title) {
       $("progressTitle").textContent = title;
       $("progressStage").textContent = job.stage || "Working";
       $("progressDetail").textContent = job.error || job.detail || job.message || "Working...";
       const total = job.total || 0;
       $("progressCount").textContent = total ? `${job.current || 0} / ${total}` : `${job.current || 0}`;
-      $("progressPercent").textContent = `${job.percent || 0}%`;
-      $("progressFill").style.width = `${job.percent || 0}%`;
+      const percent = Number(job.percent);
+      const hasPercent = Number.isFinite(percent) && percent > 0;
+      $("progressPercent").textContent = hasPercent ? `${percent}%` : "Working";
+      $("progressFill").style.width = hasPercent ? `${percent}%` : "35%";
+      $("progressFill").classList.toggle("indeterminate", !hasPercent && !!job.running);
+      $("progressStarted").textContent = formatBrisbane(job.started_at_utc);
+      $("progressElapsed").textContent = elapsedText(job.elapsed_seconds);
+      $("progressSnapshot").textContent = job.summary?.market_snapshot_date || "-";
+      renderProgressSteps(job.stage, job.success === true);
       $("modalFetchLog").textContent = job.log || job.error || (job.summary && job.summary.error ? job.summary.error : "");
-      $("closeProgress").disabled = !!job.running;
-      if (job.running || (!$("progressModal").classList.contains("hidden") && job.success !== null)) {
-        $("progressModal").classList.remove("hidden");
+    }
+
+    function renderRefreshBatches(batches = [], refresh = {}) {
+      const box = $("progressEvents");
+      box.replaceChildren();
+      const failed = batches.filter((batch) => batch.status === "failed");
+      const running = batches.filter((batch) => batch.status === "running");
+      const completed = batches.filter((batch) => batch.status === "succeeded").slice(-6);
+      const queued = batches.filter((batch) => batch.status === "queued").slice(0, 4);
+      const visible = [...failed.slice(-4), ...completed, ...running, ...queued]
+        .sort((left, right) => Number(left.batch_index) - Number(right.batch_index));
+      for (const batch of visible) {
+        const row = document.createElement("div");
+        row.className = `progress-event ${batch.status || ""}`;
+        const range = [batch.first_ticker, batch.last_ticker].filter(Boolean).join(" to ");
+        const time = batch.status === "running" && batch.started_at_utc
+          ? `, running since ${formatBrisbane(batch.started_at_utc)}`
+          : batch.finished_at_utc ? `, finished ${formatBrisbane(batch.finished_at_utc)}` : "";
+        row.innerHTML = `<strong>Batch ${fmt.format(batch.batch_index)} of ${fmt.format(refresh.batch_counts?.total || batches.length)}: ${escapeHtml(batch.status || "queued")}</strong>${escapeHtml(`${batch.ticker_count || 0} tickers${range ? ` (${range})` : ""}, attempt ${batch.attempts || 0}${time}${batch.error ? ` - ${batch.error}` : ""}`)}`;
+        box.appendChild(row);
       }
+      if (!visible.length) box.textContent = "Waiting for the first batch to start.";
+    }
+
+    async function pollLiveRefresh(market, refreshJobId, pollToken) {
+      try {
+        const payload = await api(`/api/refresh/job?refresh_job_id=${encodeURIComponent(refreshJobId)}`);
+        if (pollToken !== activeRefreshPollToken) return;
+        const refresh = payload.refresh || {};
+        updateProgress(refresh, `${String(market).toUpperCase()} Market Refresh`);
+        renderProgressSteps(refresh.stage, refresh.success === true, refreshStageOrder);
+        renderRefreshBatches(payload.batches || [], refresh);
+        $("progressSnapshot").textContent = `${refresh.batch_counts?.completed || 0} / ${refresh.batch_counts?.total || 0} batches`;
+        $("modalFetchLog").textContent = JSON.stringify({
+          refresh_job_id: refresh.id,
+          market: refresh.market,
+          provider: refresh.provider,
+          status: refresh.status,
+          stage: refresh.stage,
+          batch_counts: refresh.batch_counts,
+          running_child_jobs: (payload.batches || []).filter((batch) => batch.status === "running").map((batch) => batch.child_job_id).filter(Boolean)
+        }, null, 2);
+        const marketStatusPromise = refreshStatus().catch(() => null);
+        if (refresh.running) {
+          setTimeout(() => pollLiveRefresh(market, refreshJobId, pollToken), 2000);
+        } else {
+          const markets = await marketStatusPromise;
+          const dataThrough = markets?.[market]?.latest_bar_date || "unknown";
+          $("manualRefreshStatus").textContent = refresh.success
+            ? `${String(market).toUpperCase()} update complete; data through ${dataThrough}`
+            : `${String(market).toUpperCase()} update failed; data remains through ${dataThrough}`;
+          $("manualRefreshStatus").className = `status-line admin-status ${refresh.success ? "ok" : "bad"}`;
+        }
+      } catch (error) {
+        if (pollToken !== activeRefreshPollToken) return;
+        $("progressDetail").textContent = error.message;
+        $("progressDetail").className = "status-line bad";
+      }
+    }
+
+    function openLiveRefresh(market, refreshJobId) {
+      if (!refreshJobId) return;
+      activeRefreshPollToken += 1;
+      const pollToken = activeRefreshPollToken;
+      $("progressEvents").replaceChildren();
+      $("progressTitle").textContent = `${String(market).toUpperCase()} Market Refresh`;
+      $("progressDetail").textContent = "Loading live batch activity...";
+      $("progressModal").classList.remove("hidden");
+      pollLiveRefresh(market, refreshJobId, pollToken);
     }
 
     function updateJob(job) {
@@ -1726,14 +3326,20 @@
 
     async function pollFilterJob(jobId) {
       try {
-        const query = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";
+        const params = new URLSearchParams();
+        if (jobId) params.set("job_id", jobId);
+        if (activeFilterAfterEventId) params.set("after_event_id", String(activeFilterAfterEventId));
+        const query = params.toString() ? `?${params.toString()}` : "";
         const payload = await api(`/api/filter/job${query}`);
+        activeFilterAfterEventId = Number(payload.next_event_id || activeFilterAfterEventId || 0);
+        appendProgressEvents(payload.events || []);
         updateFilterJob(payload.job);
         if (payload.job.running) {
           setTimeout(() => pollFilterJob(jobId), 1000);
           return;
         }
         if (payload.job.success) {
+          appendProgressEvents([{stage: "Loading results", status: "running", message: "Loading completed screen results.", created_at_utc: new Date().toISOString()}]);
           const summary = payload.job.summary || {};
           currentScanId = summary.scan_id || null;
           renderResults(payload.job.results || [], currentScanId);
@@ -1746,6 +3352,11 @@
             .map(([label, count]) => `${count} ${label.toLowerCase()}`);
           const youngerText = youngerCount ? `, younger groups: ${youngerParts.join(", ")}` : "";
           $("resultMeta").textContent = `${scanText}${(payload.job.results || []).length} matches${youngerText} from ${summary.scanned_count || 0} scanned at ${summary.generated_at || ""}`;
+          localStorage.removeItem(FILTER_JOB_STORAGE_KEY);
+          activeFilterAfterEventId = 0;
+          refreshStatus().catch(() => {});
+        } else {
+          localStorage.removeItem(FILTER_JOB_STORAGE_KEY);
         }
       } catch (error) {
         $("filterStatus").textContent = error.message;
@@ -1914,6 +3525,8 @@
       $("filterStatus").textContent = "Scanning...";
       $("runFilter").disabled = true;
       $("progressModal").classList.remove("hidden");
+      $("progressEvents").replaceChildren();
+      activeFilterAfterEventId = 0;
       $("progressStage").textContent = "Filtering";
       $("progressDetail").textContent = "Preparing online market scan...";
       $("progressFill").style.width = "0%";
@@ -1939,6 +3552,7 @@
       };
       try {
         const response = await api("/api/filter/start", { method: "POST", body: JSON.stringify(payload) });
+        if (response.job?.id) localStorage.setItem(FILTER_JOB_STORAGE_KEY, response.job.id);
         updateFilterJob(response.job);
         pollFilterJob(response.job.id);
       } catch (error) {
@@ -1948,17 +3562,29 @@
       }
     }
 
+    function resumeActiveFilterJob() {
+      const jobId = localStorage.getItem(FILTER_JOB_STORAGE_KEY);
+      if (!jobId) return;
+      $("progressModal").classList.remove("hidden");
+      $("filterStatus").textContent = "Resuming scan progress...";
+      $("filterStatus").className = "status-line warn";
+      activeFilterAfterEventId = 0;
+      pollFilterJob(jobId);
+    }
+
     async function loadSharedScan() {
       $("filterStatus").textContent = "Loading shared scan...";
       $("filterStatus").className = "status-line warn";
       try {
         const market = encodeURIComponent($("marketSelect").value);
-        const payload = await api(`/api/scan-results?market=${market}`);
+        const payload = await api(`/api/scan-results?market=${market}&config=default`);
         currentScanId = payload.scan?.id || null;
         renderResults(payload.results || [], currentScanId);
         $("metricMatches").textContent = fmt.format((payload.results || []).length);
-        const created = payload.scan?.created_at_utc ? new Date(payload.scan.created_at_utc).toLocaleString() : "";
-        $("resultMeta").textContent = `shared scan ${currentScanId || ""}, ${(payload.results || []).length} matches${created ? ` from ${created}` : ""}`;
+        const scan = payload.scan || {};
+        const created = scan.created_at_utc ? formatBrisbane(scan.created_at_utc) : "-";
+        const snapshot = scan.market_snapshot_date || "-";
+        $("resultMeta").textContent = `scan ${currentScanId || "-"} created ${created}, data snapshot ${snapshot}, ${fmt.format(scan.scanned_count || 0)} scanned, ${fmt.format((payload.results || []).length)} matches`;
         $("filterStatus").textContent = "Shared scan loaded";
         $("filterStatus").className = "status-line ok";
       } catch (error) {
@@ -1969,7 +3595,7 @@
 
     function labelText(label) {
       if (label === "winner") return "Winner";
-      if (label === "potential_winner") return "Potential Winner";
+      if (label === "needs_confirmation") return "Needs Confirmation";
       if (label === "maybe") return "Maybe";
       if (label === "bad") return "Bad";
       return "";
@@ -1977,13 +3603,13 @@
 
     function labelButtons(row) {
       const labels = [
-        ["winner", "Winner"],
-        ["potential_winner", "Potential"],
-        ["maybe", "Maybe"],
-        ["bad", "Bad"]
+        ["winner", "Winner", "Winner"],
+        ["needs_confirmation", "Needs confirm", "Needs Confirmation"],
+        ["maybe", "Maybe", "Maybe"],
+        ["bad", "Bad", "Bad"]
       ];
-      return `<div class="label-cell">${labels.map(([value, text]) =>
-        `<button class="label-btn ${row.label === value ? "active" : ""}" data-label="${value}" data-ticker="${row.ticker}" title="Mark ${text}">${text}</button>`
+      return `<div class="label-cell"><span class="appraisal-current" data-label="${row.label || ""}">${row.label ? labelText(row.label) : "Not appraised"}</span>${labels.map(([value, text, title]) =>
+        `<button class="label-btn ${row.label === value ? "active" : ""}" data-label="${value}" data-ticker="${row.ticker}" title="Mark as ${title}">${text}</button>`
       ).join("")}</div>`;
     }
 
@@ -2001,8 +3627,13 @@
     function applyRowLabel(ticker, label) {
       const row = document.querySelector(`tr[data-ticker="${ticker}"]`);
       if (!row) return;
-      row.classList.remove("label-winner", "label-potential_winner", "label-maybe", "label-bad");
+      row.classList.remove("label-winner", "label-needs_confirmation", "label-maybe", "label-bad");
       if (label) row.classList.add(`label-${label}`);
+      const current = row.querySelector(".appraisal-current");
+      if (current) {
+        current.dataset.label = label || "";
+        current.textContent = label ? labelText(label) : "Not appraised";
+      }
       row.querySelectorAll(".label-btn").forEach((button) => {
         button.classList.toggle("active", button.dataset.label === label);
       });
@@ -2103,7 +3734,7 @@
         await authReady;
         await firebaseAuthMethods.signInWithEmailAndPassword(firebaseAuth, $("authEmail").value.trim(), $("authPassword").value);
         window.location.reload();
-      } catch (error) { $("topStatus").textContent = error.message; }
+      } catch (error) { $("loginStatus").textContent = error.message; }
     });
     $("authCreate").addEventListener("click", async () => {
       try {
@@ -2111,8 +3742,8 @@
         const email = $("authEmail").value.trim();
         if (!email) throw new Error("Enter your invited email address first");
         await firebaseAuthMethods.sendPasswordResetEmail(firebaseAuth, email);
-        $("topStatus").textContent = `Password setup email sent to ${email}`;
-      } catch (error) { $("topStatus").textContent = error.message; }
+        $("loginStatus").textContent = `Password setup email sent to ${email}`;
+      } catch (error) { $("loginStatus").textContent = error.message; }
     });
     $("authSignOut").addEventListener("click", async () => {
       await firebaseAuthMethods.signOut(firebaseAuth);
@@ -2121,12 +3752,64 @@
 
     $("marketTab").addEventListener("click", () => activateView("market"));
     $("analysisTab").addEventListener("click", () => activateView("analysis"));
+    $("openFeedback").addEventListener("click", openFeedbackDialog);
+    $("closeFeedback").addEventListener("click", closeFeedbackDialog);
+    $("submitFeedback").addEventListener("click", submitFeedback);
+    $("feedbackStatusFilter").addEventListener("change", () => loadFeedbackInbox().catch(() => {}));
+    $("feedbackMessage").addEventListener("input", () => {
+      $("feedbackCharacterCount").textContent = `${$("feedbackMessage").value.length} / 4000`;
+    });
+    $("feedbackModal").addEventListener("click", (event) => {
+      if (event.target === $("feedbackModal")) closeFeedbackDialog();
+    });
     $("refreshAnalysis").addEventListener("click", loadAnalysis);
-    $("recalculateOutcomes").addEventListener("click", recalculateOutcomes);
-    $("analysisMarket").addEventListener("change", loadAnalysis);
-    $("analysisHorizon").addEventListener("change", loadAnalysis);
+    [["analysisMarketAsx", "asx"], ["analysisMarketUs", "us"]].forEach(([id, market]) => {
+      $(id).addEventListener("click", () => {
+        $("analysisMarket").value = market;
+        $("analysisMarketAsx").classList.toggle("active", market === "asx");
+        $("analysisMarketUs").classList.toggle("active", market === "us");
+        $("analysisMarketAsx").setAttribute("aria-pressed", String(market === "asx"));
+        $("analysisMarketUs").setAttribute("aria-pressed", String(market === "us"));
+        loadAnalysis();
+      });
+    });
+    [["analysisDaily", "daily"], ["analysisWeekly", "weekly"]].forEach(([id, interval]) => {
+      $(id).addEventListener("click", () => {
+        $("analysisInterval").value = interval;
+        $("analysisDaily").classList.toggle("active", interval === "daily");
+        $("analysisWeekly").classList.toggle("active", interval === "weekly");
+        $("analysisDaily").setAttribute("aria-pressed", String(interval === "daily"));
+        $("analysisWeekly").setAttribute("aria-pressed", String(interval === "weekly"));
+        loadAnalysis();
+      });
+    });
+    $("analysisRange").addEventListener("change", loadAnalysis);
+    $("analysisManualForm").addEventListener("submit", addAnalysisNeedsConfirmation);
+    $("analysisReviewOpenMarket").addEventListener("click", () => {
+      const market = $("analysisReviewOpenMarket").dataset.market;
+      const ticker = $("analysisReviewOpenMarket").dataset.ticker;
+      if (!market || !ticker) return;
+      $("marketSelect").value = market;
+      applyMarketDefaults();
+      activateView("market");
+      loadChart(ticker, true);
+    });
+    document.querySelectorAll(".analysis-sort").forEach((button) => {
+      button.addEventListener("click", () => changeAnalysisPickSort(button.dataset.analysisGroup, button.dataset.sortKey));
+    });
     $("marketSelect").addEventListener("change", applyMarketDefaults);
-    $("refreshStatus").addEventListener("click", refreshStatus);
+    $("marketAsx").addEventListener("click", () => setMarket("asx"));
+    $("marketUs").addEventListener("click", () => setMarket("us"));
+    $("topStatus").addEventListener("click", () => {
+      if (!$("topStatus").disabled) {
+        openLiveRefresh($("topStatus").dataset.market, $("topStatus").dataset.refreshId);
+      }
+    });
+    $("openOperations").addEventListener("click", () => {
+      $("adminPanel").hidden = !$("adminPanel").hidden;
+    });
+    $("refreshAsxData").addEventListener("click", () => startManualMarketRefresh("asx"));
+    $("refreshUsData").addEventListener("click", () => startManualMarketRefresh("us"));
     bindLimitToggle("useFetchLimit", "fetchLimit");
     bindLimitToggle("useScanLimit", "scanLimit");
     $("tickerFileSelect").addEventListener("change", () => {
@@ -2146,21 +3829,50 @@
     document.querySelectorAll(".ma-check").forEach((input) => {
       input.addEventListener("change", () => loadChart());
     });
+    document.querySelectorAll(".screen-ma-check").forEach((input) => {
+      input.addEventListener("change", syncScreenMaInputs);
+    });
     $("chartTicker").addEventListener("keydown", (event) => {
       if (event.key === "Enter") loadChart();
     });
     window.addEventListener("resize", () => {
       if (lastCandles.length) drawCandles(lastCandles, lastChartTicker, lastMovingAverages);
+      if (lastReviewChart) {
+        drawCandles(lastReviewChart.candles, lastReviewChart.ticker, lastReviewChart.movingAverages, {
+          canvas: $("analysisReviewChart"),
+          interval: lastReviewChart.interval,
+          range: lastReviewChart.range,
+          trackState: false
+        });
+      }
+      if (lastAnalysisPayload) drawAnalysisChart();
     });
     window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !$("feedbackModal").classList.contains("hidden")) {
+        closeFeedbackDialog();
+        return;
+      }
       if (event.key === "Escape" && $("chartPanel").classList.contains("fullscreen")) {
         toggleChartFullscreen(false);
       }
     });
-    $("closeProgress").addEventListener("click", () => $("progressModal").classList.add("hidden"));
-    initializeAppMode().finally(async () => {
+    $("closeProgress").addEventListener("click", () => {
+      activeRefreshPollToken += 1;
+      $("progressModal").classList.add("hidden");
+    });
+    authReady.then(async (getToken) => {
+      if (!getToken) {
+        showSignedOut();
+        return;
+      }
+      showAuthenticated();
+      syncScreenMaInputs();
+      await initializeAppMode();
       await loadCurrentUserProfile();
       applyMarketDefaults();
+      resumeActiveFilterJob();
+    }).catch((error) => {
+      showSignedOut(error.message || "Sign-in setup failed");
     });
   </script>
 </body>

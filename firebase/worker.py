@@ -29,6 +29,7 @@ if str(SRC) not in sys.path:
 
 from moneymaker import fetcher
 from firebase.migrate_sqlite_to_postgres import import_cache, import_ratings, sqlite_connection
+from firebase.schema import apply_migrations
 from cloud_backend.market_status import refresh_market_status
 from cloud_backend.postgres_screener import run_postgres_filter
 from cloud_backend.weekly_cache import sync_weekly_history
@@ -55,12 +56,48 @@ def update_job(**values: Any) -> None:
 def update_job_id(target_job_id: str, **values: Any) -> None:
     if not target_job_id:
         return
+    event_metadata = values.pop("event_metadata", {}) or {}
     values.setdefault("log_tail", "")
     assignments = ", ".join(f"{key} = %s" for key in values)
     with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
         with conn.cursor() as cur:
-            cur.execute(f"UPDATE job_runs SET {assignments} WHERE id = %s", (*values.values(), target_job_id))
+            cur.execute(
+                f"UPDATE job_runs SET {assignments}, updated_at_utc = now() WHERE id = %s",
+                (*values.values(), target_job_id),
+            )
+            stage = str(values.get("stage") or "Working")
+            status = str(values.get("status") or "running")
+            current = int(values.get("current_count") or 0)
+            total = values.get("total_count")
+            percent = values.get("percent")
+            message = str(values.get("error") or values.get("detail") or status)
+            cur.execute(
+                """
+                INSERT INTO job_events (
+                    job_id, stage_code, stage, status, message,
+                    current_count, total_count, percent, metadata_json
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    target_job_id,
+                    _stage_code(stage),
+                    stage,
+                    status,
+                    message,
+                    current,
+                    total,
+                    percent,
+                    Jsonb(event_metadata),
+                ),
+            )
         conn.commit()
+
+
+def _stage_code(value: str) -> str:
+    normalized = "_".join(part for part in "".join(
+        character.lower() if character.isalnum() else " " for character in value
+    ).split() if part)
+    return normalized or "working"
 
 
 def update_refresh_job(refresh_job_id: str, **values: Any) -> None:
@@ -108,7 +145,15 @@ def mark_refresh_batches(refresh_job_id: str, status: str, error: str | None = N
         conn.commit()
 
 
-def update_parent_fetch_job(parent_job_id: str, refresh_job_id: str, detail: str | None = None) -> None:
+def update_parent_fetch_job(
+    parent_job_id: str,
+    refresh_job_id: str,
+    detail: str | None = None,
+    *,
+    market: str | None = None,
+    provider: str | None = None,
+    target_price_basis: str | None = None,
+) -> None:
     if not parent_job_id or not refresh_job_id:
         return
     with psycopg.connect(os.environ["MONEYMAKER_DATABASE_URL"]) as conn:
@@ -159,13 +204,16 @@ def update_parent_fetch_job(parent_job_id: str, refresh_job_id: str, detail: str
                     parent_job_id,
                 ),
             )
+            if status == "succeeded" and market and provider and target_price_basis:
+                cur.execute(
+                    "UPDATE market_status SET price_basis = %s WHERE market = %s AND provider = %s",
+                    (target_price_basis, market, provider),
+                )
         conn.commit()
 
 
 def ensure_schema(conn: psycopg.Connection) -> None:
-    schema = (ROOT / "firebase" / "migrations" / "001_schema.sql").read_text(encoding="utf-8")
-    conn.execute(schema)
-    conn.commit()
+    apply_migrations(conn)
 
 
 def checkpoint_path(market: str) -> Path:
@@ -253,8 +301,10 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
         if str(ticker).strip()
     ]
     batch_refresh = bool(refresh_batch_id and explicit_tickers)
+    force_full_history = bool(data.get("force_full_history"))
+    target_price_basis = str(data.get("target_price_basis") or "").strip()
     cache = checkpoint_path(market)
-    if batch_refresh:
+    if batch_refresh or force_full_history:
         remove_sqlite_checkpoint(cache)
     else:
         download_checkpoint(market, cache)
@@ -277,7 +327,7 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
         with conn.cursor() as cur:
             cur.execute("SELECT DISTINCT ticker FROM price_history WHERE market = %s", (market,))
             existing_tickers = {row[0] for row in cur.fetchall()}
-    full_tickers = set(requested_tickers) - existing_tickers
+    full_tickers = set(requested_tickers) if force_full_history else set(requested_tickers) - existing_tickers
     last_update = 0.0
 
     def progress(stage: str, current: int, total: int | None, message: str) -> None:
@@ -307,7 +357,7 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
         export_json=False,
         **{key: value for key, value in params.items() if key in {
             "years", "workers", "provider", "limit", "info_refresh_days",
-            "history_refresh_days", "prune_missing_tickers", "history_chunk_size",
+            "history_refresh_days", "history_end_date", "prune_missing_tickers", "history_chunk_size",
             "history_pause_seconds", "info_pause_seconds", "rate_limit_pause_seconds",
             "max_rate_limit_retries", "stop_on_rate_limit"
         }},
@@ -343,10 +393,18 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
             incremental_tickers,
             start_date=(date.today() - timedelta(days=overlap_days + 7)),
         )
-        refresh_market_status(conn, market, provider)
         counts["weekly_prices"] = weekly_rows
         counts["weekly_metrics"] = metric_rows
-        counts["market_status_refreshed"] = True
+        counts["market_status_refreshed"] = False
+        if not refresh_batch_id:
+            refresh_market_status(conn, market, provider)
+            if force_full_history and target_price_basis:
+                conn.execute(
+                    "UPDATE market_status SET price_basis = %s WHERE market = %s AND provider = %s",
+                    (target_price_basis, market, provider),
+                )
+                conn.commit()
+            counts["market_status_refreshed"] = True
     if not batch_refresh:
         upload_checkpoint(market, cache)
     if refresh_batch_id:
@@ -406,8 +464,33 @@ def run_fetch(data: dict[str, Any]) -> dict[str, Any]:
                         refresh_job_id,
                     ),
                 )
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) FILTER (WHERE status IN ('queued', 'running'))::int AS active_batches,
+                        COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_batches
+                    FROM refresh_batches
+                    WHERE refresh_job_id = %s
+                    """,
+                    (refresh_job_id,),
+                )
+                active_batches, failed_batches = cur.fetchone()
+                if int(active_batches or 0) == 0:
+                    refresh_market_status(conn, market, provider)
+                    if force_full_history and target_price_basis and int(failed_batches or 0) == 0:
+                        cur.execute(
+                            "UPDATE market_status SET price_basis = %s WHERE market = %s AND provider = %s",
+                            (target_price_basis, market, provider),
+                        )
+                    counts["market_status_refreshed"] = True
             conn.commit()
-        update_parent_fetch_job(parent_job_id, refresh_job_id)
+        update_parent_fetch_job(
+            parent_job_id,
+            refresh_job_id,
+            market=market,
+            provider=provider,
+            target_price_basis=target_price_basis if force_full_history else None,
+        )
     else:
         update_refresh_job(
             refresh_job_id,
@@ -714,7 +797,7 @@ def main() -> None:
     kind = os.environ.get("MONEYMAKER_JOB_TYPE", "").strip().lower()
     data = payload()
     try:
-        update_job(status="running", stage="Starting", detail=f"Starting {kind} job")
+        update_job(status="running", stage="Starting worker", detail=f"Starting {kind} worker")
         if kind == "fetch":
             result = run_fetch(data)
         elif kind == "filter":
@@ -728,12 +811,15 @@ def main() -> None:
         else:
             raise RuntimeError(f"Unknown worker job type: {kind}")
         update_job(status="succeeded", stage="Complete", current_count=1, total_count=1,
-                   percent=100, detail=json.dumps(result)[:4000],
+                   percent=100, detail="Screen complete" if kind == "filter" else json.dumps(result)[:4000],
+                   finished_at_utc=datetime.now(timezone.utc),
+                   event_metadata=result.get("performance", {}),
                    parameters_json=Jsonb(result.get("filter", result)),
                    result_json=Jsonb(result.get("results", [])))
     except Exception as exc:
         update_job(status="failed", stage="Failed", error=str(exc),
-                   detail="".join(traceback.format_exception(exc))[-4000:])
+                   detail="".join(traceback.format_exception(exc))[-4000:],
+                   finished_at_utc=datetime.now(timezone.utc))
         refresh_job_id = str(data.get("refresh_job_id") or "").strip()
         refresh_batch_id = str(data.get("refresh_batch_id") or "").strip()
         parent_job_id = str(data.get("parent_job_id") or "").strip()

@@ -38,6 +38,13 @@ def test_nasdaq_pipe_file_does_not_get_asx_suffix(tmp_path):
     assert get_tickers_from_file(str(ticker_file)) == ["AAPL", "MSFT"]
 
 
+def test_market_index_symbols_keep_their_yahoo_caret(tmp_path):
+    ticker_file = tmp_path / "asx_benchmark_tickers.txt"
+    ticker_file.write_text("^AORD\n^GSPC\n", encoding="utf-8")
+
+    assert get_tickers_from_file(str(ticker_file)) == ["^AORD", "^GSPC"]
+
+
 def test_apply_ticker_limit_preserves_order():
     assert apply_ticker_limit(["AAPL", "MSFT", "NVDA"], 2) == ["AAPL", "MSFT"]
     assert apply_ticker_limit(["AAPL", "MSFT"], None) == ["AAPL", "MSFT"]
@@ -249,6 +256,34 @@ def test_yfinance_history_download_sets_auto_adjust_false(monkeypatch):
     assert missing == set()
     assert stopped is False
     assert calls[0]["auto_adjust"] is False
+
+
+def test_extract_histories_accepts_price_first_yfinance_multiindex():
+    index = pd.to_datetime(["2026-01-02"])
+    columns = pd.MultiIndex.from_product([["Close", "Volume"], ["AAA"]], names=["Price", "Ticker"])
+    data = pd.DataFrame([[1.5, 100]], index=index, columns=columns)
+
+    histories = fetcher._extract_histories_from_frame(["AAA"], data)
+
+    assert list(histories) == ["AAA"]
+    assert histories["AAA"].loc[index[0], "Close"] == 1.5
+    assert histories["AAA"].loc[index[0], "Volume"] == 100
+
+
+def test_extract_histories_accepts_ticker_first_yfinance_multiindex():
+    index = pd.to_datetime(["2026-01-02"])
+    columns = pd.MultiIndex.from_product([["AAA"], ["Close", "Volume"]], names=["Ticker", "Price"])
+    data = pd.DataFrame([[1.5, 100]], index=index, columns=columns)
+
+    histories = fetcher._extract_histories_from_frame(["AAA"], data)
+
+    assert list(histories) == ["AAA"]
+    assert histories["AAA"].loc[index[0], "Close"] == 1.5
+
+
+def test_history_download_end_is_exclusive_and_stable():
+    assert fetcher._history_download_end("2026-07-17") == datetime(2026, 7, 17)
+    assert fetcher._history_download_end(now=datetime(2026, 7, 17, 23, 59)) == datetime(2026, 7, 18)
 
 
 def test_read_stooq_history_rejects_api_key_instruction_response(monkeypatch):
