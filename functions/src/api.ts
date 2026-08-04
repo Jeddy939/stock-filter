@@ -1898,15 +1898,21 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
   const horizon = analysisHorizon(req.query.horizon);
   const requestedLabel = String(req.query.label ?? "").trim().toLowerCase().replace(/\s+/g, "_");
   if (requestedLabel && !VALID_LABELS.has(requestedLabel)) throw new ApiError(400, "Invalid rating label");
+  const scope = String(req.query.scope ?? "mine").trim().toLowerCase();
+  if (scope !== "mine" && scope !== "team") throw new ApiError(400, "Analysis scope must be mine or team");
+  if (scope === "team" && requestedLabel !== "needs_confirmation") {
+    throw new ApiError(400, "Team scope is only available for Needs Confirmation");
+  }
+  const ownerUid = scope === "team" ? null : user.uid;
   const limit = Math.min(Math.max(Number(req.query.limit ?? 250), 1), 5000);
   const result = await db().query(
     `
     WITH latest_events AS (
       SELECT DISTINCT ON (firebase_uid, market, ticker)
         id, firebase_uid, market, ticker, action, label, event_at_utc, signal_date,
-        close_price AS signal_price, scan_id, source_id
+        close_price AS signal_price, scan_id, source_id, user_email
       FROM rating_events
-      WHERE firebase_uid = $5
+      WHERE ($5::text IS NULL OR firebase_uid = $5)
         AND ($1::text IS NULL OR market = $1)
       ORDER BY firebase_uid, market, ticker, event_at_utc DESC, id DESC
     ), latest_labels AS (
@@ -1916,6 +1922,7 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
         AND ($2::text IS NULL OR label = $2)
     )
     SELECT
+      labelled.firebase_uid, COALESCE(labelled.user_email, owner.email) AS owner_email,
       labelled.market, labelled.ticker, labelled.label, labelled.scan_id, labelled.source_id,
       labelled.event_at_utc, labelled.signal_date, labelled.signal_price,
       CASE WHEN $3::int = 0 THEN latest.close_price ELSE outcome.price_at_horizon END AS latest_price,
@@ -1941,12 +1948,13 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
     LEFT JOIN rating_outcomes outcome
       ON outcome.rating_event_id = labelled.id
      AND outcome.horizon_days = $3::int
+    LEFT JOIN user_profiles owner ON owner.firebase_uid = labelled.firebase_uid
     ORDER BY return_percent ASC NULLS LAST, labelled.event_at_utc DESC
     LIMIT $4
     `,
-    [market, requestedLabel || null, horizon, limit, user.uid]
+    [market, requestedLabel || null, horizon, limit, ownerUid]
   );
-  res.json({ok: true, market: requestedMarket, horizon_days: horizon, picks: result.rows});
+  res.json({ok: true, market: requestedMarket, scope, horizon_days: horizon, picks: result.rows});
 }));
 
 apiApp.post("/api/analysis/pick", asyncRoute(async (req, res) => {
@@ -1956,6 +1964,12 @@ apiApp.post("/api/analysis/pick", asyncRoute(async (req, res) => {
   const ticker = normalizeAnalysisTicker(market, req.body.ticker);
   const label = String(req.body.label ?? "").trim().toLowerCase().replace(/\s+/g, "_");
   if (!VALID_LABELS.has(label)) throw new ApiError(400, "Invalid rating label");
+  const requestedTargetUid = String(req.body.target_uid ?? "").trim();
+  if (requestedTargetUid.length > 128) throw new ApiError(400, "Invalid appraisal owner");
+  const targetUid = requestedTargetUid || user.uid;
+  if (targetUid !== user.uid && label !== "winner" && label !== "bad") {
+    throw new ApiError(403, "Shared review items can only be confirmed as Winner or Bad");
+  }
 
   const client = await db().connect();
   try {
@@ -1964,13 +1978,13 @@ apiApp.post("/api/analysis/pick", asyncRoute(async (req, res) => {
         `
         SELECT id, action, label, event_at_utc, signal_date, close_price, scan_id, source_id,
                cache_file, provider, query, note, rank, market_cap, avg_volume, volume_ratio,
-               sector, industry, result_json
+               sector, industry, result_json, user_email
         FROM rating_events
         WHERE firebase_uid = $1 AND market = $2 AND ticker = $3
         ORDER BY event_at_utc DESC, id DESC
         LIMIT 1
         `,
-        [user.uid, market, ticker]
+        [targetUid, market, ticker]
       );
     const latestPriceResult = await client.query(
         `
@@ -1998,6 +2012,9 @@ apiApp.post("/api/analysis/pick", asyncRoute(async (req, res) => {
 
     const previous = latestEventResult.rows[0];
     const previousIsActive = previous?.action === "label" && previous?.label;
+    if (targetUid !== user.uid && (!previousIsActive || previous.label !== "needs_confirmation")) {
+      throw new ApiError(409, `${ticker} is no longer waiting for confirmation from that user`);
+    }
     const metric = metricResult.rows[0] ?? {};
     const signalDate = previousIsActive && previous.signal_date ? previous.signal_date : latestPrice.price_date;
     const signalPrice = previousIsActive && numberOrNull(previous.close_price) !== null
@@ -2007,9 +2024,15 @@ apiApp.post("/api/analysis/pick", asyncRoute(async (req, res) => {
 
     const scanId = previousIsActive ? numberOrNull(previous.scan_id) : null;
     const sourceId = previousIsActive ? numberOrNull(previous.source_id) : null;
-    const eventResultJson = previousIsActive && previous.result_json
+    const previousResult = previousIsActive && previous.result_json && typeof previous.result_json === "object"
       ? previous.result_json
       : {manual_pick: true, added_from: "analysis"};
+    const eventResultJson = {
+      ...previousResult,
+      shared_resolution: targetUid !== user.uid,
+      resolved_by_uid: user.uid,
+      resolved_by_email: user.email
+    };
 
     if (scanId !== null && sourceId !== null) {
       await client.query(
@@ -2021,7 +2044,7 @@ apiApp.post("/api/analysis/pick", asyncRoute(async (req, res) => {
           label = EXCLUDED.label,
           updated_at_utc = NOW()
         `,
-        [user.uid, scanId, sourceId, market, ticker, label]
+        [targetUid, scanId, sourceId, market, ticker, label]
       );
       await client.query(
         `
@@ -2033,7 +2056,7 @@ apiApp.post("/api/analysis/pick", asyncRoute(async (req, res) => {
           note = COALESCE(EXCLUDED.note, user_appraisals.note),
           appraised_at_utc = NOW()
         `,
-        [user.uid, scanId, sourceId, market, ticker, label, previous.note ?? null]
+        [targetUid, scanId, sourceId, market, ticker, label, previous.note ?? null]
       );
     }
 
@@ -2071,8 +2094,8 @@ apiApp.post("/api/analysis/pick", asyncRoute(async (req, res) => {
         JSON.stringify(eventResultJson),
         yahooUrl(ticker),
         sourceId,
-        user.uid,
-        user.email
+        targetUid,
+        previous?.user_email ?? (targetUid === user.uid ? user.email : null)
       ]
     );
     await client.query("COMMIT");
@@ -2081,6 +2104,7 @@ apiApp.post("/api/analysis/pick", asyncRoute(async (req, res) => {
       market,
       ticker,
       label,
+      owner_uid: targetUid,
       signal_date: dateOnly(signalDate),
       signal_price: signalPrice,
       event: inserted.rows[0],

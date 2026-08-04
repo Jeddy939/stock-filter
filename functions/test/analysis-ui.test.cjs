@@ -6,7 +6,10 @@ const html = fs.readFileSync(path.join(__dirname, "..", "..", "hosting", "index.
 
 assert.match(html, /<h3 id="analysisReviewHeading">Needs confirmation<\/h3>/);
 assert.match(html, /id="analysisReviewChart"/);
-assert.match(html, /label=needs_confirmation&horizon=0&limit=5000/);
+assert.match(html, /label=needs_confirmation&scope=team&horizon=0&limit=5000/);
+assert.match(html, /<th>Owner<\/th>/);
+assert.match(html, /data-review-owner=/);
+assert.match(html, /target_uid:\s*tableRow\.dataset\.reviewOwner/);
 assert.ok(html.indexOf('id="analysisReviewHeading"') < html.indexOf('id="analysisChartHeading"'));
 assert.match(html, /id="analysisManualTicker"/);
 assert.match(html, /id="analysisAddNeeds"/);

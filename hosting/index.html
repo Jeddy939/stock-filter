@@ -759,7 +759,9 @@
       max-height: 320px;
       border-radius: 0;
     }
-    .analysis-review table { border: 0; border-radius: 0; }
+    .analysis-review table { min-width: 900px; border: 0; border-radius: 0; }
+    .analysis-review th:first-child { width: 190px; }
+    .analysis-review th:last-child { width: 150px; }
     .analysis-review tr[data-review-ticker] { cursor: pointer; }
     .analysis-review tr[data-review-ticker]:hover td { background: rgba(242, 193, 78, .06); }
     .analysis-review tr[data-review-ticker].selected td { background: rgba(242, 193, 78, .11); }
@@ -853,8 +855,8 @@
     .analysis-picks table td:nth-child(4), .analysis-picks table td:nth-child(5),
     .analysis-picks table td:nth-child(6), .analysis-picks table th:nth-child(4),
     .analysis-picks table th:nth-child(5), .analysis-picks table th:nth-child(6) { text-align: right; }
-    .analysis-review table td:nth-child(4), .analysis-review table td:nth-child(5),
-    .analysis-review table th:nth-child(4), .analysis-review table th:nth-child(5) { text-align: right; }
+    .analysis-review table td:nth-child(5), .analysis-review table td:nth-child(6),
+    .analysis-review table th:nth-child(5), .analysis-review table th:nth-child(6) { text-align: right; }
     .return-positive { color: var(--accent); }
     .return-negative { color: var(--bad); }
     .return-neutral { color: var(--muted); }
@@ -1667,8 +1669,8 @@
       </div>
       <div class="results-wrap">
         <table>
-          <thead><tr><th>Market</th><th>Ticker</th><th>Selected</th><th>Return</th><th>Price date</th><th>Decision</th></tr></thead>
-          <tbody id="analysisReviewBody"><tr><td colspan="6" style="text-align:left;color:var(--muted)">No stocks currently need confirmation.</td></tr></tbody>
+          <thead><tr><th>Owner</th><th>Market</th><th>Ticker</th><th>Selected</th><th>Return</th><th>Price date</th><th>Decision</th></tr></thead>
+          <tbody id="analysisReviewBody"><tr><td colspan="7" style="text-align:left;color:var(--muted)">No stocks currently need confirmation.</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -2401,9 +2403,11 @@
       });
     }
 
-    function setSelectedReviewRow(market, ticker) {
+    function setSelectedReviewRow(ownerUid, market, ticker) {
       document.querySelectorAll("#analysisReviewBody tr[data-review-ticker]").forEach((row) => {
-        const selected = row.dataset.reviewMarket === market && row.dataset.reviewTicker === ticker;
+        const selected = row.dataset.reviewOwner === ownerUid
+          && row.dataset.reviewMarket === market
+          && row.dataset.reviewTicker === ticker;
         row.classList.toggle("selected", selected);
         row.setAttribute("aria-selected", String(selected));
       });
@@ -2412,7 +2416,7 @@
     async function loadAnalysisReviewChart(row) {
       if (!row?.ticker || !row?.market) return;
       const requestToken = ++reviewChartRequestToken;
-      setSelectedReviewRow(row.market, row.ticker);
+      setSelectedReviewRow(row.firebase_uid, row.market, row.ticker);
       $("analysisReviewChartTitle").textContent = row.ticker;
       $("analysisReviewChartMeta").textContent = "Loading daily candles...";
       $("analysisReviewChartEmpty").hidden = true;
@@ -2426,7 +2430,8 @@
           movingAverages: payload.moving_averages || {},
           interval: payload.interval || "daily",
           range: payload.range || "1y",
-          market: payload.market || row.market
+          market: payload.market || row.market,
+          ownerUid: row.firebase_uid
         };
         drawCandles(lastReviewChart.candles, lastReviewChart.ticker, lastReviewChart.movingAverages, {
           canvas: $("analysisReviewChart"),
@@ -2457,7 +2462,9 @@
       document.querySelectorAll("#analysisReviewBody tr[data-review-ticker]").forEach((tableRow) => {
         const select = () => {
           const pick = lastAnalysisReviewPicks.find((row) =>
-            row.market === tableRow.dataset.reviewMarket && row.ticker === tableRow.dataset.reviewTicker
+            row.firebase_uid === tableRow.dataset.reviewOwner
+            && row.market === tableRow.dataset.reviewMarket
+            && row.ticker === tableRow.dataset.reviewTicker
           );
           if (pick) loadAnalysisReviewChart(pick);
         };
@@ -2484,7 +2491,8 @@
               body: JSON.stringify({
                 market: tableRow.dataset.reviewMarket,
                 ticker: tableRow.dataset.reviewTicker,
-                label: button.dataset.confirmLabel
+                label: button.dataset.confirmLabel,
+                target_uid: tableRow.dataset.reviewOwner
               })
             });
             $("analysisManualStatus").textContent = `${tableRow.dataset.reviewTicker} moved to ${labelText(button.dataset.confirmLabel)}.`;
@@ -2502,11 +2510,13 @@
     function renderAnalysisReview(reviewPicks) {
       lastAnalysisReviewPicks = reviewPicks;
       $("analysisReviewBody").innerHTML = reviewPicks.length ? reviewPicks.map((row) => `<tr
+        data-review-owner="${escapeHtml(row.firebase_uid)}"
         data-review-market="${escapeHtml(row.market)}"
         data-review-ticker="${escapeHtml(row.ticker)}"
         tabindex="0"
         aria-selected="false"
       >
+        <td title="${escapeHtml(row.owner_email || "Team member")}">${escapeHtml(row.owner_email || "Team member")}</td>
         <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
         <td><span class="ticker">${escapeHtml(row.ticker)}</span></td>
         <td>${row.event_at_utc ? new Date(row.event_at_utc).toLocaleDateString() : "-"}</td>
@@ -2516,12 +2526,13 @@
           <button type="button" data-confirm-label="winner" title="Confirm ${escapeHtml(row.ticker)} as a winner">Winner</button>
           <button type="button" data-confirm-label="bad" title="Confirm ${escapeHtml(row.ticker)} as bad">Bad</button>
         </div></td>
-      </tr>`).join("") : '<tr><td colspan="6" style="text-align:left;color:var(--muted)">No stocks currently need confirmation.</td></tr>';
+      </tr>`).join("") : '<tr><td colspan="7" style="text-align:left;color:var(--muted)">No stocks currently need confirmation.</td></tr>';
       $("analysisReviewMeta").textContent = `${fmt.format(reviewPicks.length)} awaiting review`;
       bindAnalysisReviewRows();
       if (reviewPicks.length) {
         const selected = lastReviewChart
-          ? reviewPicks.find((row) => row.market === lastReviewChart.market && row.ticker === lastReviewChart.ticker)
+          ? reviewPicks.find((row) => row.firebase_uid === lastReviewChart.ownerUid
+            && row.market === lastReviewChart.market && row.ticker === lastReviewChart.ticker)
           : null;
         loadAnalysisReviewChart(selected || reviewPicks[0]);
       } else {
@@ -2654,7 +2665,7 @@
         const [timeseriesPayload, picksPayload, reviewPayload] = await Promise.all([
           api(`/api/analysis/timeseries?market=${market}&interval=${interval}&range=${range}`),
           api(`/api/analysis/picks?market=${market}&horizon=0&limit=5000`),
-          api(`/api/analysis/picks?market=${market}&label=needs_confirmation&horizon=0&limit=5000`)
+          api(`/api/analysis/picks?market=${market}&label=needs_confirmation&scope=team&horizon=0&limit=5000`)
         ]);
         renderAnalysis(timeseriesPayload, picksPayload.picks || [], reviewPayload.picks || []);
         $("analysisStatus").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
