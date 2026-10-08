@@ -7,6 +7,7 @@ import {
   defaultScanPayload,
   defaultScheduledFetchPayload,
   startFilterJob,
+  startRatingOutcomesJob,
   startScheduledMarketRefresh,
   startSnapshotPublishJob
 } from "./api";
@@ -30,6 +31,7 @@ export type WeeklyActions = {
   startAsxScan: () => Promise<Record<string, unknown>>;
   startUsScan: () => Promise<Record<string, unknown>>;
   startPublish: () => Promise<Record<string, unknown>>;
+  startOutcomes: () => Promise<Record<string, unknown>>;
   jobStatus: (id: unknown) => Promise<WeeklyJobStatus>;
 };
 
@@ -136,6 +138,18 @@ async function retryStage(
     };
   }
   throw new Error(`${errorMessage}: exceeded 2 retries`);
+}
+
+async function completeRun(
+  actions: WeeklyActions,
+  state: WeeklyState,
+  nowIso: string
+): Promise<{state: WeeklyState; result: Record<string, unknown>}> {
+  await actions.stopDatabase();
+  return {
+    state: {...state, phase: "complete", database_stopped_at: nowIso, database_stopped: true},
+    result: {ok: true, phase: "complete", outcomes_error: state.outcomes_error ?? null}
+  };
 }
 
 export async function advanceWeeklyState(
@@ -294,11 +308,32 @@ export async function advanceWeeklyState(
         `Snapshot publication failed: ${job?.error ?? job?.stage ?? "unknown error"}`,
         actions.startPublish, nowIso);
     }
-    await actions.stopDatabase();
-    return {
-      state: {...state, phase: "complete", published_at: nowIso, database_stopped_at: nowIso, database_stopped: true},
-      result: {ok: true, phase: "complete"}
-    };
+    // The database only runs during this weekly window, so measure appraisal
+    // and screen outcomes before stopping it. Publication has already
+    // succeeded; an outcomes problem is recorded but never fails the run.
+    try {
+      const result = await actions.startOutcomes();
+      const jobId = resultJobId(result);
+      if (jobId) {
+        return {
+          state: {...state, phase: "measuring_outcomes", published_at: nowIso, outcomes_job_id: jobId},
+          result: {ok: true, phase: "measuring_outcomes", job_id: jobId}
+        };
+      }
+      return completeRun(actions, {...state, published_at: nowIso, outcomes_error: "Outcomes job did not return a job ID"}, nowIso);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return completeRun(actions, {...state, published_at: nowIso, outcomes_error: message}, nowIso);
+    }
+  }
+
+  if (phase === "measuring_outcomes") {
+    const job = await actions.jobStatus(state.outcomes_job_id);
+    if (active(job)) return {state, result: {ok: true, phase, job}};
+    const outcome = job?.status === "succeeded"
+      ? {outcomes_completed_at: nowIso}
+      : {outcomes_error: `Outcomes job ${job?.status ?? "missing"}: ${job?.error ?? job?.stage ?? "unknown"}`};
+    return completeRun(actions, {...state, ...outcome}, nowIso);
   }
 
   throw new Error(`Unknown weekly publication phase: ${phase}`);
@@ -368,6 +403,7 @@ function buildActions(runId: string): WeeklyActions {
     startAsxScan: () => startFilterJob(defaultScanPayload("asx")),
     startUsScan: () => startFilterJob(defaultScanPayload("us")),
     startPublish: () => startSnapshotPublishJob({weekly_run_id: runId}),
+    startOutcomes: () => startRatingOutcomesJob({market: "all", horizons: [28, 56, 84, 182]}),
     jobStatus: async (value) => jobStatus(value)
   };
 }

@@ -41,6 +41,11 @@ function fakeActions() {
       const id = `publish-${nextId++}`;
       return {job: {id}};
     },
+    startOutcomes: async () => {
+      calls.push("startOutcomes");
+      const id = `outcomes-${nextId++}`;
+      return {job: {id}};
+    },
     jobStatus: async (id) => {
       const entry = statuses.get(String(id));
       if (!entry) return null;
@@ -81,7 +86,17 @@ async function testSequence() {
 
   actions.mark("publish-5", "succeeded");
   state = await advance(state, actions);
+  assert.equal(state.phase, "measuring_outcomes");
+  assert.ok(!actions.calls.includes("stopDatabase"), "database must stay up while outcomes are measured");
+
+  actions.mark("outcomes-6", "running");
+  state = await advance(state, actions);
+  assert.equal(state.phase, "measuring_outcomes", "a running outcomes job keeps the run waiting");
+
+  actions.mark("outcomes-6", "succeeded");
+  state = await advance(state, actions);
   assert.equal(state.phase, "complete");
+  assert.ok(state.outcomes_completed_at);
 
   assert.deepEqual(actions.calls, [
     "startAsxRefresh",
@@ -89,6 +104,7 @@ async function testSequence() {
     "startUsRefresh",
     "startUsScan",
     "startPublish",
+    "startOutcomes",
     "stopDatabase"
   ]);
   console.log("sequential workflow: sequence and completion passed");
@@ -210,6 +226,27 @@ async function testBoundedLaunchFailures() {
   console.log("sequential workflow: bounded launch failures passed");
 }
 
+async function testOutcomesNeverFailTheRun() {
+  const failed = fakeActions();
+  failed.mark("p1", "succeeded");
+  let state = await advance({phase: "publishing", publish_job_id: "p1"}, failed);
+  assert.equal(state.phase, "measuring_outcomes");
+  failed.mark(state.outcomes_job_id, "failed", "timeout");
+  state = await advance(state, failed);
+  assert.equal(state.phase, "complete");
+  assert.match(state.outcomes_error, /timeout/);
+  assert.ok(failed.calls.includes("stopDatabase"));
+
+  const unstartable = fakeActions();
+  unstartable.startOutcomes = async () => { throw new Error("queue unavailable"); };
+  unstartable.mark("p1", "succeeded");
+  state = await advance({phase: "publishing", publish_job_id: "p1"}, unstartable);
+  assert.equal(state.phase, "complete");
+  assert.match(state.outcomes_error, /queue unavailable/);
+  assert.ok(unstartable.calls.includes("stopDatabase"));
+  console.log("sequential workflow: outcomes failures never fail the run passed");
+}
+
 async function main() {
   await testSequence();
   await testResume();
@@ -219,6 +256,7 @@ async function main() {
   await testDeployEnvPersistence();
   await testMissingPersistedJobRetries();
   await testBoundedLaunchFailures();
+  await testOutcomesNeverFailTheRun();
   console.log("weekly sequential tests passed");
 }
 
