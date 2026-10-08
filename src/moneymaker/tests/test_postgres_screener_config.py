@@ -35,6 +35,7 @@ def test_screen_config_hash_accepts_legacy_and_normalized_ma_payloads():
         "ma_periods": {"short": 90, "intermediate": 180, "medium": 360, "long": 700},
         "min_market_cap": 0,
         "max_market_cap": 0,
+        "exclude_above_180_ma_2y": False,
     }
 
     assert normalize_screen_config(legacy_payload) == normalize_screen_config(normalized_payload)
@@ -46,6 +47,13 @@ def test_screen_config_hash_ignores_scheduled_flag():
     comparable = {"market": "asx"}
 
     assert screen_config_hash(payload) == screen_config_hash(comparable)
+
+
+def test_screen_config_hash_changes_for_two_year_180_ma_exclusion():
+    payload = {"market": "asx"}
+    enabled = {"market": "asx", "exclude_above_180_ma_2y": True}
+
+    assert screen_config_hash(payload) != screen_config_hash(enabled)
 
 
 def _metric_row(**overrides):

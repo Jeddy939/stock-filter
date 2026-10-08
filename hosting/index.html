@@ -151,6 +151,17 @@
       text-decoration-style: dotted;
       text-underline-offset: 3px;
     }
+    #weeklyRunStatus {
+      min-height: 24px;
+      max-width: min(30vw, 360px);
+      padding: 2px 7px;
+      border-color: #8b6a22;
+      background: #201b0f;
+      color: #f1cc72;
+      text-align: left;
+    }
+    #weeklyRunStatus.bad { border-color: #8f3d3d; background: #241313; color: #ff9c9c; }
+    #weeklyRunStatus.ok { border-color: #276a47; background: #102018; color: #79d7a5; }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -286,6 +297,38 @@
       background: #0c1110;
       overflow: hidden;
       position: relative;
+    }
+    .financial-chart {
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      position: relative;
+      touch-action: pan-y;
+    }
+    .financial-chart:focus-visible {
+      outline: 2px solid var(--accent-2);
+      outline-offset: -2px;
+    }
+    .financial-chart-legend {
+      position: absolute;
+      top: 8px;
+      left: 12px;
+      z-index: 2;
+      max-width: calc(100% - 110px);
+      overflow: hidden;
+      color: #dce6e0;
+      font: 600 12px/1.35 "Segoe UI", system-ui, sans-serif;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .chart-empty-message {
+      height: 100%;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      color: var(--muted);
+      text-align: center;
     }
     #chartPanel.fullscreen {
       position: fixed;
@@ -783,6 +826,44 @@
       padding-top: 12px;
       border-top: 1px solid var(--line);
     }
+    .bought-portfolio {
+      margin-top: 12px;
+      border: 1px solid #246d42;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #101613;
+    }
+    .bought-portfolio .analysis-section-head {
+      padding: 9px 12px;
+      background: rgba(36, 109, 66, .16);
+      border-bottom: 1px solid #246d42;
+    }
+    .bought-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .bought-summary span {
+      min-width: 150px;
+      padding: 7px 12px;
+      color: var(--muted);
+      font-size: 12px;
+      border-right: 1px solid var(--line);
+    }
+    .bought-summary strong { color: var(--text); margin-left: 5px; }
+    .bought-portfolio .results-wrap { max-height: min(38vh, 390px); border: 0; border-radius: 0; }
+    .bought-portfolio table { min-width: 980px; border: 0; border-radius: 0; }
+    .bought-portfolio thead { position: sticky; top: 0; z-index: 5; }
+    .purchase-action { min-height: 28px; padding: 4px 9px; font-size: 12px; }
+    .purchase-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .purchase-form label { color: var(--muted); font-size: 12px; }
+    .purchase-form input { display: block; width: 100%; margin-top: 5px; }
+    .purchase-context { margin: 0 0 12px; color: var(--text); font-weight: 700; }
+    @media (max-width: 600px) {
+      .purchase-form { grid-template-columns: 1fr; }
+      .bought-summary span { flex: 1 1 50%; }
+    }
     .analysis-pick-groups { display: grid; gap: 18px; }
     .analysis-pick-group {
       min-width: 0;
@@ -837,6 +918,41 @@
     .analysis-picks th:nth-child(3) { width: 17%; }
     .analysis-picks th:nth-child(4) { width: 12%; }
     .analysis-picks th:nth-child(5) { width: 12%; }
+    .analysis-mode-switch { margin-top: 10px; width: fit-content; }
+    .insights-workspace { display: grid; gap: 12px; padding: 12px 20px 24px; }
+    .insights-toolbar {
+      display: flex;
+      align-items: end;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .insights-toolbar label { min-width: 130px; color: var(--muted); font-size: 12px; }
+    .insights-toolbar select, .insights-toolbar input { display: block; width: 100%; margin-top: 4px; min-height: 32px; }
+    .insights-coverage { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 6px; }
+    .insights-stat { padding: 10px 12px; border-right: 1px solid var(--line); min-width: 0; }
+    .insights-stat:last-child { border-right: 0; }
+    .insights-stat span { display: block; color: var(--muted); font-size: 11px; }
+    .insights-stat strong { display: block; margin-top: 3px; color: var(--text); font-size: 17px; }
+    .insights-grid { display: grid; grid-template-columns: minmax(300px, .8fr) minmax(0, 1.2fr); gap: 12px; }
+    .insights-panel { min-width: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+    .insights-panel-head { display: flex; justify-content: space-between; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+    .insights-panel-head h3 { margin: 0; font-size: 15px; }
+    .insights-panel-body { padding: 12px; }
+    .insights-findings { display: grid; gap: 8px; }
+    .insight-finding { padding: 10px; border-left: 3px solid var(--accent); background: #111715; }
+    .insight-finding strong, .insight-finding span { display: block; }
+    .insight-finding span { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .insights-feature-table { max-height: 440px; overflow: auto; }
+    .insights-feature-table table { min-width: 620px; }
+    .insights-replay-chart { height: 300px; margin-top: 10px; border: 1px solid var(--line); background: #0c1110; }
+    @media (max-width: 760px) {
+      .insights-workspace { padding: 10px; }
+      .insights-coverage { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .insights-stat { border-bottom: 1px solid var(--line); }
+      .insights-grid { grid-template-columns: 1fr; }
+    }
     .analysis-picks th:nth-child(6) { width: 12%; }
     .analysis-picks th:nth-child(7) { width: 17%; }
     .analysis-picks th:nth-child(n+4) .analysis-sort {
@@ -1302,6 +1418,7 @@
         <button id="analysisTab" type="button" aria-pressed="false">Analysis</button>
       </nav>
       <button class="status-line" id="topStatus" type="button" disabled>Connecting to market data...</button>
+      <button class="status-line" id="weeklyRunStatus" type="button" hidden aria-live="polite" title="Open weekly update progress"></button>
       <span class="role-pill" id="authRole" hidden></span>
       <button class="feedback-button" id="openFeedback" type="button">Feedback<span class="feedback-badge" id="feedbackBadge" hidden>0</span></button>
       <button class="icon-button" id="openOperations" type="button" title="Operations" aria-label="Operations">Ops</button>
@@ -1453,6 +1570,10 @@
               <input id="useScanLimit" type="checkbox">
               Limit scan
             </label>
+            <label class="inline-check" title="Exclude stocks whose weekly close stayed above the 180-week moving average for all of the last 104 comparable weeks.">
+              <input id="excludeAbove180Ma2y" type="checkbox">
+              Exclude 2 years above 180W MA
+            </label>
           </div>
           <label>Moving averages</label>
           <div class="ma-period-toggles">
@@ -1535,6 +1656,7 @@
           <h2 style="margin:0">Chart</h2>
           <div class="chart-header-actions">
             <span class="status-line" id="chartStatus">Select a ticker</span>
+            <button id="resetChartView" type="button" title="Reset chart zoom and position">Reset view</button>
             <button id="toggleChartFullscreen" type="button" aria-pressed="false">Fullscreen</button>
           </div>
         </div>
@@ -1576,7 +1698,7 @@
           <p>Load a cached ticker to show the company description.</p>
         </div>
         <div class="chart-box">
-          <canvas id="priceChart"></canvas>
+          <div id="priceChart" class="financial-chart" role="img" tabindex="0" aria-label="Interactive stock price chart. Drag to move, scroll or pinch to zoom."></div>
         </div>
       </div>
       <div class="panel" id="resultsPanel">
@@ -1612,6 +1734,10 @@
       <div>
         <h2>Pick performance</h2>
         <p>Performance begins at each appraisal price. Lines show the average return of the available picks in each group.</p>
+        <div class="analysis-segment analysis-mode-switch" aria-label="Analysis workspace">
+          <button class="active" id="analysisPerformanceMode" type="button" aria-pressed="true">Performance</button>
+          <button id="analysisInsightsMode" type="button" aria-pressed="false">Insights</button>
+        </div>
       </div>
       <div class="analysis-tools">
         <input id="analysisMarket" type="hidden" value="asx">
@@ -1636,6 +1762,7 @@
         <button id="refreshAnalysis" type="button">Refresh</button>
       </div>
     </div>
+    <div id="analysisPerformanceWorkspace">
     <div class="analysis-statusbar" aria-live="polite">
       <span id="analysisStatus">Open Analysis to load online appraisal performance.</span>
       <span>Active picks <strong id="analysisPickCount">-</strong></span>
@@ -1661,10 +1788,13 @@
           <strong id="analysisReviewChartTitle">Select a stock to review</strong>
           <span id="analysisReviewChartMeta">Daily candles, one year</span>
         </div>
-        <button id="analysisReviewOpenMarket" type="button" hidden>Open full chart</button>
+        <div class="actions" style="margin:0">
+          <button id="analysisReviewResetView" type="button" title="Reset chart zoom and position" hidden>Reset view</button>
+          <button id="analysisReviewOpenMarket" type="button" hidden>Open full chart</button>
+        </div>
       </div>
       <div class="analysis-review-chart-box">
-        <canvas id="analysisReviewChart" role="img" aria-label="Price chart for the selected stock needing confirmation"></canvas>
+        <div id="analysisReviewChart" class="financial-chart" role="img" tabindex="0" aria-label="Interactive price chart for the selected stock needing confirmation. Drag to move, scroll or pinch to zoom."></div>
         <div class="analysis-review-chart-empty" id="analysisReviewChartEmpty">Select a stock in the table to view its chart.</div>
       </div>
       <div class="results-wrap">
@@ -1685,6 +1815,24 @@
         <div class="analysis-chart-empty" id="analysisChartEmpty">No priced appraisals are available for this market and range.</div>
       </div>
     </section>
+    <section class="bought-portfolio" aria-labelledby="boughtPortfolioHeading">
+      <div class="analysis-section-head">
+        <h3 id="boughtPortfolioHeading">Bought portfolio</h3>
+        <span class="status-line" id="boughtPortfolioMeta">No purchases recorded</span>
+      </div>
+      <div class="bought-summary" aria-live="polite">
+        <span>Positions <strong id="boughtPositionCount">0</strong></span>
+        <span>Equal-weight return <strong id="boughtAverageReturn">-</strong></span>
+        <span>In profit <strong id="boughtProfitCount">0</strong></span>
+        <span>Latest price date <strong id="boughtLatestDate">-</strong></span>
+      </div>
+      <div class="results-wrap">
+        <table>
+          <thead><tr><th>Buyer</th><th>Market</th><th>Ticker</th><th>Bought</th><th>Buy price</th><th>Latest price</th><th>Return</th><th>Held</th><th>Price date</th><th></th></tr></thead>
+          <tbody id="boughtPortfolioBody"><tr><td colspan="10" style="text-align:left;color:var(--muted)">No purchases recorded yet. Use Bought on a winner.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
     <section class="analysis-picks" aria-labelledby="analysisPicksHeading">
       <div class="analysis-section-head">
         <h3 id="analysisPicksHeading">Current picks</h3>
@@ -1701,7 +1849,7 @@
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="signal_price">Signal</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="latest_price">Price</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="return_percent">Return</button></th>
-              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="latest_date">Date</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="latest_date">Date</button></th><th>Bought</th>
             </tr></thead><tbody id="analysisWinnerBody"></tbody></table>
           </div>
         </section>
@@ -1734,6 +1882,77 @@
           </div>
         </section>
       </div>
+    </section>
+    </div>
+    <section class="insights-workspace" id="analysisInsightsWorkspace" hidden aria-labelledby="insightsHeading">
+      <div class="insights-toolbar">
+        <label>Scope<select id="insightsScope"><option value="mine">My picks</option><option value="team">Team</option></select></label>
+        <label>Feature timing<select id="insightsTiming"><option value="decision">Winner decision</option><option value="origin">Initial selection</option></select></label>
+        <label>Outcome horizon<select id="insightsHorizon"><option value="28">4 weeks</option><option value="56">8 weeks</option><option value="84" selected>12 weeks</option><option value="182">26 weeks</option></select></label>
+        <button id="generateInsights" type="button">Generate insights</button>
+        <span class="status-line" id="insightsStatus" aria-live="polite">Load Insights to check appraisal coverage.</span>
+      </div>
+      <div class="insights-coverage">
+        <div class="insights-stat"><span>Winner appraisals</span><strong id="insightsTotalEvents">-</strong></div>
+        <div class="insights-stat"><span>Mature outcomes</span><strong id="insightsMatureEvents">-</strong></div>
+        <div class="insights-stat"><span>Snapshots ready</span><strong id="insightsSnapshotCount">-</strong></div>
+        <div class="insights-stat"><span>Fundamental coverage</span><strong id="insightsFundamentalCoverage">-</strong></div>
+        <div class="insights-stat"><span>Analysis level</span><strong id="insightsAnalysisLevel">-</strong></div>
+      </div>
+      <section class="insights-panel" aria-labelledby="selectionComparisonHeading">
+        <div class="insights-panel-head"><h3 id="selectionComparisonHeading">Selection vs screen</h3><span class="status-line" id="selectionComparisonMeta"></span></div>
+        <div class="insights-panel-body">
+          <p class="status-line" style="margin:0 0 8px">Every screen hit and near-miss is measured from its signal-week close against the benchmark, so each group starts from the same point. "From rating time" measures labelled picks from when the label was given. Groups under 20 stock-weeks are too small to trust.</p>
+          <div class="results-wrap">
+            <table>
+              <thead><tr><th>Group</th><th>Stock-weeks</th><th>Avg vs benchmark</th><th>Median vs benchmark</th><th>Beat benchmark</th><th>+15% before -12%</th><th>Avg max drawdown</th><th>From rating time</th></tr></thead>
+              <tbody id="selectionComparisonBody"><tr><td colspan="8">Loading...</td></tr></tbody>
+            </table>
+          </div>
+          <h4 style="margin:12px 0 6px">By volume ratio (hits and volume near-misses)</h4>
+          <div class="results-wrap">
+            <table>
+              <thead><tr><th>Volume vs 52-week average</th><th>Hits</th><th>Near-misses</th><th>Avg vs benchmark</th><th>Median vs benchmark</th><th>Beat benchmark</th><th>+15% before -12%</th></tr></thead>
+              <tbody id="selectionVolumeBody"><tr><td colspan="7">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+      <div class="insights-grid">
+        <section class="insights-panel" aria-labelledby="insightsHeading">
+          <div class="insights-panel-head"><h3 id="insightsHeading">Historical appraisals</h3><span id="insightsReplayMeta" class="status-line"></span></div>
+          <div class="insights-panel-body">
+            <select id="insightsReplayPick" aria-label="Historical winner appraisal"><option value="">Select a winner appraisal</option></select>
+            <div id="insightsReplaySummary" class="status-line" style="margin-top:8px">Select an appraisal to inspect information known on that date.</div>
+            <div id="insightsReplayChart" class="financial-chart insights-replay-chart" role="img" aria-label="Price chart ending at the appraisal date"></div>
+            <button id="insightsRevealOutcome" type="button" style="margin-top:8px" hidden>Reveal outcome</button>
+            <div class="insights-feature-table results-wrap" style="margin-top:10px">
+              <table><thead><tr><th>Feature</th><th>Value then</th><th>Source date</th></tr></thead><tbody id="insightsFeatureBody"><tr><td colspan="3">No appraisal selected.</td></tr></tbody></table>
+            </div>
+          </div>
+        </section>
+        <section class="insights-panel">
+          <div class="insights-panel-head"><h3>Candidate patterns</h3><span id="insightsRunMeta" class="status-line"></span></div>
+          <div class="insights-panel-body insights-findings" id="insightsFindings">
+            <p class="status-line">Generate Insights after enough outcomes have matured.</p>
+          </div>
+        </section>
+      </div>
+      <section class="insights-panel" aria-labelledby="ruleLabHeading">
+        <div class="insights-panel-head"><h3 id="ruleLabHeading">Shadow Rule Lab</h3><span class="status-line" id="insightsRuleStatus">Rules never alter the production screen automatically.</span></div>
+        <div class="insights-panel-body">
+          <form class="insights-toolbar" id="insightsRuleForm">
+            <label>Name<input id="insightsRuleName" maxlength="120" placeholder="Volume leader filter"></label>
+            <label>Feature<input id="insightsRuleFeature" maxlength="100" placeholder="relative_volume_5d"></label>
+            <label>Operator<select id="insightsRuleOperator"><option value="gte">At least</option><option value="gt">Greater than</option><option value="lte">At most</option><option value="lt">Less than</option></select></label>
+            <label>Value<input id="insightsRuleValue" type="number" step="any" placeholder="2"></label>
+            <button type="submit">Save draft</button>
+          </form>
+          <div class="results-wrap" style="margin-top:10px">
+            <table><thead><tr><th>Name</th><th>Status</th><th>Version</th><th>Condition</th><th>Shadow test</th></tr></thead><tbody id="insightsRuleBody"><tr><td colspan="5">No draft rules.</td></tr></tbody></table>
+          </div>
+        </div>
+      </section>
     </section>
   </section>
 
@@ -1780,6 +1999,28 @@
     </div>
   </div>
 
+  <div class="modal feedback-modal hidden" id="purchaseModal" role="dialog" aria-modal="true" aria-labelledby="purchaseTitle">
+    <div class="feedback-window">
+      <div class="progress-head">
+        <h2 id="purchaseTitle">Record purchase</h2>
+        <button id="closePurchase" type="button">Close</button>
+      </div>
+      <div class="feedback-body">
+        <p class="purchase-context" id="purchaseContext"></p>
+        <input id="purchaseMarket" type="hidden"><input id="purchaseTicker" type="hidden">
+        <div class="purchase-form">
+          <label for="purchaseDateTime">Date and time bought<input id="purchaseDateTime" type="datetime-local" required></label>
+          <label for="purchasePrice">Price paid<input id="purchasePrice" type="number" min="0.000001" step="any" inputmode="decimal" required></label>
+        </div>
+        <p class="status-line" id="purchaseStatus" aria-live="polite"></p>
+        <div class="actions">
+          <button class="primary" id="savePurchase" type="button">Save purchase</button>
+          <button id="deletePurchase" type="button" hidden>Remove purchase</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal hidden" id="progressModal" role="dialog" aria-modal="true" aria-labelledby="progressTitle">
     <div class="progress-window">
       <div class="progress-head">
@@ -1811,26 +2052,42 @@
     </div>
   </div>
 
+  <script src="/assets/vendor/lightweight-charts/lightweight-charts.standalone.production.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const fmt = new Intl.NumberFormat();
     let authReady = Promise.resolve(null);
     let firebaseAuth = null;
     let firebaseAuthMethods = null;
+    let firebaseFirestore = null;
+    let firebaseFirestoreMethods = null;
+    let firebaseStorage = null;
+    let firebaseStorageMethods = null;
     let appCheckTokenProvider = null;
+    let currentSnapshot = null;
+    const snapshotObjectCache = new Map();
     let currentUserProfile = null;
+    let currentWeeklyRun = null;
+    let weeklyRunPollTimer = null;
+    let lastWeeklyRunPhase = null;
     async function initializeFirebaseAuth() {
       try {
         const response = await fetch("/api/auth-config");
         if (!response.ok) return null;
         const config = await response.json();
         if (!config.enabled || !config.apiKey || !config.appId) return null;
-        const [{ initializeApp }, authModule, appCheckModule] = await Promise.all([
+        const [{ initializeApp }, authModule, appCheckModule, firestoreModule, storageModule] = await Promise.all([
           import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"),
           import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js"),
-          import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app-check.js")
+          import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app-check.js"),
+          import("https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js"),
+          import("https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js")
         ]);
         const app = initializeApp(config);
+        firebaseFirestore = firestoreModule.getFirestore(app);
+        firebaseFirestoreMethods = firestoreModule;
+        firebaseStorage = storageModule.getStorage(app);
+        firebaseStorageMethods = storageModule;
         if (config.appCheck?.enabled && config.appCheck.siteKey) {
           const appCheck = appCheckModule.initializeAppCheck(app, {
             provider: new appCheckModule.ReCaptchaEnterpriseProvider(config.appCheck.siteKey),
@@ -1852,6 +2109,7 @@
             if (currentUserProfile?.user) $("topStatus").textContent = `Signed in as ${currentUserProfile.user.email || "anonymous"}`;
             else $("topStatus").textContent = `Signed in as ${user.email || "user"}`;
           } else {
+            stopWeeklyRunPolling();
             $("authSignOut").hidden = true;
             $("loginStatus").textContent = "Sign in with an invited email account";
             $("topStatus").textContent = "Sign in with an invited email account";
@@ -1866,14 +2124,184 @@
       }
     }
     authReady = initializeFirebaseAuth();
+
+    async function snapshotJson(objectPath, useCache = true) {
+      if (useCache && snapshotObjectCache.has(objectPath)) return snapshotObjectCache.get(objectPath);
+      const response = await api(`/api/snapshot-object?path=${encodeURIComponent(objectPath)}`);
+      const payload = response.snapshot;
+      if (useCache) snapshotObjectCache.set(objectPath, payload);
+      return payload;
+    }
+
+    async function loadCurrentSnapshot(force = false) {
+      if (force) snapshotObjectCache.delete("snapshots/current.json");
+      currentSnapshot = await snapshotJson("snapshots/current.json", !force);
+      return currentSnapshot;
+    }
+
+    function snapshotPath(kind, values = {}) {
+      const template = currentSnapshot?.paths?.[kind];
+      if (!template) throw new Error("The weekly snapshot has not been published yet");
+      return Object.entries(values).reduce(
+        (path, [key, value]) => path.replace(`{${key}}`, String(value)),
+        template
+      );
+    }
+
+    function liveAppraisalId(uid, market, ticker) {
+      return `${uid}__${market}__${String(ticker).toUpperCase().replace(/[^A-Z0-9._^=-]+/g, "_")}`;
+    }
+
+    function timestampIso(value) {
+      if (value?.toDate) return value.toDate().toISOString();
+      return value ? new Date(value).toISOString() : null;
+    }
+
+    async function loadLiveAppraisals(market = null) {
+      if (!firebaseFirestore || !firebaseFirestoreMethods) return [];
+      const {collection, getDocs, query, where} = firebaseFirestoreMethods;
+      const source = market
+        ? query(collection(firebaseFirestore, "team_appraisals"), where("market", "==", market))
+        : collection(firebaseFirestore, "team_appraisals");
+      const snapshot = await getDocs(source);
+      return snapshot.docs.map((item) => {
+        const row = item.data();
+        return {
+          ...row,
+          firestore_id: item.id,
+          event_at_utc: timestampIso(row.event_at_utc || row.updated_at),
+          updated_at_utc: timestampIso(row.updated_at)
+        };
+      });
+    }
+
+    async function overlayLiveAppraisals(results, market) {
+      const uid = firebaseAuth?.currentUser?.uid;
+      if (!uid) return results;
+      const appraisals = await loadLiveAppraisals(market);
+      const mine = new Map(appraisals.filter((row) => row.owner_uid === uid).map((row) => [row.ticker, row]));
+      return (results || []).map((row) => {
+        const appraisal = mine.get(row.ticker);
+        return appraisal ? {
+          ...row,
+          label: appraisal.action === "clear" ? null : appraisal.label,
+          personal_note: appraisal.note || null,
+          personal_status: appraisal.status || null,
+          appraised_at_utc: appraisal.event_at_utc || appraisal.updated_at_utc
+        } : row;
+      });
+    }
+
+    async function saveLiveAppraisal({market, ticker, label, note = null, scanId = null, targetUid = null, source = {}}) {
+      if (!firebaseFirestore || !firebaseFirestoreMethods || !firebaseAuth?.currentUser) {
+        throw new Error("Live appraisal storage is not ready");
+      }
+      const {addDoc, collection, deleteDoc, doc, serverTimestamp, setDoc} = firebaseFirestoreMethods;
+      const actor = firebaseAuth.currentUser;
+      const ownerUid = targetUid || actor.uid;
+      const normalizedTicker = String(ticker).trim().toUpperCase();
+      const documentId = liveAppraisalId(ownerUid, market, normalizedTicker);
+      const appraisalRef = doc(firebaseFirestore, "team_appraisals", documentId);
+      const action = !label || label === "clear" ? "clear" : "label";
+      const payload = {
+        owner_uid: ownerUid,
+        owner_email: targetUid && targetUid !== actor.uid ? (source.owner_email || null) : (actor.email || null),
+        actor_uid: actor.uid,
+        actor_email: actor.email || null,
+        market,
+        ticker: normalizedTicker,
+        action,
+        label: action === "label" ? label : null,
+        note: note || null,
+        status: source.status || null,
+        scan_id: Number(scanId || source.scan_id || 0) || null,
+        source_id: Number(source.source_id || 0) || null,
+        signal_date: source.signal_date || source.date || null,
+        signal_price: Number(source.signal_price || source.close_price || 0) || null,
+        market_cap: Number(source.market_cap || 0) || null,
+        avg_volume: Number(source.avg_volume || 0) || null,
+        volume_ratio: Number(source.volume_ratio || 0) || null,
+        sector: source.sector || null,
+        industry: source.industry || null,
+        updated_at: serverTimestamp()
+      };
+      if (action === "clear") await deleteDoc(appraisalRef);
+      else await setDoc(appraisalRef, payload, {merge: true});
+      await addDoc(collection(firebaseFirestore, "rating_events"), {
+        ...payload,
+        event_at_utc: serverTimestamp(),
+        synced_to_postgres: false
+      });
+      return {...payload, event_at_utc: new Date().toISOString()};
+    }
+
+    function purchaseId(uid, market, ticker) {
+      return `${uid}__${market}__${String(ticker).toUpperCase().replace(/[^A-Z0-9._^=-]+/g, "_")}`;
+    }
+
+    async function loadLivePurchases() {
+      if (!firebaseFirestore || !firebaseFirestoreMethods) return [];
+      const {collection, getDocs} = firebaseFirestoreMethods;
+      const snapshot = await getDocs(collection(firebaseFirestore, "purchases"));
+      return snapshot.docs.map((item) => {
+        const row = item.data();
+        return {
+          ...row,
+          firestore_id: item.id,
+          bought_at_utc: timestampIso(row.bought_at),
+          created_at_utc: timestampIso(row.created_at),
+          updated_at_utc: timestampIso(row.updated_at)
+        };
+      });
+    }
+
+    async function saveLivePurchase({market, ticker, boughtAt, boughtPrice}) {
+      if (!firebaseFirestore || !firebaseFirestoreMethods || !firebaseAuth?.currentUser) {
+        throw new Error("Purchase storage is not ready");
+      }
+      const {doc, serverTimestamp, setDoc} = firebaseFirestoreMethods;
+      const user = firebaseAuth.currentUser;
+      const normalizedTicker = String(ticker).trim().toUpperCase();
+      const boughtDate = new Date(boughtAt);
+      const price = Number(boughtPrice);
+      if (!Number.isFinite(boughtDate.getTime())) throw new Error("Enter a valid purchase date and time");
+      if (boughtDate.getTime() > Date.now()) throw new Error("Purchase time cannot be in the future");
+      if (!Number.isFinite(price) || price <= 0) throw new Error("Purchase price must be greater than zero");
+      const reference = doc(firebaseFirestore, "purchases", purchaseId(user.uid, market, normalizedTicker));
+      const existing = lastPurchases.find((row) => row.firestore_id === reference.id);
+      await setDoc(reference, {
+        owner_uid: user.uid,
+        owner_email: user.email || null,
+        market,
+        ticker: normalizedTicker,
+        bought_at: boughtDate,
+        bought_price: price,
+        created_at: existing ? existing.created_at || serverTimestamp() : serverTimestamp(),
+        updated_at: serverTimestamp()
+      }, {merge: true});
+    }
+
+    async function deleteLivePurchase(market, ticker) {
+      if (!firebaseFirestore || !firebaseFirestoreMethods || !firebaseAuth?.currentUser) {
+        throw new Error("Purchase storage is not ready");
+      }
+      const {deleteDoc, doc} = firebaseFirestoreMethods;
+      await deleteDoc(doc(firebaseFirestore, "purchases", purchaseId(firebaseAuth.currentUser.uid, market, ticker)));
+    }
     let lastCandles = [];
     let lastChartTicker = "";
     let lastMovingAverages = {};
     let lastAnalysisPayload = null;
     let lastAnalysisPicks = [];
     let lastAnalysisReviewPicks = [];
+    let lastPurchases = [];
+    let analysisWorkspaceMode = "performance";
+    let activeInsightsRunId = null;
+    let insightsPollTimer = null;
+    let lastInsightReplay = null;
     let lastReviewChart = null;
     let reviewChartRequestToken = 0;
+    const financialCharts = new WeakMap();
     const analysisGroupSort = {
       winner: {key: "return_percent", direction: "desc"},
       maybe: {key: "return_percent", direction: "desc"},
@@ -1881,6 +2309,7 @@
     };
     let lastFeedbackItems = [];
     let currentScanId = null;
+    let lastScreenResults = [];
     let lastExportStoragePath = null;
     let activeFilterAfterEventId = 0;
     let marketStatusTimer = null;
@@ -2171,7 +2600,28 @@
 
     async function loadCurrentUserProfile() {
       try {
-        const payload = await api("/api/user/profile");
+        let payload;
+        try {
+          if (!firebaseFirestore || !firebaseFirestoreMethods || !firebaseAuth?.currentUser) {
+            throw new Error("Firebase user profile is unavailable");
+          }
+          const profileDocument = await firebaseFirestoreMethods.getDoc(
+            firebaseFirestoreMethods.doc(firebaseFirestore, "app_users", firebaseAuth.currentUser.uid)
+          );
+          if (!profileDocument.exists()) throw new Error("Firebase user profile was not found");
+          payload = {
+            ok: true,
+            user: {
+              uid: firebaseAuth.currentUser.uid,
+              email: firebaseAuth.currentUser.email,
+              ...profileDocument.data()
+            },
+            snapshot_mode: true
+          };
+        } catch (firestoreError) {
+          console.warn("Firestore user profile is unavailable; trying the API", firestoreError);
+          payload = await api("/api/user/profile");
+        }
         currentUserProfile = payload;
         const user = payload.user || {};
         const role = user.role || "viewer";
@@ -2203,7 +2653,7 @@
       $("marketTab").setAttribute("aria-pressed", String(!analysis));
       $("analysisTab").classList.toggle("active", analysis);
       $("analysisTab").setAttribute("aria-pressed", String(analysis));
-      if (analysis) loadAnalysis();
+      if (analysis) loadActiveAnalysisWorkspace();
     }
 
     function returnText(value) {
@@ -2381,6 +2831,8 @@
 
     function bindAnalysisChartLinks() {
       document.querySelectorAll(".analysis-chart-link").forEach((link) => {
+        if (link.dataset.analysisChartBound) return;
+        link.dataset.analysisChartBound = "true";
         link.addEventListener("click", (event) => {
           event.preventDefault();
           $("marketSelect").value = link.dataset.market;
@@ -2421,6 +2873,7 @@
       $("analysisReviewChartMeta").textContent = "Loading daily candles...";
       $("analysisReviewChartEmpty").hidden = true;
       $("analysisReviewOpenMarket").hidden = true;
+      $("analysisReviewResetView").hidden = true;
       try {
         const payload = await api(`/api/chart?${reviewChartParams(row).toString()}`);
         if (requestToken !== reviewChartRequestToken) return;
@@ -2449,13 +2902,140 @@
         $("analysisReviewOpenMarket").dataset.market = row.market;
         $("analysisReviewOpenMarket").dataset.ticker = row.ticker;
         $("analysisReviewOpenMarket").hidden = false;
+        $("analysisReviewResetView").hidden = !payload.count;
       } catch (error) {
         if (requestToken !== reviewChartRequestToken) return;
         lastReviewChart = null;
+        clearFinancialChart($("analysisReviewChart"));
         $("analysisReviewChartMeta").textContent = error.message;
         $("analysisReviewChartEmpty").textContent = "The review chart could not be loaded.";
         $("analysisReviewChartEmpty").hidden = false;
+        $("analysisReviewResetView").hidden = true;
       }
+    }
+
+    const WEEKLY_RUN_POLL_MS = 20_000;
+    const WEEKLY_RUN_PHASES = {
+      starting_database: {label: "Starting database", detail: "Preparing the weekly market database.", step: 1, percent: 8},
+      refreshing_asx: {label: "Updating ASX", detail: "Downloading and storing the latest ASX market data.", step: 2, percent: 18},
+      screening_asx: {label: "Running ASX screen", detail: "Running the default ASX screen before starting the larger US update.", step: 3, percent: 32},
+      refreshing_us: {label: "Updating US", detail: "Downloading and storing the latest US market data.", step: 4, percent: 52},
+      screening_us: {label: "Running US screen", detail: "Running the default US screen.", step: 5, percent: 68},
+      screening: {label: "Running screens", detail: "Running the default ASX and US screens.", step: 4, percent: 75},
+      screening_legacy: {label: "Finishing legacy screens", detail: "Waiting for previously started ASX and US screens.", step: 5, percent: 75},
+      publishing: {label: "Publishing website", detail: "Building and publishing the new weekly snapshot.", step: 6, percent: 92},
+      complete: {label: "Weekly update complete", detail: "The latest weekly market data and screens are published.", step: 7, percent: 100},
+      failed: {label: "Weekly update failed", detail: "The weekly update stopped before publication.", step: 0, percent: 0}
+    };
+
+    function brisbaneWeeklyRunId(now = new Date()) {
+      const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Australia/Brisbane",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        weekday: "short"
+      }).formatToParts(now).map((part) => [part.type, part.value]));
+      const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(parts.weekday);
+      const localDate = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
+      return new Date(localDate - ((weekday + 5) % 7) * 86_400_000).toISOString().slice(0, 10);
+    }
+
+    function firestoreDate(value) {
+      if (value?.toDate) return value.toDate();
+      const parsed = value ? new Date(value) : null;
+      return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
+    }
+
+    function weeklyRunTechnicalDetails(run) {
+      return JSON.stringify(Object.fromEntries(Object.entries(run || {}).map(([key, value]) => [
+        key,
+        value?.toDate ? value.toDate().toISOString() : value
+      ])), null, 2);
+    }
+
+    function renderWeeklyRunStatus(run) {
+      const button = $("weeklyRunStatus");
+      currentWeeklyRun = run;
+      if (!run) {
+        button.hidden = true;
+        return;
+      }
+      const phase = String(run.phase || "");
+      const phaseInfo = WEEKLY_RUN_PHASES[phase] || {label: "Weekly update", detail: phase || "Waiting for status", step: 0, percent: 0};
+      button.hidden = false;
+      button.className = `status-line ${phase === "failed" ? "bad" : phase === "complete" ? "ok" : "warn"}`;
+      button.textContent = phaseInfo.label;
+      button.setAttribute("aria-label", `${phaseInfo.label}. ${phaseInfo.detail} Open progress details.`);
+      button.title = run.error ? `${phaseInfo.detail} ${run.error}` : `${phaseInfo.detail} Open progress details.`;
+    }
+
+    function openWeeklyRunProgress() {
+      const run = currentWeeklyRun;
+      if (!run) return;
+      const phase = String(run.phase || "");
+      const phaseInfo = WEEKLY_RUN_PHASES[phase] || {label: phase || "Weekly update", detail: "Waiting for coordinator status.", step: 0, percent: 0};
+      const started = firestoreDate(run.started_at);
+      const elapsedSeconds = started ? Math.max(0, Math.round((Date.now() - started.getTime()) / 1000)) : 0;
+      const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+      const isActive = !["complete", "failed"].includes(phase);
+      const progressFill = $("progressFill");
+      $("progressTitle").textContent = "Weekly Market Update";
+      $("progressDetail").textContent = run.error || phaseInfo.detail;
+      $("progressDetail").className = `status-line ${phase === "failed" ? "bad" : phase === "complete" ? "ok" : "warn"}`;
+      $("progressStage").textContent = phaseInfo.label;
+      $("progressCount").textContent = phaseInfo.step ? `Step ${phaseInfo.step} / 7` : "Stopped";
+      $("progressPercent").textContent = phase === "complete" ? "100%" : phase === "failed" ? "Failed" : "In progress";
+      progressFill.classList.toggle("indeterminate", isActive);
+      progressFill.style.width = phase === "complete" ? "100%" : phase === "failed" ? "0%" : "35%";
+      $("progressStarted").textContent = started ? formatBrisbane(started.toISOString()) : "-";
+      $("progressElapsed").textContent = started ? `${elapsedMinutes}m` : "-";
+      $("progressSnapshot").textContent = currentSnapshot?.markets?.asx?.latest_bar_date || "Not published yet";
+      $("progressSteps").textContent = "Database -> ASX -> US -> Screens -> Publish -> Complete";
+      const updated = firestoreDate(run.updated_at);
+      $("progressEvents").textContent = updated ? `Last coordinator update ${formatBrisbane(updated.toISOString())}` : "Waiting for the next coordinator check";
+      $("modalFetchLog").textContent = weeklyRunTechnicalDetails(run);
+      $("progressModal").classList.remove("hidden");
+    }
+
+    function stopWeeklyRunPolling() {
+      if (weeklyRunPollTimer) clearTimeout(weeklyRunPollTimer);
+      weeklyRunPollTimer = null;
+      currentWeeklyRun = null;
+      $("weeklyRunStatus").hidden = true;
+    }
+
+    async function pollWeeklyRunStatus() {
+      if (!firebaseAuth?.currentUser || !firebaseFirestore || !firebaseFirestoreMethods) {
+        stopWeeklyRunPolling();
+        return;
+      }
+      try {
+        const runs = firebaseFirestoreMethods.collection(firebaseFirestore, "weekly_runs");
+        const reference = firebaseFirestoreMethods.doc(runs, brisbaneWeeklyRunId());
+        const snapshot = await firebaseFirestoreMethods.getDoc(reference);
+        const run = snapshot.exists() ? snapshot.data() : null;
+        const previousPhase = lastWeeklyRunPhase;
+        lastWeeklyRunPhase = run?.phase || null;
+        renderWeeklyRunStatus(run);
+        if (run?.phase === "complete" && previousPhase && previousPhase !== "complete") {
+          await loadCurrentSnapshot(true).catch((error) => console.warn("Could not reload the completed weekly snapshot", error));
+          refreshStatus().catch(() => {});
+          loadSharedScan().catch(() => {});
+        }
+      } catch (error) {
+        console.warn("Could not load weekly coordinator status", error);
+      } finally {
+        if (firebaseAuth?.currentUser) {
+          weeklyRunPollTimer = setTimeout(pollWeeklyRunStatus, WEEKLY_RUN_POLL_MS);
+        }
+      }
+    }
+
+    function startWeeklyRunPolling() {
+      if (weeklyRunPollTimer) clearTimeout(weeklyRunPollTimer);
+      weeklyRunPollTimer = null;
+      pollWeeklyRunStatus();
     }
 
     function bindAnalysisReviewRows() {
@@ -2486,7 +3066,20 @@
           $("analysisManualStatus").textContent = `Saving ${tableRow.dataset.reviewTicker} as ${labelText(button.dataset.confirmLabel)}...`;
           $("analysisManualStatus").className = "analysis-manual-status status-line warn";
           try {
-            await api("/api/analysis/pick", {
+            if (currentSnapshot) {
+              const source = lastAnalysisReviewPicks.find((row) =>
+                row.firebase_uid === tableRow.dataset.reviewOwner
+                && row.market === tableRow.dataset.reviewMarket
+                && row.ticker === tableRow.dataset.reviewTicker
+              ) || {};
+              await saveLiveAppraisal({
+                market: tableRow.dataset.reviewMarket,
+                ticker: tableRow.dataset.reviewTicker,
+                label: button.dataset.confirmLabel,
+                targetUid: tableRow.dataset.reviewOwner,
+                source
+              });
+            } else await api("/api/analysis/pick", {
               method: "POST",
               body: JSON.stringify({
                 market: tableRow.dataset.reviewMarket,
@@ -2538,11 +3131,13 @@
       } else {
         reviewChartRequestToken += 1;
         lastReviewChart = null;
+        clearFinancialChart($("analysisReviewChart"));
         $("analysisReviewChartTitle").textContent = "No stocks awaiting review";
         $("analysisReviewChartMeta").textContent = "Needs Confirmation picks will appear here.";
         $("analysisReviewChartEmpty").textContent = "No stocks currently need confirmation.";
         $("analysisReviewChartEmpty").hidden = false;
         $("analysisReviewOpenMarket").hidden = true;
+        $("analysisReviewResetView").hidden = true;
       }
     }
 
@@ -2610,7 +3205,8 @@
         <td>${Number.isFinite(Number(row.latest_price)) ? Number(row.latest_price).toFixed(2) : "-"}</td>
         <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
         <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
-      </tr>`).join("") : `<tr><td colspan="7" style="text-align:left;color:var(--muted)">No ${labelText(label).toLowerCase()} picks.</td></tr>`;
+        ${label === "winner" ? `<td><button class="purchase-action" type="button" data-purchase-market="${escapeHtml(row.market)}" data-purchase-ticker="${escapeHtml(row.ticker)}">Bought</button></td>` : ""}
+      </tr>`).join("") : `<tr><td colspan="${label === "winner" ? 8 : 7}" style="text-align:left;color:var(--muted)">No ${labelText(label).toLowerCase()} picks.</td></tr>`;
     }
 
     function renderAnalysisPicks() {
@@ -2629,6 +3225,102 @@
       });
       $("analysisPickMeta").textContent = `${fmt.format(visibleCount)} active picks`;
       bindAnalysisChartLinks();
+      bindPurchaseActions();
+    }
+
+    function localDateTimeInput(value = new Date()) {
+      const date = value instanceof Date ? value : new Date(value);
+      const pad = (part) => String(part).padStart(2, "0");
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+
+    async function openPurchaseDialog(market, ticker) {
+      try {
+        lastPurchases = await loadLivePurchases();
+      } catch (error) {
+        console.warn("Could not preload purchases", error);
+      }
+      const uid = firebaseAuth?.currentUser?.uid;
+      const existing = lastPurchases.find((row) => row.owner_uid === uid && row.market === market && row.ticker === ticker);
+      const latest = lastAnalysisPicks.find((row) => row.market === market && row.ticker === ticker)
+        || lastScreenResults.find((row) => row.ticker === ticker && $("marketSelect").value === market);
+      $("purchaseMarket").value = market;
+      $("purchaseTicker").value = ticker;
+      $("purchaseContext").textContent = `${ticker} · ${String(market).toUpperCase()}`;
+      $("purchaseDateTime").max = localDateTimeInput(new Date());
+      $("purchaseDateTime").value = localDateTimeInput(existing?.bought_at_utc || new Date());
+      $("purchasePrice").value = existing?.bought_price || latest?.latest_price || latest?.close_price || "";
+      $("purchaseStatus").textContent = existing ? "Update or remove your recorded purchase." : "This does not change the Winner appraisal.";
+      $("purchaseStatus").className = "status-line";
+      $("deletePurchase").hidden = !existing;
+      $("purchaseModal").classList.remove("hidden");
+      $("purchasePrice").focus();
+    }
+
+    function closePurchaseDialog() {
+      $("purchaseModal").classList.add("hidden");
+    }
+
+    function bindPurchaseActions(root = document) {
+      root.querySelectorAll(".purchase-action").forEach((button) => {
+        if (button.dataset.purchaseBound) return;
+        button.dataset.purchaseBound = "true";
+        button.addEventListener("click", () => openPurchaseDialog(button.dataset.purchaseMarket, button.dataset.purchaseTicker));
+      });
+    }
+
+    function purchaseReturn(row) {
+      const boughtPrice = Number(row.bought_price);
+      const latestPrice = Number(row.latest_price);
+      return boughtPrice > 0 && Number.isFinite(latestPrice) ? ((latestPrice / boughtPrice) - 1) * 100 : null;
+    }
+
+    async function loadBoughtPortfolio() {
+      $("boughtPortfolioMeta").textContent = "Loading purchases...";
+      lastPurchases = await loadLivePurchases();
+      const marketPrices = new Map();
+      await Promise.all([...new Set(lastPurchases.map((row) => row.market))].map(async (market) => {
+        try {
+          const payload = await snapshotJson(snapshotPath("weekly_metrics", {market}));
+          (payload.metrics || []).forEach((row) => marketPrices.set(`${market}:${row.ticker}`, {
+            latest_price: row.latest_daily_close,
+            latest_date: row.latest_daily_date
+          }));
+        } catch (error) {
+          console.warn(`Could not load ${market} purchase prices`, error);
+        }
+      }));
+      const priced = lastPurchases.map((purchase) => ({
+        ...purchase,
+        ...(marketPrices.get(`${purchase.market}:${purchase.ticker}`) || {latest_price: null, latest_date: null})
+      }));
+      priced.sort((left, right) => String(right.bought_at_utc || "").localeCompare(String(left.bought_at_utc || "")));
+      const body = $("boughtPortfolioBody");
+      const currentUid = firebaseAuth?.currentUser?.uid;
+      body.innerHTML = priced.length ? priced.map((row) => {
+        const result = purchaseReturn(row);
+        const boughtAt = row.bought_at_utc ? new Date(row.bought_at_utc) : null;
+        const priceAt = row.latest_date ? new Date(`${row.latest_date}T00:00:00Z`) : new Date();
+        const heldDays = boughtAt ? Math.max(0, Math.floor((priceAt.getTime() - boughtAt.getTime()) / 86400000)) : null;
+        return `<tr>
+          <td>${escapeHtml(row.owner_email || "Team member")}</td><td>${escapeHtml(String(row.market).toUpperCase())}</td>
+          <td><a class="ticker analysis-chart-link" href="#" data-market="${escapeHtml(row.market)}" data-ticker="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</a></td>
+          <td>${boughtAt ? boughtAt.toLocaleString([], {dateStyle: "medium", timeStyle: "short"}) : "-"}</td>
+          <td>${Number(row.bought_price).toFixed(2)}</td><td>${Number.isFinite(Number(row.latest_price)) ? Number(row.latest_price).toFixed(2) : "-"}</td>
+          <td class="${returnClass(result)}">${returnText(result)}</td><td>${heldDays === null ? "-" : `${fmt.format(heldDays)}d`}</td><td>${row.latest_date || "-"}</td>
+          <td>${row.owner_uid === currentUid ? `<button class="purchase-action" type="button" data-purchase-market="${escapeHtml(row.market)}" data-purchase-ticker="${escapeHtml(row.ticker)}">Edit</button>` : ""}</td>
+        </tr>`;
+      }).join("") : `<tr><td colspan="10" style="text-align:left;color:var(--muted)">No purchases recorded yet. Use Bought on a winner.</td></tr>`;
+      const returns = priced.map(purchaseReturn).filter(Number.isFinite);
+      const average = returns.length ? returns.reduce((sum, value) => sum + value, 0) / returns.length : null;
+      $("boughtPositionCount").textContent = fmt.format(priced.length);
+      $("boughtAverageReturn").textContent = returnText(average);
+      $("boughtAverageReturn").className = returnClass(average);
+      $("boughtProfitCount").textContent = fmt.format(returns.filter((value) => value > 0).length);
+      $("boughtLatestDate").textContent = priced.map((row) => row.latest_date).filter(Boolean).sort().at(-1) || "-";
+      $("boughtPortfolioMeta").textContent = priced.length ? "Team purchases · equal-weight performance" : "No purchases recorded";
+      bindAnalysisChartLinks();
+      bindPurchaseActions(body);
     }
 
     function renderAnalysis(payload, picks, reviewPicks) {
@@ -2655,6 +3347,115 @@
       renderAnalysisPicks();
     }
 
+    async function loadSnapshotAnalysis(market, interval, range) {
+      const uid = firebaseAuth?.currentUser?.uid;
+      const appraisals = await loadLiveAppraisals(market);
+      const mine = appraisals.filter((row) => row.owner_uid === uid && row.action !== "clear" && row.label);
+      const review = appraisals.filter((row) => row.action !== "clear" && row.label === "needs_confirmation");
+      const rangeDays = range === "all" ? null : snapshotRangeDays(range);
+      const chartRows = await Promise.all(mine.map(async (pick) => {
+        try {
+          const chart = await loadSnapshotChart(pick.ticker, market, interval, "10y", []);
+          const signalDate = String(pick.signal_date || pick.date || pick.event_at_utc || "").slice(0, 10);
+          let signalPrice = Number(pick.signal_price || pick.close_price);
+          const eligible = chart.candles.filter((row) => row.date >= signalDate);
+          if (!Number.isFinite(signalPrice) || signalPrice <= 0) signalPrice = Number(eligible[0]?.close);
+          const latest = eligible.at(-1);
+          return {pick, signalDate, signalPrice, rows: eligible, latest};
+        } catch (error) {
+          console.warn(`Could not load snapshot performance for ${pick.ticker}`, error);
+          return {pick, signalDate: null, signalPrice: null, rows: [], latest: null};
+        }
+      }));
+      const latestAvailable = chartRows.map((item) => item.latest?.date).filter(Boolean).sort().at(-1) || null;
+      const cutoff = rangeDays && latestAvailable
+        ? new Date(new Date(`${latestAvailable}T00:00:00Z`).getTime() - rangeDays * 86400000).toISOString().slice(0, 10)
+        : null;
+      const byDate = new Map();
+      chartRows.forEach((item) => {
+        if (!item.signalPrice) return;
+        item.rows.filter((row) => !cutoff || row.date >= cutoff).forEach((row) => {
+          const dateGroups = byDate.get(row.date) || new Map();
+          const value = ((Number(row.close) - item.signalPrice) / item.signalPrice) * 100;
+          const labelValues = dateGroups.get(item.pick.label) || [];
+          labelValues.push(value);
+          dateGroups.set(item.pick.label, labelValues);
+          const allValues = dateGroups.get("all_picks") || [];
+          allValues.push(value);
+          dateGroups.set("all_picks", allValues);
+          byDate.set(row.date, dateGroups);
+        });
+      });
+      const labels = ["winner", "needs_confirmation", "maybe", "bad", "all_picks"];
+      const series = labels.map((label) => ({
+        label,
+        points: [...byDate.entries()].sort(([left], [right]) => left.localeCompare(right)).flatMap(([date, groups]) => {
+          const values = groups.get(label) || [];
+          return values.length ? [{
+            date,
+            return_percent: values.reduce((sum, value) => sum + value, 0) / values.length,
+            sample_count: values.length
+          }] : [];
+        })
+      }));
+      const benchmarkTicker = market === "asx" ? "^AORD" : "SPY";
+      let benchmarkPoints = [];
+      try {
+        const benchmark = await loadSnapshotChart(benchmarkTicker, market, interval, "10y", []);
+        const earliest = chartRows.map((item) => item.signalDate).filter(Boolean).sort()[0] || cutoff;
+        const rows = benchmark.candles.filter((row) => (!earliest || row.date >= earliest) && (!cutoff || row.date >= cutoff));
+        const initial = Number(rows[0]?.close);
+        benchmarkPoints = Number.isFinite(initial) && initial > 0
+          ? rows.map((row) => ({date: row.date, return_percent: ((Number(row.close) / initial) - 1) * 100}))
+          : [];
+      } catch (error) {
+        console.warn("Snapshot benchmark is unavailable", error);
+      }
+      const picks = chartRows.map((item) => ({
+        ...item.pick,
+        firebase_uid: item.pick.owner_uid,
+        event_at_utc: item.pick.event_at_utc || item.pick.updated_at_utc,
+        signal_date: item.signalDate,
+        signal_price: item.signalPrice,
+        latest_date: item.latest?.date || null,
+        latest_price: item.latest?.close ?? null,
+        return_percent: item.latest && item.signalPrice
+          ? ((Number(item.latest.close) - item.signalPrice) / item.signalPrice) * 100
+          : null
+      }));
+      const dates = chartRows.map((item) => item.signalDate).filter(Boolean).sort();
+      return {
+        timeseries: {
+          ok: true,
+          market,
+          interval,
+          range,
+          methodology: "Each pick is rebased to 0% on its appraisal price; lines show the mean available return for each category.",
+          coverage: {
+            active_pick_count: mine.length,
+            ticker_count: new Set(mine.map((item) => item.ticker)).size,
+            earliest_signal_date: dates[0] || null,
+            latest_signal_date: dates.at(-1) || null
+          },
+          series,
+          benchmark: {
+            ticker: benchmarkTicker,
+            name: market === "asx" ? "All Ordinaries" : "S&P 500 (SPY)",
+            available: benchmarkPoints.length > 0,
+            unavailable_reason: benchmarkPoints.length ? null : "Benchmark is not included in the current weekly snapshot",
+            points: benchmarkPoints
+          }
+        },
+        picks,
+        review: review.map((item) => ({
+          ...item,
+          firebase_uid: item.owner_uid,
+          event_at_utc: item.event_at_utc || item.updated_at_utc,
+          signal_price: item.signal_price || item.close_price || null
+        }))
+      };
+    }
+
     async function loadAnalysis() {
       $("analysisStatus").textContent = "Loading pick performance...";
       $("analysisStatus").className = "status-line warn";
@@ -2662,18 +3463,339 @@
       const interval = encodeURIComponent($("analysisInterval").value);
       const range = encodeURIComponent($("analysisRange").value);
       try {
-        const [timeseriesPayload, picksPayload, reviewPayload] = await Promise.all([
-          api(`/api/analysis/timeseries?market=${market}&interval=${interval}&range=${range}`),
-          api(`/api/analysis/picks?market=${market}&horizon=0&limit=5000`),
-          api(`/api/analysis/picks?market=${market}&label=needs_confirmation&scope=team&horizon=0&limit=5000`)
-        ]);
-        renderAnalysis(timeseriesPayload, picksPayload.picks || [], reviewPayload.picks || []);
+        if (currentSnapshot) {
+          const snapshotAnalysis = await loadSnapshotAnalysis(
+            decodeURIComponent(market),
+            decodeURIComponent(interval),
+            decodeURIComponent(range)
+          );
+          renderAnalysis(snapshotAnalysis.timeseries, snapshotAnalysis.picks, snapshotAnalysis.review);
+        } else {
+          const [timeseriesPayload, picksPayload, reviewPayload] = await Promise.all([
+            api(`/api/analysis/timeseries?market=${market}&interval=${interval}&range=${range}`),
+            api(`/api/analysis/picks?market=${market}&horizon=0&limit=5000`),
+            api(`/api/analysis/picks?market=${market}&label=needs_confirmation&scope=team&horizon=0&limit=5000`)
+          ]);
+          renderAnalysis(timeseriesPayload, picksPayload.picks || [], reviewPayload.picks || []);
+        }
+        await loadBoughtPortfolio();
         $("analysisStatus").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
         $("analysisStatus").className = "status-line ok";
       } catch (error) {
         $("analysisStatus").textContent = error.message;
         $("analysisStatus").className = "status-line bad";
         $("analysisChartMeta").textContent = "Performance data could not be loaded";
+      }
+    }
+
+    function setAnalysisWorkspace(mode) {
+      analysisWorkspaceMode = mode === "insights" ? "insights" : "performance";
+      const insights = analysisWorkspaceMode === "insights";
+      $("analysisPerformanceWorkspace").hidden = insights;
+      $("analysisInsightsWorkspace").hidden = !insights;
+      $("analysisPerformanceMode").classList.toggle("active", !insights);
+      $("analysisInsightsMode").classList.toggle("active", insights);
+      $("analysisPerformanceMode").setAttribute("aria-pressed", String(!insights));
+      $("analysisInsightsMode").setAttribute("aria-pressed", String(insights));
+      $("analysisDaily").parentElement.hidden = insights;
+      $("analysisRange").hidden = insights;
+      $("refreshAnalysis").textContent = insights ? "Refresh coverage" : "Refresh";
+      if (insights) loadInsightsOverview();
+      else loadAnalysis();
+    }
+
+    function loadActiveAnalysisWorkspace() {
+      return analysisWorkspaceMode === "insights" ? loadInsightsOverview() : loadAnalysis();
+    }
+
+    function renderInsightFindings(findings) {
+      $("insightsFindings").innerHTML = findings.length ? findings.map((finding) => {
+        const metrics = finding.in_sample_metrics_json || {};
+        const adjusted = Number(finding.adjusted_p_value);
+        const effect = Number(metrics.effect_size);
+        return `<article class="insight-finding">
+          <strong>${escapeHtml(finding.title || "Exploratory feature difference")}</strong>
+          <span>${escapeHtml(finding.explanation || "")}</span>
+          <span>${fmt.format(Number(finding.support_count || 0))} observations · effect ${Number.isFinite(effect) ? effect.toFixed(2) : "-"} · adjusted p ${Number.isFinite(adjusted) ? adjusted.toFixed(3) : "-"}</span>
+          <span>Exploratory only. This has not passed walk-forward or holdout validation.</span>
+        </article>`;
+      }).join("") : '<p class="status-line">No feature differences met the minimum coverage requirements for this run.</p>';
+    }
+
+    async function loadInsightRun(runId) {
+      const payload = await api(`/api/analysis/insights/runs/${encodeURIComponent(runId)}?limit=100`);
+      const job = payload.job || {};
+      if (job.running || !payload.run) {
+        $("insightsRunMeta").textContent = job.message || job.stage || "Analysis queued";
+        clearTimeout(insightsPollTimer);
+        insightsPollTimer = setTimeout(() => loadInsightRun(runId).catch(showInsightsError), 3000);
+        return;
+      }
+      activeInsightsRunId = null;
+      clearTimeout(insightsPollTimer);
+      if (job.success === false || payload.run?.status === "failed") {
+        throw new Error(job.error || payload.run?.error || "Insights analysis failed");
+      }
+      $("insightsRunMeta").textContent = payload.run?.finished_at_utc
+        ? `Completed ${new Date(payload.run.finished_at_utc).toLocaleString()}`
+        : "Complete";
+      renderInsightFindings(payload.findings || []);
+      await loadInsightsOverview(false);
+    }
+
+    function showInsightsError(error) {
+      $("insightsStatus").textContent = error.message;
+      $("insightsStatus").className = "status-line bad";
+      $("generateInsights").disabled = false;
+    }
+
+    async function loadInsightReplay(eventId) {
+      if (!eventId) {
+        clearFinancialChart($("insightsReplayChart"));
+        $("insightsRevealOutcome").hidden = true;
+        $("insightsFeatureBody").innerHTML = '<tr><td colspan="3">No appraisal selected.</td></tr>';
+        return;
+      }
+      $("insightsReplaySummary").textContent = "Loading the immutable appraisal snapshot...";
+      try {
+        const payload = await api(`/api/analysis/insights/picks/${encodeURIComponent(eventId)}`);
+        const snapshot = payload.snapshot;
+        if (!snapshot) {
+          $("insightsReplaySummary").textContent = "This older appraisal has not been backfilled yet.";
+          $("insightsFeatureBody").innerHTML = '<tr><td colspan="3">Snapshot unavailable.</td></tr>';
+          return;
+        }
+        const selectedHorizon = Number($("insightsHorizon").value);
+        const outcome = (payload.outcomes || []).find((item) => Number(item.horizon_days) === selectedHorizon) || null;
+        lastInsightReplay = {payload, outcome};
+        $("insightsReplaySummary").textContent = `${payload.event.ticker} · ${snapshot.feature_as_of_date || "no price cutoff"} · ${snapshot.status}`;
+        const chartQuery = new URLSearchParams({
+          market: payload.event.market,
+          ticker: payload.event.ticker,
+          interval: "daily",
+          range: "5y",
+          ma: "30,90,180,360,700",
+          end_date: snapshot.feature_as_of_date
+        });
+        const chart = await api(`/api/chart?${chartQuery.toString()}`);
+        drawCandles(chart.candles || [], chart.ticker, chart.moving_averages || {}, {
+          canvas: $("insightsReplayChart"), interval: "daily", range: "5y", trackState: false
+        });
+        $("insightsRevealOutcome").hidden = !outcome?.outcome_date;
+        const values = snapshot.values || [];
+        $("insightsFeatureBody").innerHTML = values.length ? values.map((value) => {
+          const displayed = value.is_missing ? `Missing: ${value.missing_reason || "unavailable"}`
+            : value.numeric_value ?? value.boolean_value ?? value.categorical_value ?? "-";
+          return `<tr><td title="${escapeHtml(value.description || "")}">${escapeHtml(value.feature_name)}</td><td>${escapeHtml(displayed)}</td><td>${value.source_as_of_utc ? new Date(value.source_as_of_utc).toLocaleDateString() : "-"}</td></tr>`;
+        }).join("") : '<tr><td colspan="3">No feature values were stored.</td></tr>';
+      } catch (error) {
+        $("insightsReplaySummary").textContent = error.message;
+        $("insightsFeatureBody").innerHTML = '<tr><td colspan="3">Could not load appraisal snapshot.</td></tr>';
+      }
+    }
+
+    async function revealInsightOutcome() {
+      const replay = lastInsightReplay;
+      if (!replay?.outcome?.outcome_date) return;
+      const event = replay.payload.event;
+      const query = new URLSearchParams({
+        market: event.market,
+        ticker: event.ticker,
+        interval: "daily",
+        range: "5y",
+        ma: "30,90,180,360,700",
+        end_date: replay.outcome.outcome_date
+      });
+      $("insightsRevealOutcome").disabled = true;
+      try {
+        const chart = await api(`/api/chart?${query.toString()}`);
+        drawCandles(chart.candles || [], chart.ticker, chart.moving_averages || {}, {
+          canvas: $("insightsReplayChart"), interval: "daily", range: "5y", trackState: false
+        });
+        $("insightsReplaySummary").textContent = `${event.ticker} outcome revealed through ${replay.outcome.outcome_date} · ${returnText(replay.outcome.benchmark_excess_return_percent)} versus benchmark`;
+      } catch (error) {
+        $("insightsReplaySummary").textContent = error.message;
+      } finally {
+        $("insightsRevealOutcome").disabled = false;
+      }
+    }
+
+    function selectionGroupLabel(key, scope) {
+      if (key === "all_hits") return "All screen hits";
+      if (key === "unrated_hits") return scope === "team" ? "Hits nobody labelled" : "Hits you didn't label";
+      if (key.startsWith("label:")) return labelText(key.slice(6));
+      const rule = key.startsWith("near_miss:") ? key.slice(10) : key;
+      const maPeriod = rule.match(/^ma_(\d+)$/);
+      if (maPeriod) return `Near-miss: below ${maPeriod[1]}-week MA`;
+      return {
+        volume: "Near-miss: volume too low",
+        weekly_up: "Near-miss: week not up",
+        daily_confirmation: "Near-miss: daily close not confirming",
+        market_cap: "Near-miss: market cap outside range",
+        runaway: "Near-miss: runaway exclusion"
+      }[rule] || `Near-miss: ${rule}`;
+    }
+
+    function selectionGroupOrder(key) {
+      const order = ["all_hits", "label:winner", "label:needs_confirmation", "label:maybe", "label:bad", "unrated_hits"];
+      const index = order.indexOf(key);
+      return index >= 0 ? index : order.length;
+    }
+
+    function percentText(value) {
+      const number = Number(value);
+      return Number.isFinite(number) ? `${number.toFixed(1)}%` : "-";
+    }
+
+    async function loadSelectionComparison() {
+      const market = $("analysisMarket").value;
+      const scope = $("insightsScope").value;
+      const horizon = $("insightsHorizon").value;
+      $("selectionComparisonMeta").textContent = "Loading...";
+      try {
+        const payload = await api(`/api/analysis/selection-comparison?market=${encodeURIComponent(market)}&scope=${encodeURIComponent(scope)}&horizon_days=${encodeURIComponent(horizon)}`);
+        const groups = [...(payload.groups || [])].sort((left, right) =>
+          selectionGroupOrder(left.group_key) - selectionGroupOrder(right.group_key) || String(left.group_key).localeCompare(String(right.group_key))
+        );
+        $("selectionComparisonBody").innerHTML = groups.length ? groups.map((group) => {
+          const count = Number(group.observation_count || 0);
+          const small = count < 20;
+          const fromRating = Number(group.rating_anchored_count || 0)
+            ? `${returnText(group.rating_anchored_average_excess_percent)} (${fmt.format(Number(group.rating_anchored_count))})`
+            : "-";
+          return `<tr${small ? ' style="color:var(--muted)"' : ""}><td>${escapeHtml(selectionGroupLabel(String(group.group_key), scope))}${small ? " (small sample)" : ""}</td><td>${fmt.format(count)}</td><td>${returnText(group.average_excess_percent)}</td><td>${returnText(group.median_excess_percent)}</td><td>${percentText(group.beat_benchmark_percent)}</td><td>${percentText(group.target_hit_percent)}</td><td>${returnText(group.average_drawdown_percent)}</td><td>${fromRating}</td></tr>`;
+        }).join("") : '<tr><td colspan="8">No screen hits have reached this horizon yet. Outcomes appear once hits are older than the selected horizon.</td></tr>';
+        const buckets = payload.volume_buckets || [];
+        $("selectionVolumeBody").innerHTML = buckets.length ? buckets.map((bucket) =>
+          `<tr><td>${escapeHtml(bucket.bucket)}</td><td>${fmt.format(Number(bucket.hit_count || 0))}</td><td>${fmt.format(Number(bucket.near_miss_count || 0))}</td><td>${returnText(bucket.average_excess_percent)}</td><td>${returnText(bucket.median_excess_percent)}</td><td>${percentText(bucket.beat_benchmark_percent)}</td><td>${percentText(bucket.target_hit_percent)}</td></tr>`
+        ).join("") : '<tr><td colspan="7">No measured hits or volume near-misses yet.</td></tr>';
+        $("selectionComparisonMeta").textContent = `${market.toUpperCase()} · ${Math.round(Number(horizon) / 7)} weeks`;
+      } catch (error) {
+        $("selectionComparisonMeta").textContent = error.message;
+        $("selectionComparisonBody").innerHTML = '<tr><td colspan="8">Comparison unavailable.</td></tr>';
+        $("selectionVolumeBody").innerHTML = '<tr><td colspan="7">Comparison unavailable.</td></tr>';
+      }
+    }
+
+    async function loadInsightsOverview(loadLatestRun = true) {
+      const teamOption = $("insightsScope").querySelector('option[value="team"]');
+      const isAdmin = currentUserProfile?.user?.role === "admin";
+      teamOption.disabled = !isAdmin;
+      if (!isAdmin && $("insightsScope").value === "team") $("insightsScope").value = "mine";
+      $("insightsStatus").textContent = "Checking point-in-time coverage...";
+      $("insightsStatus").className = "status-line warn";
+      const market = encodeURIComponent($("analysisMarket").value);
+      const scope = encodeURIComponent($("insightsScope").value);
+      const timing = encodeURIComponent($("insightsTiming").value);
+      const horizon = encodeURIComponent($("insightsHorizon").value);
+      loadSelectionComparison();
+      try {
+        const [overview, history] = await Promise.all([
+          api(`/api/analysis/insights/overview?market=${market}&scope=${scope}&timing=${timing}&horizon_days=${horizon}`),
+          api("/api/user/rating-history?limit=1000")
+        ]);
+        const coverage = overview.coverage || {};
+        $("insightsTotalEvents").textContent = fmt.format(Number(coverage.total_events || 0));
+        $("insightsMatureEvents").textContent = fmt.format(Number(coverage.mature_events || 0));
+        $("insightsSnapshotCount").textContent = fmt.format(Number(coverage.complete_snapshots || 0));
+        $("insightsFundamentalCoverage").textContent = `${Number(coverage.fundamental_coverage_percent || 0).toFixed(1)}%`;
+        $("insightsAnalysisLevel").textContent = labelText(overview.analysis_level || "coverage");
+        $("insightsStatus").textContent = overview.minimum_sample_message || "Coverage loaded";
+        $("insightsStatus").className = `status-line ${Number(coverage.mature_events || 0) >= 20 ? "ok" : "warn"}`;
+        const winnerPicks = (history.events || []).filter((event) => event.action === "label" && event.label === "winner" && event.market === $("analysisMarket").value);
+        $("insightsReplayPick").innerHTML = '<option value="">Select a winner appraisal</option>' + winnerPicks.map((pick) =>
+          `<option value="${Number(pick.id)}">${escapeHtml(pick.ticker)} · ${pick.event_at_utc ? new Date(pick.event_at_utc).toLocaleDateString() : "unknown date"}</option>`
+        ).join("");
+        $("insightsReplayMeta").textContent = `${fmt.format(winnerPicks.length)} current winner picks`;
+        await loadInsightRules();
+        if (loadLatestRun && overview.latest_run?.id && !activeInsightsRunId) await loadInsightRun(overview.latest_run.id);
+      } catch (error) {
+        showInsightsError(error);
+      } finally {
+        $("generateInsights").disabled = false;
+      }
+    }
+
+    async function generateInsights() {
+      $("generateInsights").disabled = true;
+      $("insightsStatus").textContent = "Queueing point-in-time analysis...";
+      $("insightsStatus").className = "status-line warn";
+      try {
+        const response = await api("/api/analysis/insights/run", {
+          method: "POST",
+          body: JSON.stringify({
+            market: $("analysisMarket").value,
+            scope: $("insightsScope").value,
+            timing: $("insightsTiming").value,
+            horizon_days: Number($("insightsHorizon").value)
+          })
+        });
+        activeInsightsRunId = response.job.id;
+        $("insightsRunMeta").textContent = response.deduplicated ? "Joined existing analysis" : "Analysis queued";
+        await loadInsightRun(activeInsightsRunId);
+      } catch (error) {
+        showInsightsError(error);
+      }
+    }
+
+    async function loadInsightRules() {
+      try {
+        const payload = await api("/api/analysis/insights/rules");
+        const rules = payload.rules || [];
+        $("insightsRuleBody").innerHTML = rules.length ? rules.map((rule) => {
+          const clauses = rule.condition_json?.all || [];
+          const condition = clauses.map((clause) => `${clause.feature} ${clause.operator} ${clause.value}`).join(" AND ");
+          return `<tr><td>${escapeHtml(rule.name)}</td><td>${escapeHtml(rule.status)}</td><td>${Number(rule.version)}</td><td>${escapeHtml(condition)}</td><td><button type="button" data-evaluate-rule="${escapeHtml(rule.id)}">Evaluate</button></td></tr>`;
+        }).join("") : '<tr><td colspan="5">No draft rules.</td></tr>';
+        document.querySelectorAll("[data-evaluate-rule]").forEach((button) => button.addEventListener("click", () => evaluateInsightRule(button.dataset.evaluateRule, button)));
+      } catch (error) {
+        $("insightsRuleStatus").textContent = error.message;
+        $("insightsRuleStatus").className = "status-line bad";
+      }
+    }
+
+    async function createInsightRule(event) {
+      event.preventDefault();
+      const name = $("insightsRuleName").value.trim();
+      const feature = $("insightsRuleFeature").value.trim();
+      const value = Number($("insightsRuleValue").value);
+      if (!name || !feature || !Number.isFinite(value)) {
+        $("insightsRuleStatus").textContent = "Enter a name, stored feature name, and numeric threshold.";
+        $("insightsRuleStatus").className = "status-line bad";
+        return;
+      }
+      $("insightsRuleStatus").textContent = "Saving draft rule...";
+      try {
+        await api("/api/analysis/insights/rules", {
+          method: "POST",
+          body: JSON.stringify({name, condition: {all: [{feature, operator: $("insightsRuleOperator").value, value}]}})
+        });
+        $("insightsRuleStatus").textContent = "Draft saved. Run a shadow test before considering approval.";
+        $("insightsRuleStatus").className = "status-line ok";
+        await loadInsightRules();
+      } catch (error) {
+        $("insightsRuleStatus").textContent = error.message;
+        $("insightsRuleStatus").className = "status-line bad";
+      }
+    }
+
+    async function evaluateInsightRule(ruleId, button) {
+      button.disabled = true;
+      $("insightsRuleStatus").textContent = "Running shadow evaluation...";
+      $("insightsRuleStatus").className = "status-line warn";
+      try {
+        const payload = await api(`/api/analysis/insights/rules/${encodeURIComponent(ruleId)}/evaluate`, {
+          method: "POST",
+          body: JSON.stringify({market: $("analysisMarket").value, horizon_days: Number($("insightsHorizon").value)})
+        });
+        const result = payload.evaluation;
+        $("insightsRuleStatus").textContent = `Retained ${result.retained_count}/${result.eligible_count}; removed ${result.low_removed_count} underperformers and incorrectly removed ${result.high_removed_count} high performers.`;
+        $("insightsRuleStatus").className = `status-line ${Number(result.high_removed_count) === 0 ? "ok" : "warn"}`;
+      } catch (error) {
+        $("insightsRuleStatus").textContent = error.message;
+        $("insightsRuleStatus").className = "status-line bad";
+      } finally {
+        button.disabled = false;
       }
     }
 
@@ -2690,12 +3812,23 @@
       $("analysisManualStatus").textContent = `Adding ${ticker.toUpperCase()} for review...`;
       $("analysisManualStatus").className = "analysis-manual-status status-line warn";
       try {
-        const payload = await api("/api/analysis/pick", {
-          method: "POST",
-          body: JSON.stringify({market: $("analysisMarket").value, ticker, label: "needs_confirmation"})
-        });
+        const market = $("analysisMarket").value;
+        const normalizedTicker = ticker.toUpperCase();
+        const chart = currentSnapshot ? await loadSnapshotChart(normalizedTicker, market, "daily", "1y", []) : null;
+        const latest = chart?.candles?.at(-1) || {};
+        const payload = currentSnapshot
+          ? await saveLiveAppraisal({
+            market,
+            ticker: normalizedTicker,
+            label: "needs_confirmation",
+            source: {date: latest.date, close_price: latest.close}
+          })
+          : await api("/api/analysis/pick", {
+            method: "POST",
+            body: JSON.stringify({market, ticker: normalizedTicker, label: "needs_confirmation"})
+          });
         $("analysisManualTicker").value = "";
-        $("analysisManualStatus").textContent = `${payload.ticker} added to Needs Confirmation.`;
+        $("analysisManualStatus").textContent = `${payload.ticker || normalizedTicker} added to Needs Confirmation.`;
         $("analysisManualStatus").className = "analysis-manual-status status-line ok";
         await loadAnalysis();
       } catch (error) {
@@ -2732,17 +3865,18 @@
       $("feedbackBadge").hidden = newCount === 0;
       $("feedbackList").innerHTML = lastFeedbackItems.length ? lastFeedbackItems.map((item) => {
         const location = [String(item.market || "").toUpperCase(), item.ticker].filter(Boolean).join(" / ");
-        return `<article class="feedback-item" data-feedback-id="${Number(item.id)}">
+        const feedbackId = String(item.id);
+        return `<article class="feedback-item" data-feedback-id="${escapeHtml(feedbackId)}">
           <div class="feedback-item-head">
-            <span>#${Number(item.id)} · ${escapeHtml(item.category)}${location ? ` · ${escapeHtml(location)}` : ""}</span>
+            <span>#${escapeHtml(feedbackId)} · ${escapeHtml(item.category)}${location ? ` · ${escapeHtml(location)}` : ""}</span>
             <time>${item.created_at_utc ? new Date(item.created_at_utc).toLocaleString() : ""}</time>
           </div>
           <p>${escapeHtml(item.message)}</p>
           <div class="feedback-item-head"><span>${escapeHtml(item.user_email || "Unknown user")}</span><span>${escapeHtml(item.status)}</span></div>
           <div class="actions">
-            <button type="button" data-feedback-copy="${Number(item.id)}">Copy</button>
-            ${item.status === "new" ? `<button type="button" data-feedback-status="reviewed" data-feedback-id="${Number(item.id)}">Mark reviewed</button>` : ""}
-            ${item.status !== "done" ? `<button type="button" data-feedback-status="done" data-feedback-id="${Number(item.id)}">Mark done</button>` : ""}
+            <button type="button" data-feedback-copy="${escapeHtml(feedbackId)}">Copy</button>
+            ${item.status === "new" ? `<button type="button" data-feedback-status="reviewed" data-feedback-id="${escapeHtml(feedbackId)}">Mark reviewed</button>` : ""}
+            ${item.status !== "done" ? `<button type="button" data-feedback-status="done" data-feedback-id="${escapeHtml(feedbackId)}">Mark done</button>` : ""}
           </div>
         </article>`;
       }).join("") : '<p class="status-line">No feedback matches this status.</p>';
@@ -2750,10 +3884,17 @@
       document.querySelectorAll("[data-feedback-status]").forEach((button) => button.addEventListener("click", async () => {
         button.disabled = true;
         try {
-          await api(`/api/admin/feedback/${button.dataset.feedbackId}`, {
-            method: "PATCH",
-            body: JSON.stringify({status: button.dataset.feedbackStatus})
-          });
+          if (currentSnapshot && firebaseFirestore && firebaseFirestoreMethods) {
+            await firebaseFirestoreMethods.updateDoc(
+              firebaseFirestoreMethods.doc(firebaseFirestore, "feedback", button.dataset.feedbackId),
+              {status: button.dataset.feedbackStatus, updated_at: firebaseFirestoreMethods.serverTimestamp()}
+            );
+          } else {
+            await api(`/api/admin/feedback/${button.dataset.feedbackId}`, {
+              method: "PATCH",
+              body: JSON.stringify({status: button.dataset.feedbackStatus})
+            });
+          }
           await loadFeedbackInbox();
         } catch (error) {
           $("feedbackStatus").textContent = error.message;
@@ -2762,7 +3903,7 @@
         }
       }));
       document.querySelectorAll("[data-feedback-copy]").forEach((button) => button.addEventListener("click", async () => {
-        const item = lastFeedbackItems.find((entry) => Number(entry.id) === Number(button.dataset.feedbackCopy));
+        const item = lastFeedbackItems.find((entry) => String(entry.id) === String(button.dataset.feedbackCopy));
         if (!item) return;
         const text = [
           `MoneyMaker feedback #${item.id}`,
@@ -2783,8 +3924,23 @@
 
     async function loadFeedbackInbox() {
       if (currentUserProfile?.user?.role !== "admin") return;
-      const status = encodeURIComponent($("feedbackStatusFilter").value || "new");
-      renderFeedbackInbox(await api(`/api/admin/feedback?status=${status}&limit=100`));
+      const selectedStatus = $("feedbackStatusFilter").value || "new";
+      if (currentSnapshot && firebaseFirestore && firebaseFirestoreMethods) {
+        const snapshot = await firebaseFirestoreMethods.getDocs(
+          firebaseFirestoreMethods.collection(firebaseFirestore, "feedback")
+        );
+        const all = snapshot.docs.map((item) => {
+          const row = item.data();
+          return {...row, id: item.id, created_at_utc: timestampIso(row.created_at)};
+        }).sort((left, right) => String(right.created_at_utc).localeCompare(String(left.created_at_utc)));
+        const counts = Object.entries(all.reduce((result, item) => {
+          result[item.status] = (result[item.status] || 0) + 1;
+          return result;
+        }, {})).map(([status, count]) => ({status, count}));
+        renderFeedbackInbox({feedback: all.filter((item) => item.status === selectedStatus).slice(0, 100), counts});
+        return;
+      }
+      renderFeedbackInbox(await api(`/api/admin/feedback?status=${encodeURIComponent(selectedStatus)}&limit=100`));
     }
 
     function openFeedbackDialog() {
@@ -2809,7 +3965,23 @@
       $("feedbackStatus").textContent = "Sending...";
       $("feedbackStatus").className = "status-line warn";
       try {
-        const payload = await api("/api/feedback", {method: "POST", body: JSON.stringify(feedbackContext())});
+        let payload;
+        if (currentSnapshot && firebaseFirestore && firebaseFirestoreMethods && firebaseAuth?.currentUser) {
+          const context = feedbackContext();
+          const saved = await firebaseFirestoreMethods.addDoc(
+            firebaseFirestoreMethods.collection(firebaseFirestore, "feedback"),
+            {
+              ...context,
+              user_uid: firebaseAuth.currentUser.uid,
+              user_email: firebaseAuth.currentUser.email || null,
+              status: "new",
+              created_at: firebaseFirestoreMethods.serverTimestamp()
+            }
+          );
+          payload = {feedback: {id: saved.id}};
+        } else {
+          payload = await api("/api/feedback", {method: "POST", body: JSON.stringify(feedbackContext())});
+        }
         $("feedbackMessage").value = "";
         $("feedbackCharacterCount").textContent = "0 / 4000";
         $("feedbackStatus").textContent = `Feedback #${payload.feedback.id} sent.`;
@@ -2824,6 +3996,12 @@
     }
 
     async function initializeAppMode() {
+      if (currentSnapshot) {
+        document.body.classList.add("cloud-mode");
+        document.title = "Moneymaker Markets";
+        document.querySelector("h1").textContent = "Moneymaker Markets";
+        return;
+      }
       try {
         const payload = await api("/api/config");
         if (payload.cloud) {
@@ -2858,7 +4036,17 @@
     }
 
     async function refreshStatus() {
-      const payload = await api("/api/markets/status");
+      let payload;
+      if (currentSnapshot) {
+        payload = {ok: true, markets: currentSnapshot.markets || {}, snapshot_mode: true};
+      } else {
+        try {
+          payload = await api("/api/markets/status");
+        } catch (apiError) {
+          const snapshot = await loadCurrentSnapshot(true);
+          payload = {ok: true, markets: snapshot.markets || {}, snapshot_mode: true};
+        }
+      }
       const markets = payload.markets || {};
       renderMarketStatusStrip(markets);
       const market = $("marketSelect").value;
@@ -2884,6 +4072,10 @@
       } else {
         $("topStatus").textContent = `${market.toUpperCase()} data through ${s.latest_bar_date || "unknown"}; updated ${formatBrisbane(s.last_successful_refresh_at_utc || s.database_refreshed_at_utc, false)}`;
         $("topStatus").className = "status-line ok";
+      }
+      if (payload.snapshot_mode) {
+        const published = currentSnapshot?.published_at_utc ? formatBrisbane(currentSnapshot.published_at_utc) : "unknown";
+        topStatus.textContent = `${market.toUpperCase()} data through ${s.latest_bar_date || "unknown"}; weekly edition published ${published}`;
       }
       if (marketStatusTimer) clearTimeout(marketStatusTimer);
       const hasRunningRefresh = Object.values(markets).some((item) =>
@@ -2964,8 +4156,98 @@
 
     function redrawChartSoon() {
       window.setTimeout(() => {
-        if (lastCandles.length) drawCandles(lastCandles, lastChartTicker, lastMovingAverages);
+        resizeFinancialChart($("priceChart"));
       }, 80);
+    }
+
+    function snapshotRangeDays(range) {
+      return {"3m": 92, "6m": 184, "1y": 366, "2y": 731, "5y": 1827, "10y": 3653}[range] || 366;
+    }
+
+    function snapshotAggregateCandles(candles, interval) {
+      if (interval === "daily") return candles;
+      const groups = new Map();
+      candles.forEach((row) => {
+        const when = new Date(`${row.date}T00:00:00Z`);
+        let key;
+        if (interval === "monthly") {
+          key = `${row.date.slice(0, 7)}-01`;
+        } else {
+          const day = when.getUTCDay() || 7;
+          when.setUTCDate(when.getUTCDate() - day + 1);
+          key = when.toISOString().slice(0, 10);
+        }
+        const existing = groups.get(key);
+        if (!existing) {
+          groups.set(key, {...row, date: key});
+        } else {
+          existing.high = Math.max(existing.high, row.high);
+          existing.low = Math.min(existing.low, row.low);
+          existing.close = row.close;
+          existing.volume += row.volume || 0;
+        }
+      });
+      return [...groups.values()].sort((left, right) => left.date.localeCompare(right.date));
+    }
+
+    function snapshotMovingAverages(candles, periods) {
+      const result = {};
+      periods.forEach((period) => {
+        let sum = 0;
+        const values = candles.map((row, index) => {
+          sum += Number(row.close);
+          if (index >= period) sum -= Number(candles[index - period].close);
+          return index + 1 >= period ? sum / period : null;
+        });
+        result[String(period)] = values;
+      });
+      return result;
+    }
+
+    async function loadSnapshotChart(ticker, market, interval, range, periods) {
+      const payload = await snapshotJson(snapshotPath("chart", {
+        market,
+        ticker: String(ticker).toUpperCase().replace(/[^A-Z0-9._^=-]+/g, "_")
+      }));
+      const daily = (payload.rows || []).map((row) => ({
+        date: String(row[0]).slice(0, 10),
+        open: Number(row[1]),
+        high: Number(row[2]),
+        low: Number(row[3]),
+        close: Number(row[4]),
+        volume: Number(row[5] || 0)
+      })).filter((row) => [row.open, row.high, row.low, row.close].every(Number.isFinite));
+      const complete = snapshotAggregateCandles(daily, interval);
+      const completeAverages = snapshotMovingAverages(complete, periods);
+      const latest = complete.at(-1)?.date;
+      const cutoff = latest
+        ? new Date(`${latest}T00:00:00Z`).getTime() - snapshotRangeDays(range) * 86400000
+        : 0;
+      const firstVisible = Math.max(0, complete.findIndex((row) => new Date(`${row.date}T00:00:00Z`).getTime() >= cutoff));
+      const candles = complete.slice(firstVisible);
+      const movingAverages = Object.fromEntries(Object.entries(completeAverages).map(([period, values]) => [
+        period,
+        values.slice(firstVisible)
+      ]));
+      const appraisals = await loadLiveAppraisals(market);
+      const appraisal = appraisals.find((row) => row.owner_uid === firebaseAuth?.currentUser?.uid && row.ticker === ticker) || null;
+      return {
+        ...payload,
+        interval,
+        range,
+        candles,
+        moving_averages: movingAverages,
+        moving_average_availability: Object.fromEntries(periods.map((period) => [String(period), {
+          available: complete.length >= period,
+          required_bars: period,
+          cached_bars: complete.length,
+          initialized_at: complete.length >= period ? complete[period - 1].date : null
+        }])),
+        appraisal,
+        count: candles.length,
+        start: candles[0]?.date || null,
+        end: candles.at(-1)?.date || null
+      };
     }
 
     function toggleChartFullscreen(force = null) {
@@ -3000,7 +4282,15 @@
         ma: selectedMaPeriods()
       });
       try {
-        const payload = await api(`/api/chart?${params.toString()}`);
+        const payload = currentSnapshot
+          ? await loadSnapshotChart(
+            selectedTicker,
+            $("marketSelect").value,
+            $("chartInterval").value,
+            $("chartRange").value,
+            selectedMaPeriods().split(",").map(Number).filter(Number.isFinite)
+          )
+          : await api(`/api/chart?${params.toString()}`);
         renderCompanyProfile(payload.company || {}, payload.ticker || selectedTicker, payload.appraisal || null);
         drawCandles(payload.candles || [], payload.ticker, payload.moving_averages || {});
         const unavailable = Object.entries(payload.moving_average_availability || {})
@@ -3018,160 +4308,215 @@
       }
     }
 
-    function drawCandles(candles, ticker, movingAverages = {}, options = {}) {
-      if (options.trackState !== false) {
-        lastCandles = candles;
-        lastChartTicker = ticker || lastChartTicker;
-        lastMovingAverages = movingAverages || {};
-      }
-      const canvas = options.canvas || $("priceChart");
-      const box = canvas.parentElement;
-      const interval = options.interval || $("chartInterval").value;
-      const range = options.range || $("chartRange").value;
-      const dpr = window.devicePixelRatio || 1;
-      const width = Math.max(320, box.clientWidth);
-      const height = Math.max(260, box.clientHeight);
-      canvas.width = Math.floor(width * dpr);
-      canvas.height = Math.floor(height * dpr);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-
-      const ctx = canvas.getContext("2d");
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = "#0c1110";
-      ctx.fillRect(0, 0, width, height);
-
-      if (!candles.length) {
-        ctx.fillStyle = "#9fb0a8";
-        ctx.font = "13px Segoe UI, sans-serif";
-        ctx.fillText("No cached candle data for this selection.", 18, 32);
-        return;
-      }
-
-      const pad = { left: 58, right: 12, top: 44, bottom: 28 };
-      const volumeBandHeight = Math.max(70, Math.min(150, height * 0.22));
-      const volumeGap = 16;
-      const priceTop = pad.top;
-      const volumeBottom = height - pad.bottom;
-      const volumeTop = volumeBottom - volumeBandHeight;
-      const priceBottom = Math.max(priceTop + 80, volumeTop - volumeGap);
-      const chartWidth = width - pad.left - pad.right;
-      const priceHeight = priceBottom - priceTop;
-
-      const maValues = Object.values(movingAverages || {})
-        .flat()
-        .filter((value) => Number.isFinite(value));
-      const high = Math.max(...candles.map(c => c.high), ...maValues);
-      const low = Math.min(...candles.map(c => c.low), ...maValues);
-      const volumeMax = Math.max(...candles.map(c => c.volume || 0), 1);
-      const priceRange = Math.max(high - low, 0.000001);
-      const y = (price) => priceTop + ((high - price) / priceRange) * priceHeight;
-      const candleStep = chartWidth / candles.length;
-      const bodyWidth = Math.max(2, Math.min(11, candleStep * 0.62));
-
-      ctx.strokeStyle = "#24332d";
-      ctx.lineWidth = 1;
-      ctx.fillStyle = "#9fb0a8";
-      ctx.font = "11px Segoe UI, sans-serif";
-      ctx.textAlign = "right";
-      ctx.textBaseline = "middle";
-
-      for (let i = 0; i <= 4; i++) {
-        const py = priceTop + (priceHeight / 4) * i;
-        const price = high - (priceRange / 4) * i;
-        ctx.beginPath();
-        ctx.moveTo(pad.left, py);
-        ctx.lineTo(width - pad.right, py);
-        ctx.stroke();
-        ctx.fillText(priceLabel(price), pad.left - 8, py);
-      }
-
-      ctx.strokeStyle = "#1f2d27";
-      ctx.beginPath();
-      ctx.moveTo(pad.left, volumeTop);
-      ctx.lineTo(width - pad.right, volumeTop);
-      ctx.stroke();
-      ctx.fillStyle = "#9fb0a8";
-      ctx.font = "11px Segoe UI, sans-serif";
-      ctx.textAlign = "right";
-      ctx.fillText("Volume", pad.left - 8, volumeTop + 12);
-
-      candles.forEach((candle, index) => {
-        const x = pad.left + index * candleStep + candleStep / 2;
-        const up = candle.close >= candle.open;
-        const color = up ? "#59c981" : "#e47b72";
-        const wickTop = y(candle.high);
-        const wickBottom = y(candle.low);
-        const openY = y(candle.open);
-        const closeY = y(candle.close);
-        const bodyTop = Math.min(openY, closeY);
-        const bodyHeight = Math.max(1, Math.abs(closeY - openY));
-        const volumeHeight = ((candle.volume || 0) / volumeMax) * (volumeBottom - volumeTop);
-
-        ctx.strokeStyle = color;
-        ctx.beginPath();
-        ctx.moveTo(x, wickTop);
-        ctx.lineTo(x, wickBottom);
-        ctx.stroke();
-
-        ctx.fillStyle = color;
-        ctx.fillRect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyHeight);
-        ctx.globalAlpha = 0.35;
-        ctx.fillRect(x - bodyWidth / 2, volumeBottom - volumeHeight, bodyWidth, volumeHeight);
-        ctx.globalAlpha = 1;
-      });
-
-      Object.entries(movingAverages || {}).forEach(([period, values]) => {
-        if (!values.some((value) => Number.isFinite(value))) return;
-        ctx.strokeStyle = maColors[period] || "#f1f4f0";
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        let drawing = false;
-        values.forEach((value, index) => {
-          if (!Number.isFinite(value)) {
-            drawing = false;
-            return;
-          }
-          const x = pad.left + index * candleStep + candleStep / 2;
-          const py = y(value);
-          if (!drawing) {
-            ctx.moveTo(x, py);
-            drawing = true;
-          } else {
-            ctx.lineTo(x, py);
-          }
+    function normalizedChartRows(candles, movingAverages = {}) {
+      const byDate = new Map();
+      (candles || []).forEach((candle, index) => {
+        const time = String(candle?.date || "").slice(0, 10);
+        const open = Number(candle?.open);
+        const high = Number(candle?.high);
+        const low = Number(candle?.low);
+        const close = Number(candle?.close);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(time) || ![open, high, low, close].every(Number.isFinite)) return;
+        const averages = {};
+        Object.entries(movingAverages || {}).forEach(([period, values]) => {
+          const rawValue = values?.[index];
+          if (rawValue === null || rawValue === undefined || rawValue === "") return;
+          const value = Number(rawValue);
+          if (Number.isFinite(value)) averages[period] = value;
         });
-        ctx.stroke();
+        const volume = Number(candle?.volume);
+        byDate.set(time, {
+          time,
+          open,
+          high,
+          low,
+          close,
+          volume: Number.isFinite(volume) ? volume : 0,
+          averages
+        });
       });
+      return [...byDate.values()].sort((left, right) => left.time.localeCompare(right.time));
+    }
 
-      ctx.fillStyle = "#edf4ef";
-      ctx.font = "13px Segoe UI, sans-serif";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillText(`${ticker} ${interval.toUpperCase()} ${range.toUpperCase()}`, pad.left, 8);
+    function clearFinancialChart(container) {
+      const state = financialCharts.get(container);
+      if (state?.chart) state.chart.remove();
+      financialCharts.delete(container);
+      container.replaceChildren();
+    }
 
-      let legendX = pad.left;
-      Object.entries(movingAverages || {}).forEach(([period, values]) => {
-        if (!values.some((value) => Number.isFinite(value))) return;
-        ctx.fillStyle = maColors[period] || "#f1f4f0";
-        ctx.fillRect(legendX, 28, 14, 2);
-        ctx.fillStyle = "#cbd8d1";
-        ctx.font = "11px Segoe UI, sans-serif";
-        ctx.fillText(`MA ${period}`, legendX + 18, 22);
-        legendX += 62;
-      });
+    function resetChartViewport(container) {
+      financialCharts.get(container)?.chart?.timeScale().fitContent();
+      container?.focus({preventScroll: true});
+    }
 
-      ctx.fillStyle = "#9fb0a8";
-      ctx.font = "11px Segoe UI, sans-serif";
-      ctx.textAlign = "center";
-      const dateIndexes = [0, Math.floor(candles.length / 2), candles.length - 1];
-      [...new Set(dateIndexes)].forEach((index) => {
-        const x = pad.left + index * candleStep + candleStep / 2;
-        ctx.fillText(candles[index].date, x, height - 16);
+    function resizeFinancialChart(container) {
+      const state = financialCharts.get(container);
+      if (!state?.chart) return;
+      window.requestAnimationFrame(() => {
+        state.chart.resize(container.clientWidth, container.clientHeight, true);
       });
     }
 
+    function drawCandles(candles, ticker, movingAverages = {}, options = {}) {
+      if (options.trackState !== false) {
+        lastCandles = candles || [];
+        lastChartTicker = ticker || lastChartTicker;
+        lastMovingAverages = movingAverages || {};
+      }
+
+      const container = options.canvas || $("priceChart");
+      const interval = options.interval || $("chartInterval").value;
+      const range = options.range || $("chartRange").value;
+      const rows = normalizedChartRows(candles, movingAverages);
+      clearFinancialChart(container);
+
+      if (!window.LightweightCharts) {
+        const message = document.createElement("div");
+        message.className = "chart-empty-message";
+        message.textContent = "The interactive chart library could not be loaded. Check the network connection and reload.";
+        container.appendChild(message);
+        return;
+      }
+      if (!rows.length) {
+        const message = document.createElement("div");
+        message.className = "chart-empty-message";
+        message.textContent = "No cached candle data for this selection.";
+        container.appendChild(message);
+        return;
+      }
+
+      const chart = LightweightCharts.createChart(container, {
+        autoSize: true,
+        layout: {
+          background: {type: "solid", color: "#0c1110"},
+          textColor: "#aebdb5",
+          fontFamily: '"Segoe UI", system-ui, sans-serif',
+          fontSize: 12,
+          attributionLogo: true,
+          panes: {
+            separatorColor: "#26342e",
+            separatorHoverColor: "#3e6654",
+            enableResize: true
+          }
+        },
+        grid: {
+          vertLines: {color: "#18231f"},
+          horzLines: {color: "#24332d"}
+        },
+        crosshair: {
+          mode: LightweightCharts.CrosshairMode.Normal,
+          vertLine: {color: "#73837b", width: 1, labelBackgroundColor: "#30443a"},
+          horzLine: {color: "#73837b", width: 1, labelBackgroundColor: "#30443a"}
+        },
+        rightPriceScale: {
+          borderColor: "#303f38",
+          scaleMargins: {top: 0.08, bottom: 0.08}
+        },
+        timeScale: {
+          borderColor: "#303f38",
+          timeVisible: interval === "daily",
+          secondsVisible: false,
+          rightOffset: 2,
+          barSpacing: 7,
+          minBarSpacing: 0.75,
+          fixLeftEdge: false,
+          fixRightEdge: false
+        },
+        handleScroll: {
+          mouseWheel: true,
+          pressedMouseMove: true,
+          horzTouchDrag: true,
+          vertTouchDrag: false
+        },
+        handleScale: {
+          axisPressedMouseMove: true,
+          mouseWheel: true,
+          pinch: true,
+          axisDoubleClickReset: true
+        },
+        kineticScroll: {mouse: true, touch: true},
+        localization: {
+          locale: "en-AU",
+          priceFormatter: priceLabel
+        }
+      });
+
+      const candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+        title: ticker || "",
+        upColor: "#59c981",
+        downColor: "#e47b72",
+        wickUpColor: "#59c981",
+        wickDownColor: "#e47b72",
+        borderVisible: false,
+        priceLineVisible: true,
+        lastValueVisible: true
+      });
+      candleSeries.setData(rows.map(({time, open, high, low, close}) => ({time, open, high, low, close})));
+
+      const movingAverageSeries = {};
+      Object.keys(movingAverages || {}).forEach((period) => {
+        const data = rows
+          .filter((row) => Number.isFinite(row.averages[period]))
+          .map((row) => ({time: row.time, value: row.averages[period]}));
+        if (!data.length) return;
+        const series = chart.addSeries(LightweightCharts.LineSeries, {
+          title: `MA ${period}`,
+          color: maColors[period] || "#f1f4f0",
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false
+        });
+        series.setData(data);
+        movingAverageSeries[period] = series;
+      });
+
+      const volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
+        title: "Volume",
+        priceFormat: {type: "volume"},
+        priceLineVisible: false,
+        lastValueVisible: false
+      }, 1);
+      volumeSeries.setData(rows.map((row) => ({
+        time: row.time,
+        value: row.volume,
+        color: row.close >= row.open ? "rgba(89, 201, 129, .58)" : "rgba(228, 123, 114, .58)"
+      })));
+      const volumePane = chart.panes()[1];
+      if (volumePane) {
+        volumePane.setHeight(Math.max(95, Math.min(150, Math.round(container.clientHeight * 0.25))));
+      }
+
+      const legend = document.createElement("div");
+      legend.className = "financial-chart-legend";
+      legend.textContent = `${ticker}  ${interval.toUpperCase()}  ${range.toUpperCase()}`;
+      container.appendChild(legend);
+
+      chart.subscribeCrosshairMove((event) => {
+        const candle = event.seriesData?.get(candleSeries);
+        if (!candle || !event.time) {
+          legend.textContent = `${ticker}  ${interval.toUpperCase()}  ${range.toUpperCase()}`;
+          return;
+        }
+        const volume = event.seriesData?.get(volumeSeries);
+        const volumeText = Number.isFinite(volume?.value) ? `  V ${fmt.format(volume.value)}` : "";
+        legend.textContent = `${event.time}  O ${priceLabel(candle.open)}  H ${priceLabel(candle.high)}  L ${priceLabel(candle.low)}  C ${priceLabel(candle.close)}${volumeText}`;
+      });
+
+      container.setAttribute(
+        "aria-label",
+        `${ticker} ${interval} chart from ${rows[0].time} to ${rows[rows.length - 1].time}. Drag to move; scroll or pinch to zoom; double-click an axis to reset it.`
+      );
+      financialCharts.set(container, {
+        chart,
+        candleSeries,
+        volumeSeries,
+        movingAverageSeries,
+        dataKey: `${ticker}|${interval}|${range}|${rows.length}|${rows[0].time}|${rows[rows.length - 1].time}`
+      });
+      chart.timeScale().fitContent();
+    }
     function renderProgressSteps(stage, success, stages = progressStageOrder) {
       const currentIndex = stages.findIndex((item) => item.toLowerCase() === String(stage || "").toLowerCase());
       const doneIndex = success ? stages.length - 1 : currentIndex;
@@ -3521,6 +4866,79 @@
       }
     }
 
+    function snapshotScreenResult(row, periods) {
+      const available = Number(row.available_weeks || 0);
+      const missing = periods.filter((period) => available < period).map((period) => ({period, available_weeks: available}));
+      return {
+        ticker: row.ticker,
+        date: row.latest_daily_date || row.week_date,
+        close_price: Number(row.latest_daily_close || row.close_price),
+        market_cap: Number(row.market_cap || 0) || null,
+        avg_volume: Number(row.avg_volume_52 || 0),
+        volume_ratio: Number(row.volume_ratio_52 || 0),
+        sector: row.sector,
+        industry: row.industry,
+        ma_data_complete: missing.length === 0,
+        missing_ma_periods: missing,
+        available_ma_weeks: available,
+        history_weeks: Number(row.history_weeks || 0),
+        ma_history_label: missing.length ? `Under ${Math.min(...missing.map((item) => item.period))}w` : "Full"
+      };
+    }
+
+    async function runSnapshotScreen(payload) {
+      const metricsPayload = await snapshotJson(snapshotPath("metrics", {market: payload.market}));
+      let tickerScreenData = {};
+      if (currentSnapshot.paths?.screen_flags) {
+        const flagPayload = await snapshotJson(snapshotPath("screen_flags", {market: payload.market}));
+        tickerScreenData = flagPayload.tickers || {};
+      }
+      const periods = [payload.ma_short, payload.ma_intermediate, payload.ma_medium, payload.ma_long]
+        .map(Number).filter((value, index, all) => Number.isFinite(value) && value > 0 && all.indexOf(value) === index);
+      const minimumPeriod = periods.length ? Math.min(...periods) : 53;
+      const queryText = String(payload.query || "").toUpperCase();
+      const marketLatestDate = currentSnapshot.markets?.[payload.market]?.latest_bar_date;
+      const rows = (metricsPayload.metrics || []).map((row) => ({
+        ...row,
+        ...(tickerScreenData[row.ticker] || {}),
+        market_latest_date: marketLatestDate
+      })).filter((row) => {
+        const available = Number(row.available_weeks || 0);
+        const close = Number(row.latest_daily_close);
+        const previous = Number(row.previous_close_price);
+        const priceAverage = Number(row.price_avg_1);
+        const averageVolume = Number(row.avg_volume_52);
+        const weeklyVolume = Number(row.weekly_volume);
+        const marketCapMillions = Number(row.market_cap || 0) / 1000000;
+        if (queryText && !String(row.ticker).toUpperCase().includes(queryText)) return false;
+        if (available < Math.max(53, minimumPeriod)) return false;
+        if (!Number.isFinite(close) || !Number.isFinite(previous) || !Number.isFinite(priceAverage)) return false;
+        if (row.latest_daily_date !== row.market_latest_date || close <= previous || close <= priceAverage) return false;
+        if (!Number.isFinite(averageVolume) || averageVolume <= 0 || weeklyVolume < payload.volume_multiplier * averageVolume) return false;
+        if (payload.min_market_cap > 0 && marketCapMillions < payload.min_market_cap) return false;
+        if (payload.max_market_cap > 0 && marketCapMillions > payload.max_market_cap) return false;
+        if (payload.exclude_above_180_ma_2y && row.above_180_for_2y) return false;
+        return periods.every((period) => available < period || (Number.isFinite(Number(row[`ma_${period}`])) && close > Number(row[`ma_${period}`])));
+      }).map((row) => snapshotScreenResult(row, periods));
+      rows.sort((left, right) => {
+        if (left.ma_data_complete !== right.ma_data_complete) return left.ma_data_complete ? -1 : 1;
+        return Number(right.volume_ratio || 0) - Number(left.volume_ratio || 0);
+      });
+      const limited = payload.limit ? rows.slice(0, payload.limit) : rows;
+      const results = await overlayLiveAppraisals(limited, payload.market);
+      return {
+        scan: {
+          id: `weekly-${currentSnapshot.snapshot_id}`,
+          created_at_utc: currentSnapshot.published_at_utc,
+          market_snapshot_date: currentSnapshot.markets?.[payload.market]?.latest_bar_date,
+          scanned_count: (metricsPayload.metrics || []).length,
+          result_count: results.length,
+          config_json: payload
+        },
+        results
+      };
+    }
+
     async function runFilter() {
       $("filterStatus").textContent = "Scanning...";
       $("runFilter").disabled = true;
@@ -3544,6 +4962,7 @@
         min_market_cap: numberValue("minCap"),
         max_market_cap: numberValue("maxCap"),
         lookback_weeks: numberValue("lookbackWeeks"),
+        exclude_above_180_ma_2y: $("excludeAbove180Ma2y").checked,
         ma_short: numberValue("maShort"),
         ma_intermediate: numberValue("maIntermediate"),
         ma_medium: numberValue("maMedium"),
@@ -3551,6 +4970,18 @@
         price_avg_weeks: 1
       };
       try {
+        if (currentSnapshot) {
+          const screened = await runSnapshotScreen(payload);
+          currentScanId = screened.scan.id;
+          renderResults(screened.results, currentScanId);
+          $("metricMatches").textContent = fmt.format(screened.results.length);
+          $("filterStatus").textContent = `Rescanned weekly data: ${fmt.format(screened.results.length)} matches`;
+          $("filterStatus").className = "status-line ok";
+          $("resultMeta").textContent = `${fmt.format(screened.scan.scanned_count)} snapshot tickers screened locally; market data through ${screened.scan.market_snapshot_date || "unknown"}`;
+          $("progressModal").classList.add("hidden");
+          $("runFilter").disabled = false;
+          return;
+        }
         const response = await api("/api/filter/start", { method: "POST", body: JSON.stringify(payload) });
         if (response.job?.id) localStorage.setItem(FILTER_JOB_STORAGE_KEY, response.job.id);
         updateFilterJob(response.job);
@@ -3565,6 +4996,10 @@
     function resumeActiveFilterJob() {
       const jobId = localStorage.getItem(FILTER_JOB_STORAGE_KEY);
       if (!jobId) return;
+      if (currentSnapshot) {
+        localStorage.removeItem(FILTER_JOB_STORAGE_KEY);
+        return;
+      }
       $("progressModal").classList.remove("hidden");
       $("filterStatus").textContent = "Resuming scan progress...";
       $("filterStatus").className = "status-line warn";
@@ -3576,8 +5011,14 @@
       $("filterStatus").textContent = "Loading shared scan...";
       $("filterStatus").className = "status-line warn";
       try {
-        const market = encodeURIComponent($("marketSelect").value);
-        const payload = await api(`/api/scan-results?market=${market}&config=default`);
+        const selectedMarket = $("marketSelect").value;
+        let payload;
+        if (currentSnapshot) {
+          payload = await snapshotJson(snapshotPath("scan", {market: selectedMarket}));
+        } else {
+          payload = await api(`/api/scan-results?market=${encodeURIComponent(selectedMarket)}&config=default`);
+        }
+        payload.results = await overlayLiveAppraisals(payload.results || [], selectedMarket);
         currentScanId = payload.scan?.id || null;
         renderResults(payload.results || [], currentScanId);
         $("metricMatches").textContent = fmt.format((payload.results || []).length);
@@ -3585,7 +5026,7 @@
         const created = scan.created_at_utc ? formatBrisbane(scan.created_at_utc) : "-";
         const snapshot = scan.market_snapshot_date || "-";
         $("resultMeta").textContent = `scan ${currentScanId || "-"} created ${created}, data snapshot ${snapshot}, ${fmt.format(scan.scanned_count || 0)} scanned, ${fmt.format((payload.results || []).length)} matches`;
-        $("filterStatus").textContent = "Shared scan loaded";
+        $("filterStatus").textContent = currentSnapshot ? "Weekly screen loaded" : "Shared scan loaded";
         $("filterStatus").className = "status-line ok";
       } catch (error) {
         $("filterStatus").textContent = error.message;
@@ -3610,7 +5051,7 @@
       ];
       return `<div class="label-cell"><span class="appraisal-current" data-label="${row.label || ""}">${row.label ? labelText(row.label) : "Not appraised"}</span>${labels.map(([value, text, title]) =>
         `<button class="label-btn ${row.label === value ? "active" : ""}" data-label="${value}" data-ticker="${row.ticker}" title="Mark as ${title}">${text}</button>`
-      ).join("")}</div>`;
+      ).join("")}<button class="purchase-action" data-purchase-market="${escapeHtml($("marketSelect").value)}" data-purchase-ticker="${escapeHtml(row.ticker)}" type="button" ${row.label === "winner" ? "" : "hidden"}>Bought</button></div>`;
     }
 
     function maDataText(row) {
@@ -3637,6 +5078,8 @@
       row.querySelectorAll(".label-btn").forEach((button) => {
         button.classList.toggle("active", button.dataset.label === label);
       });
+      const purchase = row.querySelector(".purchase-action");
+      if (purchase) purchase.hidden = label !== "winner";
     }
 
     async function labelResult(ticker, label) {
@@ -3648,20 +5091,18 @@
       const existing = row && row.querySelector(`.label-btn.active`);
       const nextLabel = existing && existing.dataset.label === label ? "clear" : label;
       try {
-        const response = await api("/api/label", {
-          method: "POST",
-          body: JSON.stringify({
-            market: $("marketSelect").value,
-            cache_file: $("cacheFile").value.trim() || "stock_cache.sqlite",
-            scan_id: currentScanId,
-            ticker,
-            label: nextLabel,
-            note: row?.dataset.note || null
-          })
+        const source = lastScreenResults.find((item) => item.ticker === ticker) || {};
+        const response = await saveLiveAppraisal({
+          market: $("marketSelect").value,
+          ticker,
+          label: nextLabel,
+          note: row?.dataset.note || null,
+          scanId: currentScanId,
+          source
         });
         applyRowLabel(ticker, response.label);
         $("resultMeta").textContent = response.label
-          ? `${ticker} marked ${labelText(response.label)} in scan ${currentScanId}`
+          ? `${ticker} marked ${labelText(response.label)} and saved live`
           : `${ticker} label cleared in scan ${currentScanId}`;
       } catch (error) {
         $("resultMeta").textContent = error.message;
@@ -3670,6 +5111,7 @@
     }
 
     function renderResults(results, scanId = null) {
+      lastScreenResults = results || [];
       const body = $("resultsBody");
       if (!results.length) {
         body.innerHTML = `<tr><td colspan="8" style="text-align:left;color:var(--muted)">No matches.</td></tr>`;
@@ -3701,6 +5143,7 @@
       body.querySelectorAll(".note-btn").forEach((button) => {
         button.addEventListener("click", () => noteResult(button.dataset.ticker));
       });
+      bindPurchaseActions(body);
     }
 
     async function noteResult(ticker) {
@@ -3710,19 +5153,17 @@
       if (note === null) return;
       const active = row.querySelector(".label-btn.active");
       try {
-        const response = await api("/api/label", {
-          method: "POST",
-          body: JSON.stringify({
-            market: $("marketSelect").value,
-            cache_file: $("cacheFile").value.trim() || "stock_cache.sqlite",
-            scan_id: currentScanId,
-            ticker,
-            label: active ? active.dataset.label : "maybe",
-            note
-          })
+        const source = lastScreenResults.find((item) => item.ticker === ticker) || {};
+        const response = await saveLiveAppraisal({
+          market: $("marketSelect").value,
+          ticker,
+          label: active ? active.dataset.label : "maybe",
+          note,
+          scanId: currentScanId,
+          source
         });
         row.dataset.note = note;
-        $("resultMeta").textContent = `${ticker} private note saved for ${response.user?.email || "this account"}`;
+        $("resultMeta").textContent = `${ticker} note saved live for ${response.owner_email || "this account"}`;
       } catch (error) {
         $("resultMeta").textContent = error.message;
         $("resultMeta").className = "status-line bad";
@@ -3762,7 +5203,53 @@
     $("feedbackModal").addEventListener("click", (event) => {
       if (event.target === $("feedbackModal")) closeFeedbackDialog();
     });
-    $("refreshAnalysis").addEventListener("click", loadAnalysis);
+    $("closePurchase").addEventListener("click", closePurchaseDialog);
+    $("purchaseModal").addEventListener("click", (event) => {
+      if (event.target === $("purchaseModal")) closePurchaseDialog();
+    });
+    $("savePurchase").addEventListener("click", async () => {
+      $("savePurchase").disabled = true;
+      $("purchaseStatus").textContent = "Saving purchase...";
+      try {
+        await saveLivePurchase({
+          market: $("purchaseMarket").value,
+          ticker: $("purchaseTicker").value,
+          boughtAt: $("purchaseDateTime").value,
+          boughtPrice: $("purchasePrice").value
+        });
+        await loadBoughtPortfolio();
+        closePurchaseDialog();
+      } catch (error) {
+        $("purchaseStatus").textContent = error.message;
+        $("purchaseStatus").className = "status-line bad";
+      } finally {
+        $("savePurchase").disabled = false;
+      }
+    });
+    $("deletePurchase").addEventListener("click", async () => {
+      $("deletePurchase").disabled = true;
+      $("purchaseStatus").textContent = "Removing purchase...";
+      try {
+        await deleteLivePurchase($("purchaseMarket").value, $("purchaseTicker").value);
+        await loadBoughtPortfolio();
+        closePurchaseDialog();
+      } catch (error) {
+        $("purchaseStatus").textContent = error.message;
+        $("purchaseStatus").className = "status-line bad";
+      } finally {
+        $("deletePurchase").disabled = false;
+      }
+    });
+    $("refreshAnalysis").addEventListener("click", loadActiveAnalysisWorkspace);
+    $("analysisPerformanceMode").addEventListener("click", () => setAnalysisWorkspace("performance"));
+    $("analysisInsightsMode").addEventListener("click", () => setAnalysisWorkspace("insights"));
+    $("generateInsights").addEventListener("click", generateInsights);
+    $("insightsRuleForm").addEventListener("submit", createInsightRule);
+    $("insightsReplayPick").addEventListener("change", (event) => loadInsightReplay(event.target.value));
+    $("insightsRevealOutcome").addEventListener("click", revealInsightOutcome);
+    ["insightsScope", "insightsTiming", "insightsHorizon"].forEach((id) => {
+      $(id).addEventListener("change", () => loadInsightsOverview());
+    });
     [["analysisMarketAsx", "asx"], ["analysisMarketUs", "us"]].forEach(([id, market]) => {
       $(id).addEventListener("click", () => {
         $("analysisMarket").value = market;
@@ -3770,7 +5257,7 @@
         $("analysisMarketUs").classList.toggle("active", market === "us");
         $("analysisMarketAsx").setAttribute("aria-pressed", String(market === "asx"));
         $("analysisMarketUs").setAttribute("aria-pressed", String(market === "us"));
-        loadAnalysis();
+        loadActiveAnalysisWorkspace();
       });
     });
     [["analysisDaily", "daily"], ["analysisWeekly", "weekly"]].forEach(([id, interval]) => {
@@ -3805,6 +5292,7 @@
         openLiveRefresh($("topStatus").dataset.market, $("topStatus").dataset.refreshId);
       }
     });
+    $("weeklyRunStatus").addEventListener("click", openWeeklyRunProgress);
     $("openOperations").addEventListener("click", () => {
       $("adminPanel").hidden = !$("adminPanel").hidden;
     });
@@ -3823,6 +5311,8 @@
     $("startRatingsExport").addEventListener("click", startRatingsExport);
     $("downloadLatestExport").addEventListener("click", downloadLatestExport);
     $("loadChart").addEventListener("click", () => loadChart());
+    $("resetChartView").addEventListener("click", () => resetChartViewport($("priceChart")));
+    $("analysisReviewResetView").addEventListener("click", () => resetChartViewport($("analysisReviewChart")));
     $("toggleChartFullscreen").addEventListener("click", () => toggleChartFullscreen());
     $("chartInterval").addEventListener("change", () => loadChart());
     $("chartRange").addEventListener("change", () => loadChart());
@@ -3836,20 +5326,17 @@
       if (event.key === "Enter") loadChart();
     });
     window.addEventListener("resize", () => {
-      if (lastCandles.length) drawCandles(lastCandles, lastChartTicker, lastMovingAverages);
-      if (lastReviewChart) {
-        drawCandles(lastReviewChart.candles, lastReviewChart.ticker, lastReviewChart.movingAverages, {
-          canvas: $("analysisReviewChart"),
-          interval: lastReviewChart.interval,
-          range: lastReviewChart.range,
-          trackState: false
-        });
-      }
+      resizeFinancialChart($("priceChart"));
+      resizeFinancialChart($("analysisReviewChart"));
       if (lastAnalysisPayload) drawAnalysisChart();
     });
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && !$("feedbackModal").classList.contains("hidden")) {
         closeFeedbackDialog();
+        return;
+      }
+      if (event.key === "Escape" && !$("purchaseModal").classList.contains("hidden")) {
+        closePurchaseDialog();
         return;
       }
       if (event.key === "Escape" && $("chartPanel").classList.contains("fullscreen")) {
@@ -3867,8 +5354,10 @@
       }
       showAuthenticated();
       syncScreenMaInputs();
-      await initializeAppMode();
       await loadCurrentUserProfile();
+      startWeeklyRunPolling();
+      await loadCurrentSnapshot().catch((error) => console.warn("Weekly snapshot is not available yet", error));
+      await initializeAppMode();
       applyMarketDefaults();
       resumeActiveFilterJob();
     }).catch((error) => {

@@ -155,11 +155,15 @@ def analyze_stock_from_local_data(
             ).mean()
             for name, period in ma_periods.items()
         }
+        runaway_ma_180 = weekly_data["Close"].shift(1).rolling(
+            window=180, min_periods=int(180 * 0.8)
+        ).mean()
 
         for i in range(1, lookback_weeks + 1):
             if len(weekly_data) < i:
                 break
             target_week_index = -i
+            target_position = len(weekly_data) - i
             pre_target_slice = weekly_data.iloc[:target_week_index]
             available_weeks = len(pre_target_slice)
 
@@ -194,6 +198,17 @@ def analyze_stock_from_local_data(
             if available_weeks < price_avg_weeks:
                 continue
             current_week_close_price = weekly_data["Close"].iloc[target_week_index]
+            if config.get("exclude_above_180_ma_2y", False):
+                window_start = target_position - 103
+                if window_start >= 0:
+                    recent_closes = weekly_data["Close"].iloc[window_start : target_position + 1]
+                    recent_ma_180 = runaway_ma_180.iloc[window_start : target_position + 1]
+                    if (
+                        len(recent_closes) == 104
+                        and recent_ma_180.notna().all()
+                        and (recent_closes > recent_ma_180).all()
+                    ):
+                        continue
             if len(weekly_data) < i + 1:
                 continue
             previous_week_close_price = weekly_data["Close"].iloc[target_week_index - 1]

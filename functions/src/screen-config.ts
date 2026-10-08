@@ -12,6 +12,7 @@ export interface NormalizedScreenConfig {
   ma_periods: Record<string, number>;
   min_market_cap: number;
   max_market_cap: number;
+  exclude_above_180_ma_2y: boolean;
 }
 
 function finiteNumber(value: unknown, fallback: number): number {
@@ -28,6 +29,11 @@ function stableJson(value: unknown): string {
     return `{${entries.join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function booleanValue(value: unknown): boolean {
+  if (value === true || value === 1) return true;
+  return ["true", "1", "yes", "on"].includes(String(value ?? "").trim().toLowerCase());
 }
 
 export function normalizeScreenConfig(payload: Record<string, unknown>): NormalizedScreenConfig {
@@ -57,7 +63,8 @@ export function normalizeScreenConfig(payload: Record<string, unknown>): Normali
     lookback_weeks: Math.max(1, Math.trunc(finiteNumber(payload.lookback_weeks, 1))),
     ma_periods: maPeriods,
     min_market_cap: Math.max(0, finiteNumber(payload.min_market_cap, 0)),
-    max_market_cap: Math.max(0, finiteNumber(payload.max_market_cap, 0))
+    max_market_cap: Math.max(0, finiteNumber(payload.max_market_cap, 0)),
+    exclude_above_180_ma_2y: booleanValue(payload.exclude_above_180_ma_2y)
   };
 }
 

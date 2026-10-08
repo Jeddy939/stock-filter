@@ -29,6 +29,7 @@ const normalizedPayload = {
   ma_periods: {short: 90, intermediate: 180, medium: 360, long: 700},
   min_market_cap: 0,
   max_market_cap: 0
+  ,exclude_above_180_ma_2y: false
 };
 
 assert.deepEqual(normalizeScreenConfig(legacyPayload), normalizeScreenConfig(normalizedPayload));
@@ -42,5 +43,10 @@ const sortedNames = normalizeScreenConfig({
   ma_periods: {long: 700, short: 90, medium: 360, intermediate: 180}
 }).ma_periods;
 assert.deepEqual(Object.keys(sortedNames), ["intermediate", "long", "medium", "short"]);
+
+assert.notEqual(
+  screenConfigHash(normalizedPayload),
+  screenConfigHash({...normalizedPayload, exclude_above_180_ma_2y: true})
+);
 
 console.log("screen-config tests passed");

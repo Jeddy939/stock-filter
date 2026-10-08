@@ -66,6 +66,12 @@ def _canonical_number(value: Any) -> Any:
     return int(number) if number.is_integer() else number
 
 
+def _boolean(value: Any) -> bool:
+    if value is True or value == 1:
+        return True
+    return str(value or "").strip().lower() in {"true", "1", "yes", "on"}
+
+
 def normalize_screen_config(payload: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Match the Functions config hash for dedupe/default scan lookup."""
     current = config or _filter_config(payload)
@@ -94,6 +100,7 @@ def normalize_screen_config(payload: dict[str, Any], config: dict[str, Any] | No
         "provider": fetcher.normalize_provider(payload.get("provider") or fetcher.DEFAULT_PROVIDER),
         "query": str(payload.get("query") or "").strip().upper(),
         "volume_multiplier": _canonical_number(current.get("volume_multiplier", 2)),
+        "exclude_above_180_ma_2y": _boolean(current.get("exclude_above_180_ma_2y", False)),
         "ma_periods": {key: ma_periods[key] for key in sorted(ma_periods)},
     }
 
@@ -284,6 +291,225 @@ def _result_from_metric(
     }
 
 
+# A near-miss fails exactly one screen rule, and only by a small margin, so it
+# sits just outside the screen's boundary. These margins define "small".
+NEAR_MISS_VOLUME_FRACTION = 0.6  # volume ratio at least 60% of the multiplier
+NEAR_MISS_PRICE_PERCENT = -5.0  # close no more than 5% below a price threshold
+NEAR_MISS_MARKET_CAP_FACTOR = 2.0  # market cap within 2x of a violated bound
+
+
+def _rule(passed: bool, observed: float | None, threshold: float | None, near: bool) -> dict[str, Any]:
+    return {"passed": passed, "observed": observed, "threshold": threshold, "near": (not passed) and near}
+
+
+def _percent_above(value: float, reference: float) -> float:
+    return (value / reference - 1.0) * 100.0
+
+
+def screen_rule_checks(row: dict[str, Any], config: dict[str, Any]) -> dict[str, dict[str, Any]] | None:
+    """Evaluate each screen rule separately for one weekly metric row.
+
+    Mirrors ``_result_from_metric(..., require_daily_confirmation=True)`` plus
+    the optional runaway exclusion: a row is a hit exactly when every rule
+    passes. Returns None when the row is ineligible (too little history,
+    missing data, or no current daily bar), since such a row can never be a hit
+    and so cannot be a near-miss either.
+    """
+    ma_periods = sorted({
+        int(period)
+        for period in (config.get("ma_periods") or {}).values()
+        if period and int(period) > 0
+    })
+    available_weeks = int(row.get("available_weeks") or 0)
+    if (ma_periods and available_weeks < ma_periods[0]) or available_weeks < 53:
+        return None
+    close_price = _number(row.get("close_price"))
+    previous_close_price = _number(row.get("previous_close_price"))
+    avg_volume = _number(row.get("avg_volume_52"))
+    weekly_volume = _number(row.get("weekly_volume"))
+    price_avg_1 = _number(row.get("price_avg_1"))
+    daily_close = _number(row.get("latest_daily_close"))
+    if (
+        close_price is None or close_price <= 0
+        or previous_close_price is None or previous_close_price <= 0
+        or not avg_volume
+        or weekly_volume is None
+        or price_avg_1 is None or price_avg_1 <= 0
+        or daily_close is None
+        or row.get("market_latest_date") is None
+        or row.get("latest_daily_date") != row.get("market_latest_date")
+    ):
+        return None
+
+    checks: dict[str, dict[str, Any]] = {}
+    multiplier = float(config["volume_multiplier"])
+    volume_ratio = weekly_volume / avg_volume
+    checks["volume"] = _rule(
+        weekly_volume >= multiplier * avg_volume, volume_ratio, multiplier,
+        volume_ratio >= NEAR_MISS_VOLUME_FRACTION * multiplier,
+    )
+    weekly_reference = max(previous_close_price, price_avg_1)
+    weekly_change = _percent_above(close_price, weekly_reference)
+    checks["weekly_up"] = _rule(
+        close_price > previous_close_price and close_price > price_avg_1, weekly_change, 0.0,
+        weekly_change >= NEAR_MISS_PRICE_PERCENT,
+    )
+
+    eligible_mas: list[float | None] = []
+    for period in ma_periods:
+        if available_weeks < period:
+            continue
+        ma_value = _number(row.get(_metric_column(period)))
+        eligible_mas.append(ma_value)
+        if ma_value is None or ma_value <= 0:
+            checks[f"ma_{period}"] = _rule(False, None, None, False)
+            continue
+        distance = _percent_above(close_price, ma_value)
+        checks[f"ma_{period}"] = _rule(close_price > ma_value, distance, 0.0, distance >= NEAR_MISS_PRICE_PERCENT)
+
+    if any(value is None or value <= 0 for value in eligible_mas):
+        checks["daily_confirmation"] = _rule(False, None, None, False)
+    else:
+        daily_reference = max([previous_close_price, price_avg_1, *eligible_mas])
+        daily_distance = _percent_above(daily_close, daily_reference)
+        checks["daily_confirmation"] = _rule(
+            daily_close > previous_close_price
+            and daily_close > price_avg_1
+            and all(daily_close > value for value in eligible_mas),
+            daily_distance, 0.0, daily_distance >= NEAR_MISS_PRICE_PERCENT,
+        )
+
+    min_cap_m = float(config.get("min_market_cap", 0) or 0)
+    max_cap_m = float(config.get("max_market_cap", 0) or 0)
+    if min_cap_m > 0 or max_cap_m > 0:
+        market_cap = _number(row.get("market_cap"))
+        if market_cap is None:
+            checks["market_cap"] = _rule(min_cap_m <= 0, None, min_cap_m or None, False)
+        else:
+            cap_m = market_cap / 1_000_000
+            if min_cap_m > 0 and cap_m < min_cap_m:
+                checks["market_cap"] = _rule(False, cap_m, min_cap_m, cap_m * NEAR_MISS_MARKET_CAP_FACTOR >= min_cap_m)
+            elif max_cap_m > 0 and cap_m > max_cap_m:
+                checks["market_cap"] = _rule(False, cap_m, max_cap_m, cap_m <= max_cap_m * NEAR_MISS_MARKET_CAP_FACTOR)
+            else:
+                checks["market_cap"] = _rule(True, cap_m, None, False)
+
+    if _boolean(config.get("exclude_above_180_ma_2y", False)):
+        runaway = row.get("runaway_104") is True
+        checks["runaway"] = _rule(not runaway, 1.0 if runaway else 0.0, None, True)
+    return checks
+
+
+def near_miss_from_checks(checks: dict[str, dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Return the single failed rule when a row missed the screen narrowly."""
+    if not checks:
+        return None
+    failed = [name for name, check in checks.items() if not check["passed"]]
+    if len(failed) != 1 or not checks[failed[0]]["near"]:
+        return None
+    check = checks[failed[0]]
+    return {"failed_rule": failed[0], "observed_value": check["observed"], "threshold_value": check["threshold"]}
+
+
+def _find_near_misses(
+    conn: psycopg.Connection,
+    market: str,
+    provider: str,
+    tickers: list[str],
+    config: dict[str, Any],
+    hit_tickers: set[str],
+) -> list[dict[str, Any]]:
+    """Latest-week near-misses for tickers the screen did not flag."""
+    candidates = [ticker for ticker in tickers if ticker not in hit_tickers]
+    if not candidates:
+        return []
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            WITH input_tickers AS (
+                SELECT unnest(%s::text[]) AS ticker
+            ),
+            market_snapshot AS (
+                SELECT latest_date AS market_latest_date
+                FROM market_status
+                WHERE market = %s AND provider = %s
+            ),
+            latest_daily AS MATERIALIZED (
+                SELECT it.ticker,
+                       recent_daily.price_date AS latest_daily_date,
+                       recent_daily.close_price AS latest_daily_close,
+                       market_snapshot.market_latest_date
+                FROM input_tickers it
+                CROSS JOIN market_snapshot
+                JOIN LATERAL (
+                    SELECT ph.price_date, ph.close_price
+                    FROM price_history ph
+                    WHERE ph.market = %s AND ph.provider = %s AND ph.ticker = it.ticker
+                      AND ph.close_price IS NOT NULL
+                    ORDER BY ph.price_date DESC
+                    LIMIT 1
+                ) recent_daily ON recent_daily.price_date = market_snapshot.market_latest_date
+            ),
+            latest_metric AS (
+                SELECT metrics.*, latest_daily.latest_daily_date,
+                       latest_daily.latest_daily_close, latest_daily.market_latest_date
+                FROM latest_daily
+                JOIN LATERAL (
+                    SELECT wm.*
+                    FROM weekly_metrics wm
+                    WHERE wm.market = %s AND wm.provider = %s AND wm.ticker = latest_daily.ticker
+                      AND wm.week_date <= CURRENT_DATE
+                    ORDER BY wm.week_date DESC
+                    LIMIT 1
+                ) metrics ON TRUE
+                WHERE CURRENT_DATE - metrics.week_date <= 7
+            )
+            SELECT latest_metric.*,
+                   CASE WHEN %s THEN (
+                       SELECT COUNT(*) = 104 AND COALESCE(BOOL_AND(recent.close_price > recent.ma_180), FALSE)
+                       FROM (
+                           SELECT history.close_price, history.ma_180
+                           FROM weekly_metrics history
+                           WHERE history.market = latest_metric.market
+                             AND history.provider = latest_metric.provider
+                             AND history.ticker = latest_metric.ticker
+                             AND history.week_date <= latest_metric.week_date
+                             AND history.ma_180 IS NOT NULL
+                             AND history.close_price IS NOT NULL
+                           ORDER BY history.week_date DESC
+                           LIMIT 104
+                       ) recent
+                   ) END AS runaway_104
+            FROM latest_metric
+            ORDER BY ticker
+            """,
+            (
+                candidates, market, provider, market, provider, market, provider,
+                _boolean(config.get("exclude_above_180_ma_2y", False)),
+            ),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+
+    near_misses: list[dict[str, Any]] = []
+    for row in rows:
+        near_miss = near_miss_from_checks(screen_rule_checks(row, config))
+        if not near_miss:
+            continue
+        avg_volume = _number(row.get("avg_volume_52"))
+        weekly_volume = _number(row.get("weekly_volume"))
+        near_misses.append({
+            "ticker": row["ticker"],
+            "signal_date": row["week_date"],
+            **near_miss,
+            "close_price": _number(row.get("close_price")),
+            "market_cap": _number(row.get("market_cap")),
+            "volume_ratio": weekly_volume / avg_volume if weekly_volume is not None and avg_volume else None,
+            "sector": row.get("sector"),
+            "industry": row.get("industry"),
+        })
+    return near_misses
+
+
 def _run_metric_filter_chunked(
     conn: psycopg.Connection,
     market: str,
@@ -400,6 +626,28 @@ def _run_metric_filter_set_based(
     if max_cap_m > 0:
         cap_conditions.append("(ranked.market_cap IS NULL OR ranked.market_cap <= %s)")
         params.append(max_cap_m * 1_000_000)
+    runaway_condition = """
+        (
+            NOT %s
+            OR (
+                SELECT COUNT(*) < 104
+                    OR NOT COALESCE(BOOL_AND(recent.close_price > recent.ma_180), FALSE)
+                FROM (
+                    SELECT history.close_price, history.ma_180
+                    FROM weekly_metrics history
+                    WHERE history.market = ranked.market
+                      AND history.provider = ranked.provider
+                      AND history.ticker = ranked.ticker
+                      AND history.week_date <= ranked.week_date
+                      AND history.ma_180 IS NOT NULL
+                      AND history.close_price IS NOT NULL
+                    ORDER BY history.week_date DESC
+                    LIMIT 104
+                ) recent
+            )
+        )
+    """
+    params.append(_boolean(config.get("exclude_above_180_ma_2y", False)))
 
     where_sql = "\n                  AND ".join([
         "ranked.available_weeks >= %s",
@@ -414,6 +662,7 @@ def _run_metric_filter_set_based(
         "ranked.close_price > ranked.price_avg_1",
         *ma_conditions,
         *cap_conditions,
+        runaway_condition,
     ])
 
     if progress:
@@ -650,6 +899,7 @@ def run_postgres_filter(
         tickers = tickers[:limit]
 
     results: list[dict[str, Any]] = []
+    near_misses: list[dict[str, Any]] = []
     skipped = 0
     total = len(tickers)
     scan_source = "postgresql://weekly_price_history"
@@ -657,6 +907,18 @@ def run_postgres_filter(
         scan_source = "postgresql://weekly_metrics"
         results, skipped, metric_performance = _run_metric_filter(conn, market, provider, tickers, config, progress)
         performance.update(metric_performance)
+        # Near-misses feed analysis only; a failure here must never cost the
+        # screen its hits.
+        near_miss_started = time.perf_counter()
+        try:
+            near_misses = _find_near_misses(
+                conn, market, provider, tickers, config, {str(row.get("ticker")) for row in results}
+            )
+        except Exception as exc:  # pragma: no cover - defensive path
+            conn.rollback()
+            near_misses = []
+            performance["near_miss_error"] = str(exc)[:500]
+        performance["stages"]["near_miss_ms"] = round((time.perf_counter() - near_miss_started) * 1000, 2)
     else:
         end = date.today()
         start = (pd.Timestamp(end) - pd.DateOffset(years=years)).date()
@@ -752,6 +1014,24 @@ def run_postgres_filter(
                     row.get("sector"), row.get("industry"), Jsonb(safe_row),
                 ),
             )
+        if near_misses:
+            cur.executemany(
+                """
+                INSERT INTO scan_near_misses (
+                    scan_id, ticker, signal_date, failed_rule, observed_value, threshold_value,
+                    close_price, market_cap, volume_ratio, sector, industry, result_json
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                [
+                    (
+                        scan_id, row["ticker"], row["signal_date"], row["failed_rule"],
+                        _number(row.get("observed_value")), _number(row.get("threshold_value")),
+                        row.get("close_price"), row.get("market_cap"), row.get("volume_ratio"),
+                        row.get("sector"), row.get("industry"), Jsonb(_json_safe(row)),
+                    )
+                    for row in near_misses
+                ],
+            )
     conn.commit()
     performance["stages"]["saving_screen_ms"] = round((time.perf_counter() - save_started) * 1000, 2)
     return {
@@ -759,6 +1039,7 @@ def run_postgres_filter(
         "scan_id": scan_id,
         "results": [_json_safe(row) for row in results],
         "result_count": len(results),
+        "near_miss_count": len(near_misses),
         "incomplete_ma_count": incomplete,
         "ma_tier_counts": tier_counts,
         "scanned_count": total,

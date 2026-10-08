@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 from urllib.request import urlopen
 
 import pandas as pd
@@ -390,6 +390,7 @@ def _history_fetch_groups(
     start: datetime,
     end: datetime,
     refresh_days: int = DEFAULT_HISTORY_REFRESH_DAYS,
+    start_overrides: Optional[Mapping[str, object]] = None,
 ) -> Dict[str, List[str]]:
     """Group tickers by start date needed for incremental refresh."""
 
@@ -400,6 +401,11 @@ def _history_fetch_groups(
     fresh_enough_date = requested_end - timedelta(days=max(1, refresh_days))
 
     for ticker in tickers:
+        override = (start_overrides or {}).get(ticker)
+        if override is not None:
+            fetch_start = max(requested_start, _coerce_date(override))
+            groups.setdefault(fetch_start.isoformat(), []).append(ticker)
+            continue
         earliest, latest = _cached_history_bounds(conn, provider, ticker)
         fetch_start = requested_start
         if earliest and latest:
@@ -438,6 +444,36 @@ def _store_info_cache(conn: sqlite3.Connection, info_data: Dict[str, dict]) -> N
         rows,
     )
     conn.commit()
+
+
+def seed_info_cache(
+    cache_file: str,
+    records: Iterable[Tuple[str, dict, object]],
+) -> int:
+    """Seed a temporary fetch cache with still-fresh profiles from the primary database."""
+    rows = [
+        (str(ticker), json.dumps(info, separators=(",", ":")), str(fetched_at))
+        for ticker, info, fetched_at in records
+        if ticker and isinstance(info, dict) and info
+    ]
+    if not rows:
+        return 0
+    conn = _cache_connect(cache_file)
+    try:
+        conn.executemany(
+            """
+            INSERT INTO company_info (ticker, info_json, fetched_at_utc)
+            VALUES (?, ?, ?)
+            ON CONFLICT(ticker) DO UPDATE SET
+                info_json = excluded.info_json,
+                fetched_at_utc = excluded.fetched_at_utc
+            """,
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return len(rows)
 
 
 def _load_info_cache(
@@ -1116,6 +1152,22 @@ def _download_historical_data(
                 chunk_histories = _extract_histories_from_frame(chunk, data)
                 historical_data.update(chunk_histories)
                 missing = {ticker for ticker in chunk if ticker not in chunk_histories}
+                if missing:
+                    retry_data, retry_failures, retry_stopped = _download_chunk_sequential(
+                        sorted(missing),
+                        start,
+                        end,
+                        pause_seconds,
+                        rate_limit_pause_seconds,
+                        max_rate_limit_retries,
+                        stop_on_rate_limit,
+                    )
+                    historical_data.update(retry_data)
+                    missing = retry_failures
+                    if retry_stopped:
+                        stopped_on_rate_limit = True
+                        missing_tickers.update(missing)
+                        return historical_data, missing_tickers, stopped_on_rate_limit
                 missing_tickers.update(missing)
                 processed += len(chunk)
                 _emit_progress(
@@ -1210,6 +1262,7 @@ def _fetch_historical_data_with_cache(
     max_rate_limit_retries: int = DEFAULT_RATE_LIMIT_RETRIES,
     stop_on_rate_limit: bool = DEFAULT_STOP_ON_RATE_LIMIT,
     load_history_frames: bool = True,
+    history_start_overrides: Optional[Mapping[str, object]] = None,
 ) -> Tuple[Dict[str, pd.DataFrame], Set[str], Dict[str, object]]:
     """Fetch only missing/stale history ranges and return cache-backed histories."""
 
@@ -1255,6 +1308,7 @@ def _fetch_historical_data_with_cache(
             start,
             end,
             history_refresh_days,
+            history_start_overrides,
         )
         cache_hit_count = len(tickers) - sum(len(group) for group in fetch_groups.values())
         _emit_progress(
@@ -1280,7 +1334,7 @@ def _fetch_historical_data_with_cache(
                 max_rate_limit_retries,
                 stop_on_rate_limit,
             )
-            downloaded_tickers.update(group_tickers)
+            downloaded_tickers.update(group_histories)
             rows_written += _store_history_cache(conn, provider, group_histories, progress_callback)
             if group_stopped_on_rate_limit:
                 stopped_on_rate_limit = True
@@ -1395,6 +1449,8 @@ def fetch_stock_data(
     stop_on_rate_limit: bool = DEFAULT_STOP_ON_RATE_LIMIT,
     export_json: bool = True,
     history_end_date: Optional[str] = None,
+    history_start_overrides: Optional[Mapping[str, object]] = None,
+    metadata_output: Optional[Dict[str, object]] = None,
 ) -> bool:
     """Fetches historical and info data for tickers and saves to ``output``.
 
@@ -1493,6 +1549,7 @@ def fetch_stock_data(
         max_rate_limit_retries,
         stop_on_rate_limit,
         load_history_frames=export_json,
+        history_start_overrides=history_start_overrides,
     )
     stopped_on_rate_limit = bool(history_cache_metadata.get("stopped_on_rate_limit"))
     if missing_hist_tickers:
@@ -1503,16 +1560,24 @@ def fetch_stock_data(
         print("   [!] History fetch stopped early because yfinance returned a rate-limit response.")
     print("Historical data fetch complete.")
 
-    all_info_data, info_cache_metadata = _fetch_info_with_cache(
-        tickers,
-        workers,
-        cache_file,
-        info_refresh_days,
-        progress_callback,
-        info_pause_seconds,
-        rate_limit_pause_seconds,
-        max_rate_limit_retries,
-    )
+    if stopped_on_rate_limit and stop_on_rate_limit:
+        all_info_data = {}
+        info_cache_metadata = {
+            "info_cache_hit_count": 0,
+            "info_download_ticker_count": 0,
+            "info_fetch_skipped_due_to_rate_limit": True,
+        }
+    else:
+        all_info_data, info_cache_metadata = _fetch_info_with_cache(
+            tickers,
+            workers,
+            cache_file,
+            info_refresh_days,
+            progress_callback,
+            info_pause_seconds,
+            rate_limit_pause_seconds,
+            max_rate_limit_retries,
+        )
     print(f"Company info fetch complete. Found info for {len(all_info_data)} tickers.")
 
     print("\n--- Step 3 of 3: Combining and saving data ---")
@@ -1634,6 +1699,9 @@ def fetch_stock_data(
         },
         "stocks": all_stock_data,
     }
+    if metadata_output is not None:
+        metadata_output.clear()
+        metadata_output.update(output_data["metadata"])
 
     if export_json:
         _emit_progress(progress_callback, "JSON export", 0, 1, f"Writing JSON export to {output}.")

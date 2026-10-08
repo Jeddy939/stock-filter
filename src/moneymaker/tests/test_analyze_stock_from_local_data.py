@@ -102,3 +102,22 @@ def test_rejects_when_latest_price_not_above_all_mas():
 
     assert result is None
 
+
+def test_optional_filter_rejects_stock_above_180_ma_for_104_weeks():
+    closes = list(range(1, 301))
+    volumes = [100] * 299 + [200]
+    payload, _ = _build_payload(closes=closes, volumes=volumes)
+    config = _base_config(exclude_above_180_ma_2y=True)
+
+    assert analyze_stock_from_local_data("RUNAWAY", payload, config) is None
+
+
+def test_optional_filter_keeps_stock_that_revisited_180_ma():
+    closes = list(range(1, 301))
+    closes[-20] = 50
+    volumes = [100] * 299 + [200]
+    payload, _ = _build_payload(closes=closes, volumes=volumes)
+    config = _base_config(exclude_above_180_ma_2y=True)
+
+    assert analyze_stock_from_local_data("RESET", payload, config) is not None
+
