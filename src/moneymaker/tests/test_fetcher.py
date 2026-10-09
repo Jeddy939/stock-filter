@@ -38,6 +38,13 @@ def test_nasdaq_pipe_file_does_not_get_asx_suffix(tmp_path):
     assert get_tickers_from_file(str(ticker_file)) == ["AAPL", "MSFT"]
 
 
+def test_market_index_symbols_keep_their_yahoo_caret(tmp_path):
+    ticker_file = tmp_path / "asx_benchmark_tickers.txt"
+    ticker_file.write_text("^AORD\n^GSPC\n", encoding="utf-8")
+
+    assert get_tickers_from_file(str(ticker_file)) == ["^AORD", "^GSPC"]
+
+
 def test_apply_ticker_limit_preserves_order():
     assert apply_ticker_limit(["AAPL", "MSFT", "NVDA"], 2) == ["AAPL", "MSFT"]
     assert apply_ticker_limit(["AAPL", "MSFT"], None) == ["AAPL", "MSFT"]
@@ -251,6 +258,67 @@ def test_yfinance_history_download_sets_auto_adjust_false(monkeypatch):
     assert calls[0]["auto_adjust"] is False
 
 
+def test_download_historical_data_retries_symbols_missing_from_batch(monkeypatch):
+    frame = pd.DataFrame(
+        {"Open": [1.0], "High": [1.2], "Low": [0.9], "Close": [1.1], "Volume": [100]},
+        index=pd.to_datetime(["2026-01-02"]),
+    )
+    sequential_calls = []
+
+    monkeypatch.setattr(fetcher.yf, "download", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        fetcher,
+        "_extract_histories_from_frame",
+        lambda chunk, data: {"AAA": frame},
+    )
+
+    def retry_missing(chunk, *args, **kwargs):
+        sequential_calls.append(chunk)
+        return {"BBB": frame}, set(), False
+
+    monkeypatch.setattr(fetcher, "_download_chunk_sequential", retry_missing)
+
+    histories, missing, stopped = fetcher._download_historical_data(
+        ["AAA", "BBB"],
+        datetime(2026, 1, 1),
+        datetime(2026, 1, 31),
+        workers=1,
+    )
+
+    assert sequential_calls == [["BBB"]]
+    assert set(histories) == {"AAA", "BBB"}
+    assert missing == set()
+    assert stopped is False
+
+
+def test_extract_histories_accepts_price_first_yfinance_multiindex():
+    index = pd.to_datetime(["2026-01-02"])
+    columns = pd.MultiIndex.from_product([["Close", "Volume"], ["AAA"]], names=["Price", "Ticker"])
+    data = pd.DataFrame([[1.5, 100]], index=index, columns=columns)
+
+    histories = fetcher._extract_histories_from_frame(["AAA"], data)
+
+    assert list(histories) == ["AAA"]
+    assert histories["AAA"].loc[index[0], "Close"] == 1.5
+    assert histories["AAA"].loc[index[0], "Volume"] == 100
+
+
+def test_extract_histories_accepts_ticker_first_yfinance_multiindex():
+    index = pd.to_datetime(["2026-01-02"])
+    columns = pd.MultiIndex.from_product([["AAA"], ["Close", "Volume"]], names=["Ticker", "Price"])
+    data = pd.DataFrame([[1.5, 100]], index=index, columns=columns)
+
+    histories = fetcher._extract_histories_from_frame(["AAA"], data)
+
+    assert list(histories) == ["AAA"]
+    assert histories["AAA"].loc[index[0], "Close"] == 1.5
+
+
+def test_history_download_end_is_exclusive_and_stable():
+    assert fetcher._history_download_end("2026-07-17") == datetime(2026, 7, 17)
+    assert fetcher._history_download_end(now=datetime(2026, 7, 17, 23, 59)) == datetime(2026, 7, 18)
+
+
 def test_read_stooq_history_rejects_api_key_instruction_response(monkeypatch):
     class FakeResponse:
         def __enter__(self):
@@ -320,3 +388,44 @@ def test_history_fetch_groups_skip_recent_complete_cache(tmp_path):
         )
 
     assert groups == {"2026-01-01": ["BBB"]}
+
+
+def test_history_fetch_groups_honours_database_start_overrides(tmp_path):
+    cache_file = tmp_path / "empty_batch_cache.sqlite"
+
+    with fetcher._cache_connect(str(cache_file)) as conn:
+        groups = fetcher._history_fetch_groups(
+            conn,
+            "yfinance",
+            ["EXISTING", "NEW"],
+            datetime(2011, 1, 1),
+            datetime(2026, 8, 6),
+            refresh_days=5,
+            start_overrides={"EXISTING": "2026-07-27"},
+        )
+
+    assert groups == {
+        "2011-01-01": ["NEW"],
+        "2026-07-27": ["EXISTING"],
+    }
+
+
+def test_seed_info_cache_preserves_database_fetch_time(tmp_path):
+    cache_file = tmp_path / "seeded_info.sqlite"
+    fetched_at = "2026-08-01T00:00:00+00:00"
+
+    assert fetcher.seed_info_cache(
+        str(cache_file),
+        [("AAA", {"longName": "Example Limited"}, fetched_at)],
+    ) == 1
+
+    conn = fetcher._cache_connect(str(cache_file))
+    try:
+        row = conn.execute(
+            "SELECT info_json, fetched_at_utc FROM company_info WHERE ticker = 'AAA'"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert json.loads(row[0]) == {"longName": "Example Limited"}
+    assert row[1] == fetched_at

@@ -153,7 +153,7 @@ def write_outputs(rows: List[Dict[str, Any]], output_dir: str) -> Dict[str, Path
         handle.write("MoneyMaker Central Rating Analysis\n")
         handle.write(f"Generated: {datetime.now().isoformat(timespec='seconds')}\n")
         handle.write(f"Total rating events: {len(rows)}\n\n")
-        for label in ("winner", "potential_winner", "maybe", "bad", None):
+        for label in ("winner", "potential_winner", "needs_confirmation", "maybe", "bad", None):
             group = [row for row in rows if row.get("label") == label]
             if not group:
                 continue

@@ -1,14 +1,8 @@
 import {onRequest} from "firebase-functions/v2/https";
 import {apiApp} from "./api";
-export {
-  scheduledDefaultScanAsx,
-  scheduledDefaultScanUs,
-  scheduledJobReconciliation,
-  scheduledRatingOutcomes,
-  scheduledRefreshAsx,
-  scheduledRefreshUs
-} from "./scheduled";
 export {refreshTickerBatch} from "./tasks";
+export {scheduledJobReconciliation, scheduledRatingOutcomes} from "./scheduled";
+export {scheduledDatabaseIdleShutdown, scheduledWeeklyPublication} from "./weekly";
 
 export const api = onRequest(
   {

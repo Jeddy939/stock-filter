@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import math
+import hashlib
+import json
+import time
 from datetime import date, datetime, timezone
 from typing import Any, Callable
 
@@ -19,6 +22,10 @@ from web_app import _company_features, _filter_config, _split_history
 ProgressCallback = Callable[[str, int, int | None, str], None]
 HISTORY_CHUNK_SIZE = 100
 SUPPORTED_METRIC_MAS = {30, 90, 180, 360, 700}
+STAGE_LOADING_SNAPSHOT = "Loading market snapshot"
+STAGE_APPLYING_CRITERIA = "Applying screen criteria"
+STAGE_RANKING_MATCHES = "Ranking matches"
+STAGE_SAVING_SCREEN = "Saving screen"
 
 
 def _json_safe(value: Any) -> Any:
@@ -48,6 +55,80 @@ def _number(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def _canonical_number(value: Any) -> Any:
+    number = _number(value)
+    if number is None:
+        return 0
+    if number < 0:
+        return 0
+    return int(number) if number.is_integer() else number
+
+
+def _boolean(value: Any) -> bool:
+    if value is True or value == 1:
+        return True
+    return str(value or "").strip().lower() in {"true", "1", "yes", "on"}
+
+
+def normalize_screen_config(payload: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Match the Functions config hash for dedupe/default scan lookup."""
+    current = config or _filter_config(payload)
+    raw_periods = payload.get("ma_periods")
+    if not isinstance(raw_periods, dict):
+        raw_periods = {
+            "short": current.get("ma_periods", {}).get("short", 90),
+            "intermediate": current.get("ma_periods", {}).get("intermediate", 180),
+            "medium": current.get("ma_periods", {}).get("medium", 360),
+            "long": current.get("ma_periods", {}).get("long", 700),
+        }
+    ma_periods = {
+        str(name): max(0, int(_number(period) or 0))
+        for name, period in raw_periods.items()
+        if max(0, int(_number(period) or 0)) > 0
+    }
+    market = "us" if str(payload.get("market") or "asx").strip().lower() == "us" else "asx"
+    return {
+        "avg_volume_weeks": int(current.get("avg_volume_weeks", 52) or 52),
+        "limit": max(0, int(_number(payload.get("limit")) or 0)),
+        "lookback_weeks": int(current.get("lookback_weeks", 1) or 1),
+        "market": market,
+        "max_market_cap": _canonical_number(current.get("max_market_cap", 0)),
+        "min_market_cap": _canonical_number(current.get("min_market_cap", 0)),
+        "price_avg_weeks": int(current.get("price_avg_weeks", 1) or 1),
+        "provider": fetcher.normalize_provider(payload.get("provider") or fetcher.DEFAULT_PROVIDER),
+        "query": str(payload.get("query") or "").strip().upper(),
+        "volume_multiplier": _canonical_number(current.get("volume_multiplier", 2)),
+        "exclude_above_180_ma_2y": _boolean(current.get("exclude_above_180_ma_2y", False)),
+        "ma_periods": {key: ma_periods[key] for key in sorted(ma_periods)},
+    }
+
+
+def screen_config_hash(payload: dict[str, Any], config: dict[str, Any] | None = None) -> str:
+    encoded = json.dumps(
+        normalize_screen_config(payload, config),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _compatible_filter_config(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload.get("ma_periods"), dict):
+        return _filter_config(payload)
+    periods = payload["ma_periods"]
+    bridged = dict(payload)
+    period_names = {
+        "short": "ma_short",
+        "intermediate": "ma_intermediate",
+        "medium": "ma_medium",
+        "long": "ma_long",
+    }
+    for name, legacy_key in period_names.items():
+        if legacy_key not in bridged and name in periods:
+            bridged[legacy_key] = periods[name]
+    return _filter_config(bridged)
 
 
 def _histories(rows: list[tuple[Any, ...]]) -> dict[str, pd.DataFrame]:
@@ -88,7 +169,45 @@ def _metric_column(period: int) -> str:
     return f"ma_{period}"
 
 
-def _result_from_metric(row: dict[str, Any], config: dict[str, Any]) -> dict[str, Any] | None:
+def _daily_confirmation_passes(
+    row: dict[str, Any],
+    ma_periods: dict[str, int],
+) -> bool:
+    """Confirm a weekly signal against the latest complete daily market session."""
+
+    market_latest_date = row.get("market_latest_date")
+    latest_daily_date = row.get("latest_daily_date")
+    latest_daily_close = _number(row.get("latest_daily_close"))
+    previous_close_price = _number(row.get("previous_close_price"))
+    price_avg_1 = _number(row.get("price_avg_1"))
+    if (
+        market_latest_date is None
+        or latest_daily_date is None
+        or latest_daily_date != market_latest_date
+        or latest_daily_close is None
+        or previous_close_price is None
+        or price_avg_1 is None
+    ):
+        return False
+    if latest_daily_close <= previous_close_price or latest_daily_close <= price_avg_1:
+        return False
+
+    available_weeks = int(row.get("available_weeks") or 0)
+    for period in ma_periods.values():
+        if available_weeks < period:
+            continue
+        ma_value = _number(row.get(_metric_column(period)))
+        if ma_value is None or latest_daily_close <= ma_value:
+            return False
+    return True
+
+
+def _result_from_metric(
+    row: dict[str, Any],
+    config: dict[str, Any],
+    *,
+    require_daily_confirmation: bool = False,
+) -> dict[str, Any] | None:
     ma_periods = {
         name: int(period)
         for name, period in (config.get("ma_periods") or {}).items()
@@ -132,6 +251,9 @@ def _result_from_metric(row: dict[str, Any], config: dict[str, Any]) -> dict[str
         if ma_value is None or close_price <= ma_value:
             return None
 
+    if require_daily_confirmation and not _daily_confirmation_passes(row, ma_periods):
+        return None
+
     market_cap = _number(row.get("market_cap"))
     min_cap_m = float(config.get("min_market_cap", 0) or 0)
     max_cap_m = float(config.get("max_market_cap", 0) or 0)
@@ -158,12 +280,237 @@ def _result_from_metric(row: dict[str, Any], config: dict[str, Any]) -> dict[str
         "missing_ma_periods": missing_ma_periods,
         "available_ma_weeks": available_weeks,
         "history_weeks": int(row.get("history_weeks") or 0),
+        "confirmation_date": (
+            row.get("latest_daily_date").isoformat()
+            if hasattr(row.get("latest_daily_date"), "isoformat")
+            else row.get("latest_daily_date")
+        ),
+        "confirmation_close_price": _number(row.get("latest_daily_close")),
         "sector": row.get("sector"),
         "industry": row.get("industry"),
     }
 
 
-def _run_metric_filter(
+# A near-miss fails exactly one screen rule, and only by a small margin, so it
+# sits just outside the screen's boundary. These margins define "small".
+NEAR_MISS_VOLUME_FRACTION = 0.6  # volume ratio at least 60% of the multiplier
+NEAR_MISS_PRICE_PERCENT = -5.0  # close no more than 5% below a price threshold
+NEAR_MISS_MARKET_CAP_FACTOR = 2.0  # market cap within 2x of a violated bound
+
+
+def _rule(passed: bool, observed: float | None, threshold: float | None, near: bool) -> dict[str, Any]:
+    return {"passed": passed, "observed": observed, "threshold": threshold, "near": (not passed) and near}
+
+
+def _percent_above(value: float, reference: float) -> float:
+    return (value / reference - 1.0) * 100.0
+
+
+def screen_rule_checks(row: dict[str, Any], config: dict[str, Any]) -> dict[str, dict[str, Any]] | None:
+    """Evaluate each screen rule separately for one weekly metric row.
+
+    Mirrors ``_result_from_metric(..., require_daily_confirmation=True)`` plus
+    the optional runaway exclusion: a row is a hit exactly when every rule
+    passes. Returns None when the row is ineligible (too little history,
+    missing data, or no current daily bar), since such a row can never be a hit
+    and so cannot be a near-miss either.
+    """
+    ma_periods = sorted({
+        int(period)
+        for period in (config.get("ma_periods") or {}).values()
+        if period and int(period) > 0
+    })
+    available_weeks = int(row.get("available_weeks") or 0)
+    if (ma_periods and available_weeks < ma_periods[0]) or available_weeks < 53:
+        return None
+    close_price = _number(row.get("close_price"))
+    previous_close_price = _number(row.get("previous_close_price"))
+    avg_volume = _number(row.get("avg_volume_52"))
+    weekly_volume = _number(row.get("weekly_volume"))
+    price_avg_1 = _number(row.get("price_avg_1"))
+    daily_close = _number(row.get("latest_daily_close"))
+    if (
+        close_price is None or close_price <= 0
+        or previous_close_price is None or previous_close_price <= 0
+        or not avg_volume
+        or weekly_volume is None
+        or price_avg_1 is None or price_avg_1 <= 0
+        or daily_close is None
+        or row.get("market_latest_date") is None
+        or row.get("latest_daily_date") != row.get("market_latest_date")
+    ):
+        return None
+
+    checks: dict[str, dict[str, Any]] = {}
+    multiplier = float(config["volume_multiplier"])
+    volume_ratio = weekly_volume / avg_volume
+    checks["volume"] = _rule(
+        weekly_volume >= multiplier * avg_volume, volume_ratio, multiplier,
+        volume_ratio >= NEAR_MISS_VOLUME_FRACTION * multiplier,
+    )
+    weekly_reference = max(previous_close_price, price_avg_1)
+    weekly_change = _percent_above(close_price, weekly_reference)
+    checks["weekly_up"] = _rule(
+        close_price > previous_close_price and close_price > price_avg_1, weekly_change, 0.0,
+        weekly_change >= NEAR_MISS_PRICE_PERCENT,
+    )
+
+    eligible_mas: list[float | None] = []
+    for period in ma_periods:
+        if available_weeks < period:
+            continue
+        ma_value = _number(row.get(_metric_column(period)))
+        eligible_mas.append(ma_value)
+        if ma_value is None or ma_value <= 0:
+            checks[f"ma_{period}"] = _rule(False, None, None, False)
+            continue
+        distance = _percent_above(close_price, ma_value)
+        checks[f"ma_{period}"] = _rule(close_price > ma_value, distance, 0.0, distance >= NEAR_MISS_PRICE_PERCENT)
+
+    if any(value is None or value <= 0 for value in eligible_mas):
+        checks["daily_confirmation"] = _rule(False, None, None, False)
+    else:
+        daily_reference = max([previous_close_price, price_avg_1, *eligible_mas])
+        daily_distance = _percent_above(daily_close, daily_reference)
+        checks["daily_confirmation"] = _rule(
+            daily_close > previous_close_price
+            and daily_close > price_avg_1
+            and all(daily_close > value for value in eligible_mas),
+            daily_distance, 0.0, daily_distance >= NEAR_MISS_PRICE_PERCENT,
+        )
+
+    min_cap_m = float(config.get("min_market_cap", 0) or 0)
+    max_cap_m = float(config.get("max_market_cap", 0) or 0)
+    if min_cap_m > 0 or max_cap_m > 0:
+        market_cap = _number(row.get("market_cap"))
+        if market_cap is None:
+            checks["market_cap"] = _rule(min_cap_m <= 0, None, min_cap_m or None, False)
+        else:
+            cap_m = market_cap / 1_000_000
+            if min_cap_m > 0 and cap_m < min_cap_m:
+                checks["market_cap"] = _rule(False, cap_m, min_cap_m, cap_m * NEAR_MISS_MARKET_CAP_FACTOR >= min_cap_m)
+            elif max_cap_m > 0 and cap_m > max_cap_m:
+                checks["market_cap"] = _rule(False, cap_m, max_cap_m, cap_m <= max_cap_m * NEAR_MISS_MARKET_CAP_FACTOR)
+            else:
+                checks["market_cap"] = _rule(True, cap_m, None, False)
+
+    if _boolean(config.get("exclude_above_180_ma_2y", False)):
+        runaway = row.get("runaway_104") is True
+        checks["runaway"] = _rule(not runaway, 1.0 if runaway else 0.0, None, True)
+    return checks
+
+
+def near_miss_from_checks(checks: dict[str, dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Return the single failed rule when a row missed the screen narrowly."""
+    if not checks:
+        return None
+    failed = [name for name, check in checks.items() if not check["passed"]]
+    if len(failed) != 1 or not checks[failed[0]]["near"]:
+        return None
+    check = checks[failed[0]]
+    return {"failed_rule": failed[0], "observed_value": check["observed"], "threshold_value": check["threshold"]}
+
+
+def _find_near_misses(
+    conn: psycopg.Connection,
+    market: str,
+    provider: str,
+    tickers: list[str],
+    config: dict[str, Any],
+    hit_tickers: set[str],
+) -> list[dict[str, Any]]:
+    """Latest-week near-misses for tickers the screen did not flag."""
+    candidates = [ticker for ticker in tickers if ticker not in hit_tickers]
+    if not candidates:
+        return []
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            WITH input_tickers AS (
+                SELECT unnest(%s::text[]) AS ticker
+            ),
+            market_snapshot AS (
+                SELECT latest_date AS market_latest_date
+                FROM market_status
+                WHERE market = %s AND provider = %s
+            ),
+            latest_daily AS MATERIALIZED (
+                SELECT it.ticker,
+                       recent_daily.price_date AS latest_daily_date,
+                       recent_daily.close_price AS latest_daily_close,
+                       market_snapshot.market_latest_date
+                FROM input_tickers it
+                CROSS JOIN market_snapshot
+                JOIN LATERAL (
+                    SELECT ph.price_date, ph.close_price
+                    FROM price_history ph
+                    WHERE ph.market = %s AND ph.provider = %s AND ph.ticker = it.ticker
+                      AND ph.close_price IS NOT NULL
+                    ORDER BY ph.price_date DESC
+                    LIMIT 1
+                ) recent_daily ON recent_daily.price_date = market_snapshot.market_latest_date
+            ),
+            latest_metric AS (
+                SELECT metrics.*, latest_daily.latest_daily_date,
+                       latest_daily.latest_daily_close, latest_daily.market_latest_date
+                FROM latest_daily
+                JOIN LATERAL (
+                    SELECT wm.*
+                    FROM weekly_metrics wm
+                    WHERE wm.market = %s AND wm.provider = %s AND wm.ticker = latest_daily.ticker
+                      AND wm.week_date <= CURRENT_DATE
+                    ORDER BY wm.week_date DESC
+                    LIMIT 1
+                ) metrics ON TRUE
+                WHERE CURRENT_DATE - metrics.week_date <= 7
+            )
+            SELECT latest_metric.*,
+                   CASE WHEN %s THEN (
+                       SELECT COUNT(*) = 104 AND COALESCE(BOOL_AND(recent.close_price > recent.ma_180), FALSE)
+                       FROM (
+                           SELECT history.close_price, history.ma_180
+                           FROM weekly_metrics history
+                           WHERE history.market = latest_metric.market
+                             AND history.provider = latest_metric.provider
+                             AND history.ticker = latest_metric.ticker
+                             AND history.week_date <= latest_metric.week_date
+                             AND history.ma_180 IS NOT NULL
+                             AND history.close_price IS NOT NULL
+                           ORDER BY history.week_date DESC
+                           LIMIT 104
+                       ) recent
+                   ) END AS runaway_104
+            FROM latest_metric
+            ORDER BY ticker
+            """,
+            (
+                candidates, market, provider, market, provider, market, provider,
+                _boolean(config.get("exclude_above_180_ma_2y", False)),
+            ),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+
+    near_misses: list[dict[str, Any]] = []
+    for row in rows:
+        near_miss = near_miss_from_checks(screen_rule_checks(row, config))
+        if not near_miss:
+            continue
+        avg_volume = _number(row.get("avg_volume_52"))
+        weekly_volume = _number(row.get("weekly_volume"))
+        near_misses.append({
+            "ticker": row["ticker"],
+            "signal_date": row["week_date"],
+            **near_miss,
+            "close_price": _number(row.get("close_price")),
+            "market_cap": _number(row.get("market_cap")),
+            "volume_ratio": weekly_volume / avg_volume if weekly_volume is not None and avg_volume else None,
+            "sector": row.get("sector"),
+            "industry": row.get("industry"),
+        })
+    return near_misses
+
+
+def _run_metric_filter_chunked(
     conn: psycopg.Connection,
     market: str,
     provider: str,
@@ -178,7 +525,7 @@ def _run_metric_filter(
     results: list[dict[str, Any]] = []
     skipped = 0
     if progress:
-        progress("Filtering", 0, total, f"Scanning {total:,} {market.upper()} metric rows.")
+        progress(STAGE_APPLYING_CRITERIA, 0, total, f"Scanning {total:,} {market.upper()} metric rows.")
 
     for chunk_start in range(0, total, HISTORY_CHUNK_SIZE * 5):
         chunk = tickers[chunk_start : chunk_start + (HISTORY_CHUNK_SIZE * 5)]
@@ -229,8 +576,230 @@ def _run_metric_filter(
             elif not metric_rows:
                 skipped += 1
             if progress and (current == total or current % 100 == 0):
-                progress("Filtering", current, total, f"Screened {current:,}/{total:,}: {ticker}")
+                progress(STAGE_APPLYING_CRITERIA, current, total, f"Screened {current:,}/{total:,}: {ticker}")
     return results, skipped
+
+
+def _run_metric_filter_set_based(
+    conn: psycopg.Connection,
+    market: str,
+    provider: str,
+    tickers: list[str],
+    config: dict[str, Any],
+    progress: ProgressCallback | None,
+) -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
+    if not tickers:
+        return [], 0, {"query_ms": 0}
+
+    lookback_weeks = max(1, int(config.get("lookback_weeks", 1) or 1))
+    ma_periods = sorted({
+        int(period)
+        for period in (config.get("ma_periods") or {}).values()
+        if period and int(period) > 0
+    })
+    for period in ma_periods:
+        _metric_column(period)
+
+    min_cap_m = float(config.get("min_market_cap", 0) or 0)
+    max_cap_m = float(config.get("max_market_cap", 0) or 0)
+    total = len(tickers)
+    min_weeks = min(ma_periods) if ma_periods else 53
+    required_weeks = max(53, min_weeks)
+    ma_conditions = [
+        f"(ranked.available_weeks < {period} OR (ranked.{_metric_column(period)} IS NOT NULL AND ranked.close_price > ranked.{_metric_column(period)}))"
+        for period in ma_periods
+    ]
+    daily_ma_conditions = [
+        f"(ranked.available_weeks < {period} OR latest_daily.latest_daily_close > ranked.{_metric_column(period)})"
+        for period in ma_periods
+    ]
+    cap_conditions: list[str] = []
+    params: list[Any] = [
+        market, provider,
+        market, provider,
+        market, provider, lookback_weeks,
+        required_weeks, float(config["volume_multiplier"]),
+    ]
+    if min_cap_m > 0:
+        cap_conditions.append("(ranked.market_cap IS NOT NULL AND ranked.market_cap >= %s)")
+        params.append(min_cap_m * 1_000_000)
+    if max_cap_m > 0:
+        cap_conditions.append("(ranked.market_cap IS NULL OR ranked.market_cap <= %s)")
+        params.append(max_cap_m * 1_000_000)
+    runaway_condition = """
+        (
+            NOT %s
+            OR (
+                SELECT COUNT(*) < 104
+                    OR NOT COALESCE(BOOL_AND(recent.close_price > recent.ma_180), FALSE)
+                FROM (
+                    SELECT history.close_price, history.ma_180
+                    FROM weekly_metrics history
+                    WHERE history.market = ranked.market
+                      AND history.provider = ranked.provider
+                      AND history.ticker = ranked.ticker
+                      AND history.week_date <= ranked.week_date
+                      AND history.ma_180 IS NOT NULL
+                      AND history.close_price IS NOT NULL
+                    ORDER BY history.week_date DESC
+                    LIMIT 104
+                ) recent
+            )
+        )
+    """
+    params.append(_boolean(config.get("exclude_above_180_ma_2y", False)))
+
+    where_sql = "\n                  AND ".join([
+        "ranked.available_weeks >= %s",
+        "ranked.close_price IS NOT NULL",
+        "ranked.previous_close_price IS NOT NULL",
+        "ranked.avg_volume_52 IS NOT NULL",
+        "ranked.avg_volume_52 <> 0",
+        "ranked.weekly_volume IS NOT NULL",
+        "ranked.price_avg_1 IS NOT NULL",
+        "ranked.weekly_volume >= %s * ranked.avg_volume_52",
+        "ranked.close_price > ranked.previous_close_price",
+        "ranked.close_price > ranked.price_avg_1",
+        *ma_conditions,
+        *cap_conditions,
+        runaway_condition,
+    ])
+
+    if progress:
+        progress(STAGE_APPLYING_CRITERIA, 0, total, f"Querying {total:,} {market.upper()} weekly metric rows.")
+    started = time.perf_counter()
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            f"""
+            WITH input_tickers AS (
+                SELECT unnest(%s::text[]) AS ticker
+            ),
+            market_snapshot AS (
+                SELECT latest_date AS market_latest_date
+                FROM market_status
+                WHERE market = %s
+                  AND provider = %s
+            ),
+            latest_daily AS MATERIALIZED (
+                SELECT
+                    it.ticker,
+                    recent_daily.price_date AS latest_daily_date,
+                    recent_daily.close_price AS latest_daily_close,
+                    market_snapshot.market_latest_date
+                FROM input_tickers it
+                CROSS JOIN market_snapshot
+                JOIN LATERAL (
+                    SELECT ph.price_date, ph.close_price
+                    FROM price_history ph
+                    WHERE ph.market = %s
+                      AND ph.provider = %s
+                      AND ph.ticker = it.ticker
+                      AND ph.close_price IS NOT NULL
+                    ORDER BY ph.price_date DESC
+                    LIMIT 1
+                ) recent_daily ON recent_daily.price_date = market_snapshot.market_latest_date
+            ),
+            metric_candidates AS (
+                SELECT
+                    metrics.*
+                FROM latest_daily
+                JOIN LATERAL (
+                    SELECT wm.*
+                    FROM weekly_metrics wm
+                    WHERE wm.market = %s
+                      AND wm.provider = %s
+                      AND wm.ticker = latest_daily.ticker
+                      AND wm.week_date <= CURRENT_DATE
+                    ORDER BY wm.week_date DESC
+                    LIMIT %s
+                ) metrics ON TRUE
+            ),
+            ranked AS (
+                SELECT
+                    metric_candidates.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY metric_candidates.ticker ORDER BY metric_candidates.week_date DESC
+                    ) AS lookback_rank,
+                    MAX(metric_candidates.week_date) OVER (
+                        PARTITION BY metric_candidates.ticker
+                    ) AS latest_week
+                FROM metric_candidates
+            ),
+            matched AS (
+                SELECT DISTINCT ON (ranked.ticker)
+                    ranked.*,
+                    latest_daily.latest_daily_date,
+                    latest_daily.latest_daily_close,
+                    latest_daily.market_latest_date
+                FROM ranked
+                JOIN latest_daily ON latest_daily.ticker = ranked.ticker
+                WHERE {where_sql}
+                  AND CURRENT_DATE - ranked.latest_week <= 7
+                  AND latest_daily.latest_daily_close > ranked.previous_close_price
+                  AND latest_daily.latest_daily_close > ranked.price_avg_1
+                  AND {" AND ".join(daily_ma_conditions) if daily_ma_conditions else "TRUE"}
+                ORDER BY ranked.ticker, ranked.week_date DESC
+            )
+            SELECT *
+            FROM matched
+            ORDER BY ticker
+            """,
+            (tickers, *params),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+        cur.execute(
+            """
+            WITH input_tickers AS (
+                SELECT unnest(%s::text[]) AS ticker
+            ),
+            market_snapshot AS (
+                SELECT latest_date AS market_latest_date
+                FROM market_status
+                WHERE market = %s
+                  AND provider = %s
+            )
+            SELECT COUNT(*)::int
+            FROM input_tickers it
+            CROSS JOIN market_snapshot
+            JOIN LATERAL (
+                SELECT ph.price_date
+                FROM price_history ph
+                WHERE ph.market = %s
+                  AND ph.provider = %s
+                  AND ph.ticker = it.ticker
+                ORDER BY ph.price_date DESC
+                LIMIT 1
+            ) recent_daily ON recent_daily.price_date = market_snapshot.market_latest_date
+            """,
+            (tickers, market, provider, market, provider),
+        )
+        recent_ticker_count = int(cur.fetchone()["count"])
+
+    query_ms = round((time.perf_counter() - started) * 1000, 2)
+    results = [
+        result
+        for row in rows
+        if (result := _result_from_metric(row, config, require_daily_confirmation=True)) is not None
+    ]
+    skipped = max(0, total - recent_ticker_count)
+    if progress:
+        progress(STAGE_APPLYING_CRITERIA, total, total, f"Matched {len(results):,} stocks in {query_ms:,.0f} ms.")
+    return results, skipped, {
+        "path": "weekly_metrics_set_based",
+        "query_ms": query_ms,
+        "recent_ticker_count": recent_ticker_count,
+    }
+
+
+def _run_metric_filter(
+    conn: psycopg.Connection,
+    market: str,
+    provider: str,
+    tickers: list[str],
+    config: dict[str, Any],
+    progress: ProgressCallback | None,
+) -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
+    return _run_metric_filter_set_based(conn, market, provider, tickers, config, progress)
 
 
 def _has_recent_weekly_metrics(
@@ -267,14 +836,61 @@ def run_postgres_filter(
     limit = int(payload.get("limit") or 0)
     query = str(payload.get("query") or "").strip().upper()
     years = int(payload.get("years") or fetcher.DEFAULT_DATA_YEARS)
-    config = _filter_config(payload)
+    config = _compatible_filter_config(payload)
+    config_hash = str(payload.get("config_hash") or screen_config_hash(payload, config))
+    performance: dict[str, Any] = {"stages": {}}
 
+    stage_started = time.perf_counter()
+    if progress:
+        progress(STAGE_LOADING_SNAPSHOT, 0, None, f"Loading {market.upper()} stock universe.")
     with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT completed_tickers, total_tickers
+            FROM refresh_jobs
+            WHERE market = %s
+              AND provider = %s
+              AND status IN ('queued', 'running')
+              AND started_at_utc > NOW() - INTERVAL '12 hours'
+            ORDER BY started_at_utc DESC
+            LIMIT 1
+            """,
+            (market, provider),
+        )
+        active_refresh = cur.fetchone()
+        if active_refresh:
+            completed, refresh_total = active_refresh
+            raise RuntimeError(
+                f"{market.upper()} market data refresh is still running "
+                f"({int(completed or 0):,}/{int(refresh_total or 0):,} tickers). "
+                "Run the screen after the refresh completes."
+            )
         cur.execute(
             "SELECT ticker, info_json FROM companies WHERE market = %s ORDER BY ticker",
             (market,),
         )
         company_rows = cur.fetchall()
+        cur.execute(
+            """
+            SELECT latest_date
+            FROM market_status
+            WHERE market = %s AND provider = %s
+            """,
+            (market, provider),
+        )
+        status_row = cur.fetchone()
+        market_snapshot_date = status_row[0] if status_row else None
+        if market_snapshot_date is None:
+            cur.execute(
+                """
+                SELECT MAX(price_date)
+                FROM price_history
+                WHERE market = %s AND provider = %s
+                """,
+                (market, provider),
+            )
+            market_snapshot_date = cur.fetchone()[0]
+    performance["stages"]["loading_market_snapshot_ms"] = round((time.perf_counter() - stage_started) * 1000, 2)
     info_map = {str(ticker): (info or {}) for ticker, info in company_rows}
     tickers = list(info_map)
     if query:
@@ -283,17 +899,31 @@ def run_postgres_filter(
         tickers = tickers[:limit]
 
     results: list[dict[str, Any]] = []
+    near_misses: list[dict[str, Any]] = []
     skipped = 0
     total = len(tickers)
     scan_source = "postgresql://weekly_price_history"
     if _metric_config_supported(config) and _has_recent_weekly_metrics(conn, market, provider):
         scan_source = "postgresql://weekly_metrics"
-        results, skipped = _run_metric_filter(conn, market, provider, tickers, config, progress)
+        results, skipped, metric_performance = _run_metric_filter(conn, market, provider, tickers, config, progress)
+        performance.update(metric_performance)
+        # Near-misses feed analysis only; a failure here must never cost the
+        # screen its hits.
+        near_miss_started = time.perf_counter()
+        try:
+            near_misses = _find_near_misses(
+                conn, market, provider, tickers, config, {str(row.get("ticker")) for row in results}
+            )
+        except Exception as exc:  # pragma: no cover - defensive path
+            conn.rollback()
+            near_misses = []
+            performance["near_miss_error"] = str(exc)[:500]
+        performance["stages"]["near_miss_ms"] = round((time.perf_counter() - near_miss_started) * 1000, 2)
     else:
         end = date.today()
         start = (pd.Timestamp(end) - pd.DateOffset(years=years)).date()
         if progress:
-            progress("Filtering", 0, total, f"Scanning {total:,} {market.upper()} stocks online.")
+            progress(STAGE_APPLYING_CRITERIA, 0, total, f"Scanning {total:,} {market.upper()} stocks online.")
 
         for chunk_start in range(0, total, HISTORY_CHUNK_SIZE):
             chunk = tickers[chunk_start : chunk_start + HISTORY_CHUNK_SIZE]
@@ -324,8 +954,11 @@ def run_postgres_filter(
                         result.update(_company_features(info_map.get(ticker, {})))
                         results.append(result)
                 if progress and (current == total or current % 25 == 0):
-                    progress("Filtering", current, total, f"Screened {current:,}/{total:,}: {ticker}")
+                    progress(STAGE_APPLYING_CRITERIA, current, total, f"Screened {current:,}/{total:,}: {ticker}")
 
+    rank_started = time.perf_counter()
+    if progress:
+        progress(STAGE_RANKING_MATCHES, 0, len(results), f"Ranking {len(results):,} matches.")
     results.sort(
         key=lambda item: (
             int(item.get("ma_history_sort") or (0 if item.get("ma_data_complete", True) else 99)),
@@ -337,25 +970,27 @@ def run_postgres_filter(
     for item in results:
         tier = str(item.get("ma_history_label") or ("Full" if item.get("ma_data_complete", True) else "Younger"))
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
+    performance["stages"]["ranking_matches_ms"] = round((time.perf_counter() - rank_started) * 1000, 2)
 
     created_at = datetime.now(timezone.utc)
     source_id = int(created_at.timestamp() * 1_000_000)
     if progress:
-        progress("Saving scan", total, total, f"Saving {len(results):,} matches online.")
+        progress(STAGE_SAVING_SCREEN, total, total, f"Saving {len(results):,} matches online.")
+    save_started = time.perf_counter()
     with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO scan_runs (
                 market, source_id, created_at_utc, provider, cache_file, years, limit_count,
                 query, scanned_count, result_count, skipped_no_history, config_json,
-                ticker_universe_json
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ticker_universe_json, config_hash, market_snapshot_date
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
                 market, source_id, created_at, provider, scan_source, years,
                 limit if limit > 0 else None, query, total, len(results), skipped,
-                Jsonb(_json_safe(config)), Jsonb(tickers),
+                Jsonb(_json_safe(config)), Jsonb(tickers), config_hash, market_snapshot_date,
             ),
         )
         scan_id = int(cur.fetchone()[0])
@@ -379,16 +1014,39 @@ def run_postgres_filter(
                     row.get("sector"), row.get("industry"), Jsonb(safe_row),
                 ),
             )
+        if near_misses:
+            cur.executemany(
+                """
+                INSERT INTO scan_near_misses (
+                    scan_id, ticker, signal_date, failed_rule, observed_value, threshold_value,
+                    close_price, market_cap, volume_ratio, sector, industry, result_json
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                [
+                    (
+                        scan_id, row["ticker"], row["signal_date"], row["failed_rule"],
+                        _number(row.get("observed_value")), _number(row.get("threshold_value")),
+                        row.get("close_price"), row.get("market_cap"), row.get("volume_ratio"),
+                        row.get("sector"), row.get("industry"), Jsonb(_json_safe(row)),
+                    )
+                    for row in near_misses
+                ],
+            )
     conn.commit()
+    performance["stages"]["saving_screen_ms"] = round((time.perf_counter() - save_started) * 1000, 2)
     return {
         "ok": True,
         "scan_id": scan_id,
         "results": [_json_safe(row) for row in results],
         "result_count": len(results),
+        "near_miss_count": len(near_misses),
         "incomplete_ma_count": incomplete,
         "ma_tier_counts": tier_counts,
         "scanned_count": total,
         "skipped_no_history": skipped,
         "generated_at": created_at.isoformat(timespec="seconds"),
+        "config_hash": config_hash,
+        "market_snapshot_date": market_snapshot_date.isoformat() if hasattr(market_snapshot_date, "isoformat") else market_snapshot_date,
+        "performance": performance,
         "source": "online_database",
     }

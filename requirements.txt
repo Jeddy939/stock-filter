@@ -1,5 +1,6 @@
 pandas>=1.0.0
-yfinance>=0.2.12 # Using a slightly more recent yfinance
+tzdata>=2024.1
+yfinance==1.5.2
 sv-ttk>=2.5.2
 curl-cffi>=0.6.0
 tqdm>=4.62.3

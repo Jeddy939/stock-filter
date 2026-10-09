@@ -8,6 +8,14 @@ import web_app
 @pytest.fixture(autouse=True)
 def isolated_shared_settings(tmp_path, monkeypatch):
     monkeypatch.setenv("MONEYMAKER_SHARED_SETTINGS", str(tmp_path / "shared_settings.json"))
+    # Labelling writes to the central ratings backups and may post to Google
+    # Sheets; keep tests away from the real repository files and webhook.
+    monkeypatch.setenv("MONEYMAKER_CENTRAL_RATINGS_DB", str(tmp_path / "central_stock_ratings.sqlite"))
+    monkeypatch.setenv("MONEYMAKER_CENTRAL_RATINGS_JSON", str(tmp_path / "central_stock_ratings.json"))
+    monkeypatch.setenv("MONEYMAKER_CENTRAL_RATINGS_JSONL", str(tmp_path / "central_stock_ratings.jsonl"))
+    monkeypatch.setenv("MONEYMAKER_GOOGLE_SHEETS_PENDING_FILE", str(tmp_path / "google_sheets_pending_ratings.jsonl"))
+    monkeypatch.delenv("MONEYMAKER_GOOGLE_SHEETS_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("MONEYMAKER_GOOGLE_SHEETS_WEBHOOK", raising=False)
 
 
 def _seed_labelled_scan(cache_file):

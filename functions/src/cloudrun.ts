@@ -12,7 +12,11 @@ export async function dispatchCloudRunJob(
     filter: "MONEYMAKER_FILTER_JOB",
     "import-sqlite": "MONEYMAKER_IMPORT_JOB",
     "export-ratings": "MONEYMAKER_EXPORT_JOB",
-    "rating-outcomes": "MONEYMAKER_OUTCOMES_JOB"
+    "publish-snapshot": "MONEYMAKER_EXPORT_JOB",
+    "rating-outcomes": "MONEYMAKER_OUTCOMES_JOB",
+    "insight-snapshot-backfill": "MONEYMAKER_INSIGHT_SNAPSHOT_JOB",
+    "insight-run": "MONEYMAKER_INSIGHT_JOB",
+    "fundamentals-refresh": "MONEYMAKER_FUNDAMENTALS_JOB"
   };
   const jobName = process.env[jobEnvByType[jobType] ?? ""] ?? `moneymaker-${jobType}`;
   const url = `https://run.googleapis.com/v2/projects/${project}/locations/${region}/jobs/${jobName}:run`;

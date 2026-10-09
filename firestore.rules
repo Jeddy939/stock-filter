@@ -2,10 +2,102 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMember() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/app_users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/app_users/$(request.auth.uid)).data.status == "active";
+    }
+
+    function isAdmin() {
+      return isMember()
+        && get(/databases/$(database)/documents/app_users/$(request.auth.uid)).data.role == "admin";
+    }
+
+    function isAppraiser() {
+      return isMember()
+        && get(/databases/$(database)/documents/app_users/$(request.auth.uid)).data.role in ["admin", "analyst"];
+    }
+
+    match /app_users/{uid} {
+      allow read: if isMember() && (request.auth.uid == uid || isAdmin());
+      allow write: if false;
+    }
+
+    match /system/{documentId} {
+      allow read: if isMember();
+      allow write: if false;
+    }
+
+    match /team_appraisals/{appraisalId} {
+      allow read: if isMember();
+      allow create: if isAppraiser()
+        && request.resource.data.owner_uid == request.auth.uid
+        && request.resource.data.market in ["asx", "us"]
+        && request.resource.data.label in ["winner", "needs_confirmation", "maybe", "bad"];
+      allow update: if isAppraiser()
+        && request.resource.data.owner_uid == resource.data.owner_uid
+        && request.resource.data.market == resource.data.market
+        && request.resource.data.ticker == resource.data.ticker
+        && request.resource.data.label in ["winner", "needs_confirmation", "maybe", "bad"];
+      allow delete: if isAppraiser();
+    }
+
+    match /rating_events/{eventId} {
+      allow read: if isMember();
+      allow create: if isAppraiser()
+        && request.resource.data.actor_uid == request.auth.uid
+        && request.resource.data.owner_uid is string
+        && request.resource.data.market in ["asx", "us"]
+        && request.resource.data.action in ["label", "clear"];
+      allow update, delete: if false;
+    }
+
+    match /purchases/{purchaseId} {
+      allow read: if isMember();
+      allow create: if isAppraiser()
+        && request.resource.data.owner_uid == request.auth.uid
+        && request.resource.data.market in ["asx", "us"]
+        && request.resource.data.ticker is string
+        && request.resource.data.bought_price is number
+        && request.resource.data.bought_price > 0
+        && request.resource.data.bought_at is timestamp
+        && request.resource.data.bought_at <= request.time;
+      allow update: if isAppraiser()
+        && resource.data.owner_uid == request.auth.uid
+        && request.resource.data.owner_uid == resource.data.owner_uid
+        && request.resource.data.market == resource.data.market
+        && request.resource.data.ticker == resource.data.ticker
+        && request.resource.data.bought_price is number
+        && request.resource.data.bought_price > 0
+        && request.resource.data.bought_at is timestamp
+        && request.resource.data.bought_at <= request.time;
+      allow delete: if isAppraiser() && resource.data.owner_uid == request.auth.uid;
+    }
+
+    match /feedback/{feedbackId} {
+      allow create: if isMember()
+        && request.resource.data.user_uid == request.auth.uid
+        && request.resource.data.message is string
+        && request.resource.data.message.size() >= 3
+        && request.resource.data.message.size() <= 4000;
+      allow read: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /weekly_runs/{runId} {
+      allow read: if isMember();
+      allow write: if false;
+    }
+
     // Job state and migration metadata are written by Cloud Run service
     // accounts. Browser clients read them only after Firebase sign-in.
     match /job_status/{jobId} {
-      allow read: if request.auth != null;
+      allow read: if isMember();
       allow write: if false;
     }
 
