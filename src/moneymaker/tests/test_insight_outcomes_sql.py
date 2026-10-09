@@ -104,6 +104,35 @@ class OutcomeSqlTests(PostgresSchemaTestCase):
         self.assertEqual(outcome_date, date(2026, 2, 13))
         self.assertEqual(quality["horizon_status"], "terminated_last_price")
 
+    def test_final_outcomes_are_not_remeasured_unless_requested(self):
+        from cloud_backend.insights.outcomes import measure_rating_outcomes
+
+        self.bars("SPY", date(2026, 1, 1), date(2026, 6, 30), lambda day: 100.0)
+        self.bars("AAA", date(2026, 1, 1), date(2026, 6, 30), lambda day: 10.0)
+        self.rating("AAA", datetime(2026, 2, 5, 1, 0, tzinfo=timezone.utc))
+        self.assertEqual(self.measure()["measured_count"], 1)
+        self.assertEqual(self.measure()["measured_count"], 0, "an observed outcome is final")
+        with self.conn.cursor() as cur:
+            forced = measure_rating_outcomes(cur, market="us", limit=1000, horizon=28, remeasure=True)
+        self.conn.commit()
+        self.assertEqual(forced["measured_count"], 1)
+
+    def test_stale_outcome_removed_for_event_not_yet_at_horizon(self):
+        today = self.conn.execute("SELECT CURRENT_DATE").fetchone()[0]
+        event_id = self.rating("NEW", datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc))
+        self.conn.execute(
+            """
+            INSERT INTO rating_outcomes (rating_event_id, horizon_days, measured_at_utc,
+                                         price_at_signal, price_at_horizon, return_percent, outcome_version)
+            VALUES (%s, 28, now(), 10, 12, 20, 1)
+            """,
+            (event_id,),
+        )
+        self.conn.commit()
+        result = self.measure()
+        self.assertEqual(result["stale_removed_count"], 1)
+        self.assertIsNone(self.outcome(event_id))
+
     def test_immature_event_is_skipped_and_stale_outcome_removed(self):
         # The whole market's data ends 30 June, so a 20 June rating has not
         # reached its 28-day horizon; it must not be treated as delisted.

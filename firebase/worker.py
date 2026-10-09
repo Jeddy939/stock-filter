@@ -40,7 +40,12 @@ from cloud_backend.weekly_metrics import sync_weekly_metrics
 from cloud_backend.insights.outcomes import OUTCOME_VERSION, measure_rating_outcomes
 from cloud_backend.insights.screen_observations import refresh_screen_observations
 from cloud_backend.insights.features import FEATURE_VERSION
-from cloud_backend.insights.snapshots import process_snapshot, queued_snapshot_ids, seed_snapshot_stubs
+from cloud_backend.insights.snapshots import (
+    ensure_feature_definitions,
+    process_snapshot,
+    queued_snapshot_ids,
+    seed_snapshot_stubs,
+)
 from cloud_backend.insights.analysis import analyze_numeric_features
 from cloud_backend.insights.fundamentals import refresh_sec_fundamentals
 from cloud_backend.insights.models import run_validated_models
@@ -49,6 +54,7 @@ OUTCOME_HORIZONS = (28, 30, 56, 84, 90, 180, 182, 360)
 # The outcomes job has a one-hour Cloud Run timeout. Rating and screen snapshot
 # building stop this long after the job starts; the backlog resumes next run.
 SCREEN_SNAPSHOT_BUDGET_SECONDS = 45 * 60
+MODEL_CANDIDATE_AUC = 0.55
 
 
 
@@ -779,6 +785,8 @@ def run_rating_outcomes(data: dict[str, Any]) -> dict[str, Any]:
     market = requested_market if requested_market in {"asx", "us"} else None
     horizons = _rating_outcome_horizons(data.get("horizons"))
     limit = min(max(int(data.get("limit") or 100000), 1), 500000)
+    # Final outcomes are skipped unless an admin asks for a full re-measure.
+    remeasure = data.get("remeasure") is True
     per_horizon: list[dict[str, Any]] = []
 
     update_job(
@@ -815,7 +823,9 @@ def run_rating_outcomes(data: dict[str, Any]) -> dict[str, Any]:
                     percent=round(((index - 1) / len(horizons)) * 100, 2),
                     detail=f"Calculating {horizon} day outcomes from saved ratings",
                 )
-                per_horizon.append(measure_rating_outcomes(cur, market=market, limit=limit, horizon=horizon))
+                per_horizon.append(measure_rating_outcomes(
+                    cur, market=market, limit=limit, horizon=horizon, remeasure=remeasure
+                ))
             conn.commit()
 
         # Keep rating snapshots current without a manual backfill, e.g. after a
@@ -941,6 +951,12 @@ def build_rating_snapshots(
     total = len(snapshot_ids)
     complete = failed = skipped = processed = 0
     failures: list[dict[str, Any]] = []
+    definition_ids: dict[str, int] | None = None
+    if snapshot_ids:
+        # Register feature definitions once rather than for every snapshot.
+        with conn.cursor(row_factory=dict_row) as cur:
+            definition_ids = ensure_feature_definitions(cur)
+        conn.commit()
     for index, snapshot_id in enumerate(snapshot_ids, 1):
         if deadline is not None and time.monotonic() >= deadline:
             break
@@ -954,7 +970,7 @@ def build_rating_snapshots(
         )
         processed += 1
         try:
-            result = process_snapshot(conn, snapshot_id)
+            result = process_snapshot(conn, snapshot_id, definition_ids)
             conn.commit()
             if result.get("skipped"):
                 skipped += 1
@@ -1085,6 +1101,9 @@ def run_insight_analysis(data: dict[str, Any]) -> dict[str, Any]:
                     "ticker": row["ticker"],
                     "market": row["market"],
                     "event_at_utc": row["event_at_utc"].isoformat(),
+                    # Picks anchored in the same week share market conditions;
+                    # the bootstrap resamples whole weeks.
+                    "cluster": "{}-W{:02d}".format(*row["feature_as_of_date"].isocalendar()[:2]),
                     "benchmark_excess_return_percent": row["benchmark_excess_return_percent"],
                     "maximum_drawdown_percent": row["maximum_drawdown_percent"],
                     "target_hit": row["target_hit"],
@@ -1099,24 +1118,33 @@ def run_insight_analysis(data: dict[str, Any]) -> dict[str, Any]:
             model_result = run_validated_models(records, horizon_days=horizon)
             cur.execute("DELETE FROM insight_findings WHERE run_id = %s", (run_id,))
             for finding in analysis["findings"]:
-                direction = "higher" if (finding.get("effect_size") or 0) >= 0 else "lower"
-                title = f"{finding['feature']} was {direction} in high performers"
+                direction = "higher" if finding["spearman_rho"] >= 0 else "lower"
+                title = f"{finding['feature']}: {direction} values went with better excess returns"
+                top = finding["quintiles"][-1]["mean_excess"]
+                bottom = finding["quintiles"][0]["mean_excess"]
                 explanation = (
-                    f"High performers averaged {finding['high_mean']:.4g}; "
-                    f"underperformers averaged {finding['low_mean']:.4g}."
+                    f"Rank correlation {finding['spearman_rho']:+.2f} "
+                    f"(95% CI {finding['rho_ci_low']:+.2f} to {finding['rho_ci_high']:+.2f}) across "
+                    f"{finding['available_count']} appraisals in {finding['cluster_count']} signal weeks. "
+                    + (f"Highest fifth averaged {top:+.1f}% vs the benchmark, lowest fifth {bottom:+.1f}%. "
+                       if top is not None and bottom is not None else "")
+                    + ("Passed the candidate checks." if finding["status"] == "candidate"
+                       else "Exploratory: " + "; ".join(finding["status_reasons"]) + ".")
                 )
                 cur.execute(
                     """
                     INSERT INTO insight_findings (
                         run_id, finding_id, finding_type, title, explanation,
                         condition_json, feature_names_json, support_count,
-                        average_excess_return, adjusted_p_value,
+                        average_excess_return, confidence_interval_json, adjusted_p_value,
                         in_sample_metrics_json, status
-                    ) VALUES (%s, %s, 'univariate', %s, %s, %s, %s, %s, %s, %s, %s, 'exploratory')
+                    ) VALUES (%s, %s, 'univariate', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (run_id, finding["finding_id"], title, explanation,
                      Jsonb({"direction": direction}), Jsonb([finding["feature"]]),
-                     finding["available_count"], None, finding["adjusted_p_value"], Jsonb(finding)),
+                     finding["available_count"], finding["top_minus_bottom_quintile_excess"],
+                     Jsonb({"spearman_rho": [finding["rho_ci_low"], finding["rho_ci_high"]], "level": 0.95}),
+                     finding["adjusted_p_value"], Jsonb(finding), finding["status"]),
                 )
             if model_result.get("enabled"):
                 holdout_auc = model_result.get("holdout", {}).get("auc")
@@ -1126,7 +1154,15 @@ def run_insight_analysis(data: dict[str, Any]) -> dict[str, Any]:
                     direction = "higher" if float(feature["coefficient"]) > 0 else "lower"
                     finding_identity = json.dumps({"feature": feature["feature"], "direction": direction, "version": feature_version}, sort_keys=True)
                     finding_id = hashlib.sha256(finding_identity.encode()).hexdigest()[:20]
-                    status = "candidate" if holdout_auc is not None and float(holdout_auc) > 0.5 else "exploratory"
+                    # A model relationship is only a candidate when it ranks
+                    # unseen appraisals better than chance in both the
+                    # walk-forward folds and the untouched holdout.
+                    status = (
+                        "candidate"
+                        if holdout_auc is not None and float(holdout_auc) >= MODEL_CANDIDATE_AUC
+                        and float(model_result.get("walk_forward_auc_mean") or 0) >= MODEL_CANDIDATE_AUC
+                        else "exploratory"
+                    )
                     cur.execute(
                         """
                         INSERT INTO insight_findings (

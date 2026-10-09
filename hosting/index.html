@@ -1806,7 +1806,7 @@
     </section>
     <section class="analysis-chart-section" aria-labelledby="analysisChartHeading">
       <div class="analysis-section-head">
-        <h3 id="analysisChartHeading">Category return since appraisal</h3>
+        <h3 id="analysisChartHeading">Return since labelling, by category</h3>
         <span id="analysisChartMeta">Waiting for performance data</span>
       </div>
       <div class="analysis-legend" id="analysisLegend"></div>
@@ -1846,7 +1846,7 @@
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="market">Market</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="ticker">Ticker</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="event_at_utc">Selected</button></th>
-              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="signal_price">Signal</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="signal_price" title="Close when the pick was labelled; returns are measured from this price">Entry</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="latest_price">Price</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="return_percent">Return</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="winner" data-sort-key="latest_date">Date</button></th><th>Bought</th>
@@ -1860,7 +1860,7 @@
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="market">Market</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="ticker">Ticker</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="event_at_utc">Selected</button></th>
-              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="signal_price">Signal</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="signal_price" title="Close when the pick was labelled; returns are measured from this price">Entry</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="latest_price">Price</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="return_percent">Return</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="maybe" data-sort-key="latest_date">Date</button></th>
@@ -1874,7 +1874,7 @@
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="market">Market</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="ticker">Ticker</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="event_at_utc">Selected</button></th>
-              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="signal_price">Signal</button></th>
+              <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="signal_price" title="Close when the pick was labelled; returns are measured from this price">Entry</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="latest_price">Price</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="return_percent">Return</button></th>
               <th aria-sort="none"><button class="analysis-sort" type="button" data-analysis-group="bad" data-sort-key="latest_date">Date</button></th>
@@ -2686,58 +2686,98 @@
       return `$${fmt.format(Math.round(number))}`;
     }
 
-    function analysisPickWindow(payload) {
-      const times = (payload?.series || [])
-        .flatMap((series) => series.points || [])
-        .map((point) => new Date(`${point.date}T00:00:00Z`).getTime())
-        .filter(Number.isFinite);
-      return times.length ? {start: Math.min(...times), end: Math.max(...times)} : null;
+    // Event-time performance: every pick starts at 0 on the session that had
+    // closed when it was labelled, so picks of different ages line up.
+    function appraisalCutoffDate(market, eventAt) {
+      const when = new Date(eventAt);
+      if (!Number.isFinite(when.getTime())) return null;
+      const timeZone = market === "asx" ? "Australia/Sydney" : "America/New_York";
+      const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+        timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+      }).formatToParts(when).map((part) => [part.type, part.value]));
+      const localDate = `${parts.year}-${parts.month}-${parts.day}`;
+      if (Number(parts.hour) * 60 + Number(parts.minute) >= 16 * 60 + 30) return localDate;
+      const previous = new Date(`${localDate}T00:00:00Z`);
+      previous.setUTCDate(previous.getUTCDate() - 1);
+      return previous.toISOString().slice(0, 10);
     }
 
-    function benchmarkPointsInPickWindow(payload, pickWindow) {
-      if (!pickWindow) return [];
-      const points = (payload?.benchmark?.points || []).filter((point) => {
-        const time = new Date(`${point.date}T00:00:00Z`).getTime();
-        return Number.isFinite(time) && time >= pickWindow.start && time <= pickWindow.end;
+    function eventTimeCurves(items, benchmarkRows, interval, maxSessions) {
+      const benchmarkByDate = new Map(benchmarkRows.map((row) => [row.date, Number(row.close)]));
+      const benchmarkOnOrBefore = (date) => {
+        for (let index = benchmarkRows.length - 1; index >= 0; index -= 1) {
+          if (benchmarkRows[index].date <= date) return Number(benchmarkRows[index].close);
+        }
+        return null;
+      };
+      const groups = new Map();
+      const add = (label, step, value, excess) => {
+        const steps = groups.get(label) || new Map();
+        const bucket = steps.get(step) || {returns: [], excess: []};
+        bucket.returns.push(value);
+        if (Number.isFinite(excess)) bucket.excess.push(excess);
+        steps.set(step, bucket);
+        groups.set(label, steps);
+      };
+      let excessSeen = false;
+      items.forEach((item) => {
+        const entry = item.rows[item.entryIndex];
+        if (!entry || !(Number(entry.close) > 0)) return;
+        const benchmarkEntry = benchmarkOnOrBefore(entry.date);
+        for (let session = 0; item.entryIndex + session < item.rows.length; session += 1) {
+          if (maxSessions !== null && session > maxSessions) break;
+          if (interval === "weekly" && session % 5) continue;
+          const row = item.rows[item.entryIndex + session];
+          const value = ((Number(row.close) / Number(entry.close)) - 1) * 100;
+          const benchmark = benchmarkByDate.get(row.date);
+          const excess = benchmark > 0 && benchmarkEntry > 0 ? value - ((benchmark / benchmarkEntry) - 1) * 100 : NaN;
+          if (Number.isFinite(excess)) excessSeen = true;
+          const step = interval === "weekly" ? session / 5 : session;
+          add(item.label, step, value, excess);
+          add("all_picks", step, value, excess);
+        }
       });
-      const baseline = Number(points[0]?.return_percent);
-      const baselineFactor = 1 + baseline / 100;
-      if (!Number.isFinite(baseline) || baselineFactor <= 0) return points;
-      return points.map((point) => {
-        const value = Number(point.return_percent);
-        return {
-          ...point,
-          return_percent: Number.isFinite(value)
-            ? (((1 + value / 100) / baselineFactor) - 1) * 100
-            : point.return_percent
-        };
-      });
+      const mean = (values) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+      const series = ["winner", "needs_confirmation", "maybe", "bad", "all_picks"].map((label) => ({
+        label,
+        points: [...(groups.get(label) || new Map()).entries()].sort(([left], [right]) => left - right).map(([step, bucket]) => ({
+          step,
+          excess_percent: mean(bucket.excess),
+          return_percent: mean(bucket.returns),
+          sample_count: excessSeen ? bucket.excess.length : bucket.returns.length
+        }))
+      }));
+      return {series, measure: excessSeen ? "excess" : "return"};
     }
+
+    // Points from fewer than this many picks are too noisy to draw.
+    const ANALYSIS_MIN_POINT_SAMPLES = 3;
 
     function analysisSources(payload) {
-      const sources = (payload?.series || []).map((series) => ({...series, name: labelText(series.label)}));
-      const benchmark = payload?.benchmark || {};
-      const pickWindow = analysisPickWindow(payload);
-      sources.push({
-        label: "benchmark",
-        name: benchmark.name || "Market benchmark",
-        points: benchmarkPointsInPickWindow(payload, pickWindow)
-      });
-      return sources;
+      const measure = payload?.measure === "excess" ? "excess_percent" : "return_percent";
+      return (payload?.series || []).map((series) => ({
+        ...series,
+        name: series.label === "all_picks" ? "All picks" : labelText(series.label),
+        points: (series.points || [])
+          .filter((point) => Number(point.sample_count) >= ANALYSIS_MIN_POINT_SAMPLES)
+          .map((point) => ({x: Number(point.step), value: Number(point[measure]), sample_count: Number(point.sample_count)}))
+          .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.value))
+      }));
     }
 
     function renderAnalysisLegend(payload) {
       const previous = new Map(Array.from(document.querySelectorAll(".analysis-series-toggle"))
         .map((input) => [input.value, input.checked]));
+      const counts = payload?.coverage?.label_counts || {};
       $("analysisLegend").innerHTML = analysisSources(payload).map((series) => {
-        const latest = series.points.at(-1);
-        const count = Number(latest?.sample_count || 0);
-        const suffix = series.label === "benchmark" ? "" : ` (${fmt.format(count)})`;
+        const count = series.label === "all_picks"
+          ? Number(payload?.coverage?.active_pick_count || 0)
+          : Number(counts[series.label] || 0);
         const enabled = series.points.length > 0;
         const checked = enabled && (previous.has(series.label) ? previous.get(series.label) : true);
         return `<label style="--series-color:${analysisSeriesColors[series.label] || "#ffffff"}">
           <input class="analysis-series-toggle" type="checkbox" value="${escapeHtml(series.label)}" ${checked ? "checked" : ""} ${enabled ? "" : "disabled"}>
-          <span class="analysis-legend-swatch"></span>${escapeHtml(series.name)}${suffix}
+          <span class="analysis-legend-swatch"></span>${escapeHtml(series.name)} (${fmt.format(count)})
         </label>`;
       }).join("");
       document.querySelectorAll(".analysis-series-toggle").forEach((input) => input.addEventListener("change", drawAnalysisChart));
@@ -2758,24 +2798,21 @@
 
       const visible = new Set(Array.from(document.querySelectorAll(".analysis-series-toggle:checked")).map((input) => input.value));
       const sources = analysisSources(payload).filter((series) => visible.has(series.label) && series.points.length);
-      const values = sources.flatMap((series) => series.points.map((point) => Number(point.return_percent)).filter(Number.isFinite));
-      const pickWindow = analysisPickWindow(payload);
-      const times = pickWindow ? [pickWindow.start, pickWindow.end] : [];
+      const points = sources.flatMap((series) => series.points);
       const empty = $("analysisChartEmpty");
-      empty.hidden = values.length > 0;
-      if (!values.length || !times.length) return;
+      empty.hidden = points.length > 0;
+      if (!points.length) return;
 
       const margin = {top: 16, right: 20, bottom: 32, left: 58};
       const plotWidth = Math.max(10, bounds.width - margin.left - margin.right);
       const plotHeight = Math.max(10, bounds.height - margin.top - margin.bottom);
-      const minTime = Math.min(...times);
-      const maxTime = Math.max(...times);
-      let minValue = Math.min(0, ...values);
-      let maxValue = Math.max(0, ...values);
+      const maxStep = Math.max(1, ...points.map((point) => point.x));
+      let minValue = Math.min(0, ...points.map((point) => point.value));
+      let maxValue = Math.max(0, ...points.map((point) => point.value));
       const valueSpan = Math.max(1, maxValue - minValue);
       minValue -= valueSpan * .08;
       maxValue += valueSpan * .08;
-      const x = (time) => margin.left + ((time - minTime) / Math.max(1, maxTime - minTime)) * plotWidth;
+      const x = (step) => margin.left + (step / maxStep) * plotWidth;
       const y = (value) => margin.top + ((maxValue - value) / Math.max(1, maxValue - minValue)) * plotHeight;
 
       ctx.font = '11px system-ui, -apple-system, "Segoe UI", sans-serif';
@@ -2784,45 +2821,43 @@
         const value = maxValue - ((maxValue - minValue) * index / 5);
         const py = y(value);
         ctx.beginPath();
-        ctx.strokeStyle = Math.abs(value) < valueSpan / 10 ? "#43534c" : "#22302b";
+        ctx.strokeStyle = "#22302b";
         ctx.lineWidth = 1;
         ctx.moveTo(margin.left, py);
         ctx.lineTo(bounds.width - margin.right, py);
         ctx.stroke();
         ctx.fillStyle = "#87968f";
         ctx.textAlign = "right";
-        ctx.fillText(`${value.toFixed(valueSpan < 10 ? 1 : 0)}%`, margin.left - 8, py);
+        const digits = valueSpan < 10 ? 1 : 0;
+        ctx.fillText(`${(Number(value.toFixed(digits)) || 0).toFixed(digits)}%`, margin.left - 8, py);
       }
+      // Zero is the benchmark (excess view) or the entry price (return view).
+      ctx.beginPath();
+      ctx.strokeStyle = analysisSeriesColors.benchmark;
+      ctx.setLineDash([6, 5]);
+      ctx.lineWidth = 1.2;
+      ctx.moveTo(margin.left, y(0));
+      ctx.lineTo(bounds.width - margin.right, y(0));
+      ctx.stroke();
+      ctx.setLineDash([]);
 
-      const dateFormat = new Intl.DateTimeFormat("en-AU", {day: "2-digit", month: "short", year: "2-digit", timeZone: "UTC"});
+      const unit = payload.step_unit === "week" ? "Week" : "Day";
       [0, .5, 1].forEach((position) => {
-        const time = minTime + (maxTime - minTime) * position;
         ctx.fillStyle = "#87968f";
-        ctx.textAlign = position === 0 ? "left" : position === 1 ? "center" : "right";
-        ctx.fillText(dateFormat.format(new Date(time)), margin.left + plotWidth * position, bounds.height - 12);
+        ctx.textAlign = position === 0 ? "left" : position === 1 ? "right" : "center";
+        ctx.fillText(`${unit} ${Math.round(maxStep * position)}`, margin.left + plotWidth * position, bounds.height - 12);
       });
 
       for (const series of sources) {
-        const points = series.points
-          .map((point) => ({time: new Date(`${point.date}T00:00:00Z`).getTime(), value: Number(point.return_percent)}))
-          .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value));
-        if (!points.length) continue;
-        const stride = Math.max(1, Math.ceil(points.length / Math.max(1, plotWidth * 1.5)));
+        const stride = Math.max(1, Math.ceil(series.points.length / Math.max(1, plotWidth * 1.5)));
         ctx.beginPath();
         ctx.strokeStyle = analysisSeriesColors[series.label] || "#ffffff";
         ctx.lineWidth = ["winner", "all_picks"].includes(series.label) ? 2.2 : 1.6;
-        ctx.setLineDash(series.label === "benchmark" ? [6, 5] : series.label === "all_picks" ? [3, 3] : []);
-        let started = false;
-        points.forEach((point, index) => {
-          if (index % stride && index !== points.length - 1) return;
-          const px = x(point.time);
-          const py = y(point.value);
-          if (!started) {
-            ctx.moveTo(px, py);
-            started = true;
-          } else {
-            ctx.lineTo(px, py);
-          }
+        ctx.setLineDash(series.label === "all_picks" ? [3, 3] : []);
+        series.points.forEach((point, index) => {
+          if (index % stride && index !== series.points.length - 1) return;
+          if (index === 0) ctx.moveTo(x(point.x), y(point.value));
+          else ctx.lineTo(x(point.x), y(point.value));
         });
         ctx.stroke();
       }
@@ -3141,7 +3176,17 @@
       }
     }
 
+    // Returns are measured from the entry price (last close when the pick was
+    // labelled); the scan-time price is only a fallback for older picks.
+    function analysisEntryPrice(row) {
+      const entry = Number(row.entry_price);
+      if (Number.isFinite(entry) && entry > 0) return entry;
+      const signal = Number(row.signal_price);
+      return Number.isFinite(signal) && signal > 0 ? signal : null;
+    }
+
     function analysisPickSortValue(row, key) {
+      if (key === "signal_price") return analysisEntryPrice(row);
       if (["event_at_utc", "latest_date"].includes(key)) {
         const value = key === "latest_date" ? (row.latest_date || row.measured_at_utc) : row[key];
         const time = value ? new Date(value).getTime() : NaN;
@@ -3201,7 +3246,7 @@
         <td>${escapeHtml(String(row.market || "").toUpperCase())}</td>
         <td><a class="ticker analysis-chart-link" href="#" data-market="${escapeHtml(row.market)}" data-ticker="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</a></td>
         <td>${row.event_at_utc ? new Date(row.event_at_utc).toLocaleDateString() : "-"}</td>
-        <td>${Number.isFinite(Number(row.signal_price)) ? Number(row.signal_price).toFixed(2) : "-"}</td>
+        <td>${analysisEntryPrice(row) !== null ? analysisEntryPrice(row).toFixed(2) : "-"}</td>
         <td>${Number.isFinite(Number(row.latest_price)) ? Number(row.latest_price).toFixed(2) : "-"}</td>
         <td class="${returnClass(row.return_percent)}">${returnText(row.return_percent)}</td>
         <td>${row.latest_date || (row.measured_at_utc ? new Date(row.measured_at_utc).toLocaleDateString() : "-")}</td>
@@ -3337,10 +3382,10 @@
       $("analysisSignalRange").textContent = firstSignal === lastSignal ? firstSignal : `${firstSignal} to ${lastSignal}`;
 
       renderAnalysisLegend(payload);
-      const pickWindow = analysisPickWindow(payload);
-      $("analysisChartMeta").textContent = pickWindow
-        ? `${payload.interval === "weekly" ? "Weekly" : "Daily"} picks, ${new Date(pickWindow.start).toISOString().slice(0, 10)} to ${new Date(pickWindow.end).toISOString().slice(0, 10)}`
-        : payload.benchmark?.unavailable_reason || "No priced picks in this range";
+      const unit = payload.step_unit === "week" ? "weeks" : "trading days";
+      $("analysisChartMeta").textContent = payload.measure === "excess"
+        ? `Average return relative to ${payload.benchmark?.name || "the benchmark"} by ${unit} since labelling (dashed line = matched the index)`
+        : `Average return by ${unit} since labelling. ${payload.benchmark?.unavailable_reason || ""}`.trim();
       drawAnalysisChart();
 
       renderAnalysisReview(reviewPicks);
@@ -3352,98 +3397,77 @@
       const appraisals = await loadLiveAppraisals(market);
       const mine = appraisals.filter((row) => row.owner_uid === uid && row.action !== "clear" && row.label);
       const review = appraisals.filter((row) => row.action !== "clear" && row.label === "needs_confirmation");
-      const rangeDays = range === "all" ? null : snapshotRangeDays(range);
+      const maxSessions = range === "all" ? null : Math.round(snapshotRangeDays(range) * 252 / 365);
       const chartRows = await Promise.all(mine.map(async (pick) => {
         try {
-          const chart = await loadSnapshotChart(pick.ticker, market, interval, "10y", []);
+          const chart = await loadSnapshotChart(pick.ticker, market, "daily", "10y", []);
           const signalDate = String(pick.signal_date || pick.date || pick.event_at_utc || "").slice(0, 10);
-          let signalPrice = Number(pick.signal_price || pick.close_price);
-          const eligible = chart.candles.filter((row) => row.date >= signalDate);
-          if (!Number.isFinite(signalPrice) || signalPrice <= 0) signalPrice = Number(eligible[0]?.close);
-          const latest = eligible.at(-1);
-          return {pick, signalDate, signalPrice, rows: eligible, latest};
+          // Entry is the last close available when the label was given.
+          const cutoff = appraisalCutoffDate(market, pick.event_at_utc || pick.updated_at_utc) || signalDate;
+          let entryIndex = -1;
+          chart.candles.forEach((row, index) => { if (row.date <= cutoff) entryIndex = index; });
+          return {pick, signalDate, rows: chart.candles, entryIndex, latest: chart.candles.at(-1) || null};
         } catch (error) {
           console.warn(`Could not load snapshot performance for ${pick.ticker}`, error);
-          return {pick, signalDate: null, signalPrice: null, rows: [], latest: null};
+          return {pick, signalDate: null, rows: [], entryIndex: -1, latest: null};
         }
       }));
-      const latestAvailable = chartRows.map((item) => item.latest?.date).filter(Boolean).sort().at(-1) || null;
-      const cutoff = rangeDays && latestAvailable
-        ? new Date(new Date(`${latestAvailable}T00:00:00Z`).getTime() - rangeDays * 86400000).toISOString().slice(0, 10)
-        : null;
-      const byDate = new Map();
-      chartRows.forEach((item) => {
-        if (!item.signalPrice) return;
-        item.rows.filter((row) => !cutoff || row.date >= cutoff).forEach((row) => {
-          const dateGroups = byDate.get(row.date) || new Map();
-          const value = ((Number(row.close) - item.signalPrice) / item.signalPrice) * 100;
-          const labelValues = dateGroups.get(item.pick.label) || [];
-          labelValues.push(value);
-          dateGroups.set(item.pick.label, labelValues);
-          const allValues = dateGroups.get("all_picks") || [];
-          allValues.push(value);
-          dateGroups.set("all_picks", allValues);
-          byDate.set(row.date, dateGroups);
-        });
-      });
-      const labels = ["winner", "needs_confirmation", "maybe", "bad", "all_picks"];
-      const series = labels.map((label) => ({
-        label,
-        points: [...byDate.entries()].sort(([left], [right]) => left.localeCompare(right)).flatMap(([date, groups]) => {
-          const values = groups.get(label) || [];
-          return values.length ? [{
-            date,
-            return_percent: values.reduce((sum, value) => sum + value, 0) / values.length,
-            sample_count: values.length
-          }] : [];
-        })
-      }));
       const benchmarkTicker = market === "asx" ? "^AORD" : "SPY";
-      let benchmarkPoints = [];
+      let benchmarkRows = [];
       try {
-        const benchmark = await loadSnapshotChart(benchmarkTicker, market, interval, "10y", []);
-        const earliest = chartRows.map((item) => item.signalDate).filter(Boolean).sort()[0] || cutoff;
-        const rows = benchmark.candles.filter((row) => (!earliest || row.date >= earliest) && (!cutoff || row.date >= cutoff));
-        const initial = Number(rows[0]?.close);
-        benchmarkPoints = Number.isFinite(initial) && initial > 0
-          ? rows.map((row) => ({date: row.date, return_percent: ((Number(row.close) / initial) - 1) * 100}))
-          : [];
+        benchmarkRows = (await loadSnapshotChart(benchmarkTicker, market, "daily", "10y", [])).candles;
       } catch (error) {
         console.warn("Snapshot benchmark is unavailable", error);
       }
-      const picks = chartRows.map((item) => ({
-        ...item.pick,
-        firebase_uid: item.pick.owner_uid,
-        event_at_utc: item.pick.event_at_utc || item.pick.updated_at_utc,
-        signal_date: item.signalDate,
-        signal_price: item.signalPrice,
-        latest_date: item.latest?.date || null,
-        latest_price: item.latest?.close ?? null,
-        return_percent: item.latest && item.signalPrice
-          ? ((Number(item.latest.close) - item.signalPrice) / item.signalPrice) * 100
-          : null
-      }));
+      const priced = chartRows.filter((item) => item.entryIndex >= 0);
+      const curves = eventTimeCurves(
+        priced.map((item) => ({label: item.pick.label, rows: item.rows, entryIndex: item.entryIndex})),
+        benchmarkRows,
+        interval,
+        maxSessions
+      );
+      const picks = chartRows.map((item) => {
+        const entry = item.entryIndex >= 0 ? item.rows[item.entryIndex] : null;
+        return {
+          ...item.pick,
+          firebase_uid: item.pick.owner_uid,
+          event_at_utc: item.pick.event_at_utc || item.pick.updated_at_utc,
+          signal_date: item.signalDate,
+          signal_price: item.pick.signal_price || item.pick.close_price || null,
+          entry_date: entry?.date || null,
+          entry_price: entry?.close ?? null,
+          latest_date: item.latest?.date || null,
+          latest_price: item.latest?.close ?? null,
+          return_percent: item.latest && entry && Number(entry.close) > 0
+            ? ((Number(item.latest.close) - Number(entry.close)) / Number(entry.close)) * 100
+            : null
+        };
+      });
       const dates = chartRows.map((item) => item.signalDate).filter(Boolean).sort();
+      const labelCounts = {};
+      mine.forEach((pick) => { labelCounts[pick.label] = (labelCounts[pick.label] || 0) + 1; });
       return {
         timeseries: {
           ok: true,
           market,
           interval,
           range,
-          methodology: "Each pick is rebased to 0% on its appraisal price; lines show the mean available return for each category.",
+          view: "event_time",
+          step_unit: interval === "weekly" ? "week" : "session",
+          measure: curves.measure,
           coverage: {
             active_pick_count: mine.length,
             ticker_count: new Set(mine.map((item) => item.ticker)).size,
             earliest_signal_date: dates[0] || null,
-            latest_signal_date: dates.at(-1) || null
+            latest_signal_date: dates.at(-1) || null,
+            label_counts: labelCounts
           },
-          series,
+          series: curves.series,
           benchmark: {
             ticker: benchmarkTicker,
             name: market === "asx" ? "All Ordinaries" : "S&P 500 (SPY)",
-            available: benchmarkPoints.length > 0,
-            unavailable_reason: benchmarkPoints.length ? null : "Benchmark is not included in the current weekly snapshot",
-            points: benchmarkPoints
+            available: curves.measure === "excess",
+            unavailable_reason: curves.measure === "excess" ? null : "Benchmark is not included in the current weekly snapshot, so raw returns are shown"
           }
         },
         picks,
@@ -3512,12 +3536,19 @@
       $("insightsFindings").innerHTML = findings.length ? findings.map((finding) => {
         const metrics = finding.in_sample_metrics_json || {};
         const adjusted = Number(finding.adjusted_p_value);
-        const effect = Number(metrics.effect_size);
+        const effect = Number(metrics.spearman_rho ?? metrics.effect_size);
+        const ciLow = Number(metrics.rho_ci_low);
+        const ciHigh = Number(metrics.rho_ci_high);
+        const interval = Number.isFinite(ciLow) && Number.isFinite(ciHigh) ? ` (95% CI ${ciLow.toFixed(2)} to ${ciHigh.toFixed(2)})` : "";
+        const candidate = finding.status === "candidate";
+        const caveat = candidate
+          ? "Candidate: survived multiple-testing correction, held in most time periods and does not rest on one stock. Still confirm it on new appraisals before relying on it."
+          : "Exploratory only: treat as a lead, not a pattern.";
         return `<article class="insight-finding">
           <strong>${escapeHtml(finding.title || "Exploratory feature difference")}</strong>
           <span>${escapeHtml(finding.explanation || "")}</span>
-          <span>${fmt.format(Number(finding.support_count || 0))} observations · effect ${Number.isFinite(effect) ? effect.toFixed(2) : "-"} · adjusted p ${Number.isFinite(adjusted) ? adjusted.toFixed(3) : "-"}</span>
-          <span>Exploratory only. This has not passed walk-forward or holdout validation.</span>
+          <span>${fmt.format(Number(finding.support_count || 0))} observations · rank correlation ${Number.isFinite(effect) ? effect.toFixed(2) : "-"}${interval} · adjusted p ${Number.isFinite(adjusted) ? adjusted.toFixed(3) : "-"}</span>
+          <span${candidate ? ' class="ok"' : ""}>${caveat}</span>
         </article>`;
       }).join("") : '<p class="status-line">No feature differences met the minimum coverage requirements for this run.</p>';
     }
@@ -3789,7 +3820,12 @@
           body: JSON.stringify({market: $("analysisMarket").value, horizon_days: Number($("insightsHorizon").value)})
         });
         const result = payload.evaluation;
-        $("insightsRuleStatus").textContent = `Retained ${result.retained_count}/${result.eligible_count}; removed ${result.low_removed_count} underperformers and incorrectly removed ${result.high_removed_count} high performers.`;
+        const metrics = result.metrics_json || {};
+        const shadowCount = Number(metrics.shadow?.eligible_count || 0);
+        const period = metrics.period === "shadow"
+          ? "Shadow test on appraisals made after this rule was saved"
+          : `In-sample only (${shadowCount} of ${Number(metrics.shadow_minimum || 10)} appraisals needed since this rule was saved)`;
+        $("insightsRuleStatus").textContent = `${period}: retained ${result.retained_count}/${result.eligible_count}; removed ${result.low_removed_count} underperformers and incorrectly removed ${result.high_removed_count} high performers.`;
         $("insightsRuleStatus").className = `status-line ${Number(result.high_removed_count) === 0 ? "ok" : "warn"}`;
       } catch (error) {
         $("insightsRuleStatus").textContent = error.message;

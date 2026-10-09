@@ -37,14 +37,40 @@ RATING_OUTCOME_CANDIDATES_CTE = """
             ticker,
             appraisal_cutoff_date(market, event_at_utc) AS cutoff_day,
             CASE WHEN lower(market) = 'asx' THEN '^AORD' ELSE 'SPY' END AS benchmark_ticker
-        FROM rating_events
+        FROM rating_events event
         WHERE action = 'label'
           AND label IS NOT NULL
           AND market IS NOT NULL
           AND ticker IS NOT NULL
           AND (%(market)s::text IS NULL OR market = %(market)s)
+          -- Nothing to measure until the horizon has passed.
+          AND appraisal_cutoff_date(market, event_at_utc) <= CURRENT_DATE - %(horizon)s::int
+          -- An observed outcome under the current definition is final, so it is
+          -- skipped unless a full re-measure is requested.
+          AND (
+              %(remeasure)s
+              OR NOT EXISTS (
+                  SELECT 1
+                  FROM rating_outcomes done
+                  WHERE done.rating_event_id = event.id
+                    AND done.horizon_days = %(horizon)s
+                    AND done.outcome_version = %(version)s
+                    AND done.quality_json->>'horizon_status' = 'observed'
+              )
+          )
         ORDER BY event_at_utc DESC, id DESC
         LIMIT %(limit)s
+    )
+"""
+
+
+# Old-definition outcome rows are removed for every rating in the market, not
+# just this run's candidates, so immature or skipped events cannot keep them.
+RATING_STALE_SCOPE_CTE = """
+    candidates AS (
+        SELECT id
+        FROM rating_events
+        WHERE (%(market)s::text IS NULL OR market = %(market)s)
     )
 """
 
@@ -268,10 +294,13 @@ def measure_outcomes(
     outcome_table: str,
     key_column: str,
     params: dict[str, Any],
+    stale_scope_cte: str | None = None,
 ) -> dict[str, Any]:
-    """Upsert outcomes for one horizon and drop candidates' stale definitions.
+    """Upsert outcomes for one horizon and drop stale outcome definitions.
 
     ``params`` must include ``horizon`` and anything the candidates CTE uses.
+    ``stale_scope_cte`` (default: the candidates) defines a ``candidates``
+    CTE whose rows lose any outcome stored under an older definition.
     """
     params = {**params, "version": OUTCOME_VERSION}
     cur.execute(outcomes_upsert_sql(candidates_cte, outcome_table, key_column), params)
@@ -282,7 +311,7 @@ def measure_outcomes(
     # into analysis.
     cur.execute(
         f"""
-        WITH {candidates_cte}
+        WITH {stale_scope_cte or candidates_cte}
         DELETE FROM {outcome_table} outcome
         USING candidates
         WHERE outcome.{key_column} = candidates.id
@@ -294,11 +323,19 @@ def measure_outcomes(
     return {"horizon_days": params["horizon"], "measured_count": measured_count, "stale_removed_count": cur.rowcount}
 
 
-def measure_rating_outcomes(cur: psycopg.Cursor, *, market: str | None, limit: int, horizon: int) -> dict[str, Any]:
+def measure_rating_outcomes(
+    cur: psycopg.Cursor,
+    *,
+    market: str | None,
+    limit: int,
+    horizon: int,
+    remeasure: bool = False,
+) -> dict[str, Any]:
     return measure_outcomes(
         cur,
         candidates_cte=RATING_OUTCOME_CANDIDATES_CTE,
         outcome_table="rating_outcomes",
         key_column="rating_event_id",
-        params={"market": market, "limit": limit, "horizon": horizon},
+        params={"market": market, "limit": limit, "horizon": horizon, "remeasure": remeasure},
+        stale_scope_cte=RATING_STALE_SCOPE_CTE,
     )

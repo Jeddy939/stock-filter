@@ -34,7 +34,10 @@ def chronological_partitions(
     holdout_group_count = max(1, round(len(unique_dates) * holdout_fraction))
     holdout_start = unique_dates[-holdout_group_count]
     development_dates = [value for value in unique_dates if value < holdout_start]
-    development_indices = [index for index, value in enumerate(normalized) if value < holdout_start]
+    # The final model trains only on events whose outcome windows closed
+    # before the holdout begins, so no holdout-period prices leak into it.
+    holdout_embargo = holdout_start - timedelta(days=horizon_days)
+    development_indices = [index for index, value in enumerate(normalized) if value < holdout_embargo]
     holdout_indices = [index for index, value in enumerate(normalized) if value >= holdout_start]
     if len(development_dates) < 4:
         return {"folds": [], "development_indices": development_indices, "holdout_indices": holdout_indices, "holdout_start": holdout_start}
@@ -89,5 +92,15 @@ def calibration_summary(labels: Sequence[int], scores: Sequence[float], bins: in
                 "mean_score": sum(score for _, score in selected) / len(selected),
                 "observed_rate": sum(label for label, _ in selected) / len(selected),
             })
+    # Scores only count as calibrated probabilities when they beat always
+    # predicting the observed base rate.
+    base_rate = sum(int(label) for label in labels) / len(labels)
+    reference_brier = base_rate * (1 - base_rate)
     enough_bins = sum(row["count"] >= 5 for row in rows) >= 3
-    return {"bins": rows, "brier_score": brier, "calibrated": enough_bins and brier < 0.25}
+    return {
+        "bins": rows,
+        "brier_score": brier,
+        "reference_brier_score": reference_brier,
+        "brier_skill": 1 - brier / reference_brier if reference_brier else None,
+        "calibrated": enough_bins and brier < reference_brier,
+    }

@@ -2033,12 +2033,13 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
         CASE WHEN $2::int = 0 THEN latest.close_price ELSE outcome.price_at_horizon END AS latest_price,
         CASE WHEN $2::int = 0 THEN latest.price_date ELSE NULL END AS latest_date,
         CASE
-          WHEN $2::int = 0 AND labelled.signal_price > 0 AND latest.close_price IS NOT NULL
-          THEN ((latest.close_price - labelled.signal_price) / labelled.signal_price) * 100
+          WHEN $2::int = 0 AND entry.close_price > 0 AND latest.close_price IS NOT NULL
+          THEN ((latest.close_price - entry.close_price) / entry.close_price) * 100
           WHEN $2::int <> 0 THEN outcome.return_percent
           ELSE NULL
         END AS return_percent
       FROM latest_labels labelled
+      ${ENTRY_PRICE_LATERAL("labelled")}
       LEFT JOIN LATERAL (
         SELECT close_price, price_date
         FROM price_history
@@ -2076,6 +2077,22 @@ apiApp.get("/api/analysis/summary", asyncRoute(async (req, res) => {
   res.json({ok: true, market: requestedMarket, horizon_days: horizon, summary: result.rows});
 }));
 
+// Entry price for a labelled pick: the last close from price_history in the
+// session that had completed when the label was given (same anchor as the
+// point-in-time outcomes), so entry and later prices share one price basis.
+const ENTRY_PRICE_LATERAL = (alias: string) => `
+    LEFT JOIN LATERAL (
+      SELECT price_date, close_price
+      FROM price_history
+      WHERE market = ${alias}.market
+        AND ticker = ${alias}.ticker
+        AND provider = 'yfinance'
+        AND price_date <= appraisal_cutoff_date(${alias}.market, ${alias}.event_at_utc)
+        AND close_price > 0
+      ORDER BY price_date DESC
+      LIMIT 1
+    ) entry ON TRUE`;
+
 apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   const market = strictMarket(req.query.market);
@@ -2089,158 +2106,128 @@ apiApp.get("/api/analysis/timeseries", asyncRoute(async (req, res) => {
   const range = String(req.query.range ?? "all").trim().toLowerCase();
   const days = analysisRangeDays(range);
   if (days === undefined) throw new ApiError(400, "Analysis range must be 3m, 6m, 1y, 2y, 5y, or all");
-
-  const dateBucket = interval === "weekly"
-    ? "date_trunc('week', ph.price_date)::date"
-    : "ph.price_date";
-  const benchmarkBucket = interval === "weekly"
-    ? "date_trunc('week', price_date)::date"
-    : "price_date";
+  // Range limits how far after each appraisal the curves extend.
+  const maxSessions = days === null ? null : Math.round(days * 252 / 365);
   const benchmarkTicker = market === "asx" ? "^AORD" : "SPY";
   const benchmarkName = market === "asx" ? "All Ordinaries" : "S&P 500 (SPY)";
-  const activeLabelsCte = `
+
+  const result = await db().query(
+    `
     WITH latest_events AS (
       SELECT DISTINCT ON (firebase_uid, market, ticker)
-        id, firebase_uid, market, ticker, action, label, event_at_utc,
-        signal_date, close_price AS signal_price
+        id, firebase_uid, market, ticker, action, label, event_at_utc, signal_date
       FROM rating_events
       WHERE market = $1
         AND firebase_uid = $2
       ORDER BY firebase_uid, market, ticker, event_at_utc DESC, id DESC
     ), active_labels AS (
-      SELECT *
-      FROM latest_events
-      WHERE action = 'label'
-        AND label IS NOT NULL
-        AND signal_date IS NOT NULL
-        AND signal_price > 0
-    )
-  `;
-
-  const [seriesResult, benchmarkResult, coverageResult] = await Promise.all([
-    db().query(
-      `
-      ${activeLabelsCte}, pick_points AS (
-        SELECT
-          ${dateBucket} AS point_date,
-          labelled.label,
-          labelled.firebase_uid,
-          labelled.ticker,
-          ((ph.close_price - labelled.signal_price) / labelled.signal_price) * 100 AS return_percent
-        FROM active_labels labelled
-        JOIN price_history ph
-          ON ph.market = labelled.market
-         AND ph.provider = 'yfinance'
-         AND ph.ticker = labelled.ticker
-         AND ph.price_date >= labelled.signal_date
-         AND ph.close_price IS NOT NULL
-        WHERE ($3::int IS NULL OR ph.price_date >= CURRENT_DATE - ($3::int * INTERVAL '1 day'))
-      ), category_points AS (
-        SELECT point_date, label, ROUND(AVG(return_percent)::numeric, 4) AS return_percent,
-               COUNT(*)::int AS sample_count
-        FROM pick_points
-        GROUP BY point_date, label
-      ), all_pick_points AS (
-        SELECT point_date, 'all_picks'::text AS label,
-               ROUND(AVG(return_percent)::numeric, 4) AS return_percent,
-               COUNT(*)::int AS sample_count
-        FROM pick_points
-        GROUP BY point_date
-      )
-      SELECT point_date::text AS date, label, return_percent, sample_count
-      FROM (
-        SELECT * FROM category_points
-        UNION ALL
-        SELECT * FROM all_pick_points
-      ) combined
-      ORDER BY point_date, label
-      `,
-      [market, user.uid, days]
-    ),
-    db().query(
-      `
-      ${activeLabelsCte}, analysis_window AS (
-        SELECT CASE
-          WHEN COUNT(*) = 0 THEN NULL::date
-          WHEN $4::int IS NULL THEN MIN(signal_date)
-          ELSE GREATEST(MIN(signal_date), CURRENT_DATE - $4::int)
-        END AS start_date
-        FROM active_labels
-      ), source_bars AS (
-        SELECT ${benchmarkBucket} AS point_date, price_date, close_price
+      SELECT * FROM latest_events WHERE action = 'label' AND label IS NOT NULL
+    ), entries AS (
+      SELECT labelled.id, labelled.label, labelled.market, labelled.ticker,
+             entry.price_date AS entry_date, entry.close_price AS entry_price,
+             benchmark_entry.close_price AS benchmark_entry_price
+      FROM active_labels labelled
+      ${ENTRY_PRICE_LATERAL("labelled")}
+      LEFT JOIN LATERAL (
+        SELECT close_price
         FROM price_history
-        WHERE market = $1
-          AND provider = 'yfinance'
-          AND ticker = $3
-          AND close_price IS NOT NULL
-          AND price_date >= (SELECT start_date FROM analysis_window)
-      ), ranked AS (
-        SELECT point_date, close_price,
-               ROW_NUMBER() OVER (PARTITION BY point_date ORDER BY price_date DESC) AS row_number
-        FROM source_bars
-      ), bars AS (
-        SELECT point_date, close_price
-        FROM ranked
-        WHERE row_number = 1
-      ), normalized AS (
-        SELECT point_date, close_price,
-               FIRST_VALUE(close_price) OVER (ORDER BY point_date) AS initial_close
-        FROM bars
-      )
-      SELECT point_date::text AS date,
-             ROUND((((close_price / NULLIF(initial_close, 0)) - 1) * 100)::numeric, 4) AS return_percent
-      FROM normalized
-      ORDER BY point_date
-      `,
-      [market, user.uid, benchmarkTicker, days]
-    ),
-    db().query(
-      `
-      ${activeLabelsCte}
-      SELECT COUNT(*)::int AS active_pick_count,
-             COUNT(DISTINCT ticker)::int AS ticker_count,
-             MIN(signal_date)::text AS earliest_signal_date,
-             MAX(signal_date)::text AS latest_signal_date
-      FROM active_labels
-      `,
-      [market, user.uid]
+        WHERE market = labelled.market AND provider = 'yfinance' AND ticker = $3
+          AND price_date <= entry.price_date AND close_price > 0
+        ORDER BY price_date DESC
+        LIMIT 1
+      ) benchmark_entry ON TRUE
+      WHERE entry.price_date IS NOT NULL
+    ), paths AS (
+      SELECT entries.id, entries.label,
+             ROW_NUMBER() OVER (PARTITION BY entries.id ORDER BY ph.price_date) - 1 AS session,
+             ((ph.close_price / entries.entry_price) - 1) * 100 AS return_percent,
+             ((benchmark.close_price / entries.benchmark_entry_price) - 1) * 100 AS benchmark_percent
+      FROM entries
+      JOIN price_history ph
+        ON ph.market = entries.market AND ph.provider = 'yfinance' AND ph.ticker = entries.ticker
+       AND ph.price_date >= entries.entry_date
+       AND ($4::int IS NULL OR ph.price_date <= entries.entry_date + ($4::int * 2))
+       AND ph.close_price IS NOT NULL
+      LEFT JOIN price_history benchmark
+        ON benchmark.market = entries.market AND benchmark.provider = 'yfinance'
+       AND benchmark.ticker = $3 AND benchmark.price_date = ph.price_date
+    ), sampled AS (
+      SELECT id, label,
+             CASE WHEN $5 = 'weekly' THEN session / 5 ELSE session END AS step,
+             return_percent, return_percent - benchmark_percent AS excess_percent
+      FROM paths
+      WHERE ($4::int IS NULL OR session <= $4::int)
+        AND ($5 <> 'weekly' OR session % 5 = 0)
+    ), grouped AS (
+      SELECT step, label, return_percent, excess_percent FROM sampled
+      UNION ALL
+      SELECT step, 'all_picks', return_percent, excess_percent FROM sampled
     )
-  ]);
+    SELECT step, label,
+           ROUND(AVG(excess_percent)::numeric, 4) AS excess_percent,
+           ROUND(AVG(return_percent)::numeric, 4) AS return_percent,
+           COUNT(excess_percent)::int AS excess_count,
+           COUNT(*)::int AS sample_count
+    FROM grouped
+    GROUP BY step, label
+    ORDER BY label, step
+    `,
+    [market, user.uid, benchmarkTicker, maxSessions, interval]
+  );
+  const coverageResult = await db().query(
+    `
+    WITH latest_events AS (
+      SELECT DISTINCT ON (firebase_uid, market, ticker)
+        id, market, ticker, action, label, event_at_utc, signal_date
+      FROM rating_events
+      WHERE market = $1 AND firebase_uid = $2
+      ORDER BY firebase_uid, market, ticker, event_at_utc DESC, id DESC
+    )
+    SELECT COUNT(*)::int AS active_pick_count,
+           COUNT(DISTINCT ticker)::int AS ticker_count,
+           MIN(signal_date)::text AS earliest_signal_date,
+           MAX(signal_date)::text AS latest_signal_date,
+           COALESCE(jsonb_object_agg(label, label_count) FILTER (WHERE label IS NOT NULL), '{}'::jsonb) AS label_counts
+    FROM (
+      SELECT *, COUNT(*) OVER (PARTITION BY label) AS label_count
+      FROM latest_events WHERE action = 'label' AND label IS NOT NULL
+    ) active
+    `,
+    [market, user.uid]
+  );
 
+  const benchmarkAvailable = result.rows.some((row) => Number(row.excess_count) > 0);
   const series = new Map<string, Array<Record<string, unknown>>>();
-  for (const row of seriesResult.rows) {
+  for (const row of result.rows) {
     const label = String(row.label);
     const points = series.get(label) ?? [];
     points.push({
-      date: row.date,
+      step: Number(row.step),
+      excess_percent: numberOrNull(row.excess_percent),
       return_percent: numberOrNull(row.return_percent),
-      sample_count: Number(row.sample_count ?? 0)
+      sample_count: Number(benchmarkAvailable ? row.excess_count : row.sample_count)
     });
     series.set(label, points);
   }
   const categoryOrder = ["winner", "needs_confirmation", "maybe", "bad", "all_picks"];
-  const seriesPayload = categoryOrder.map((label) => ({label, points: series.get(label) ?? []}));
-  const benchmarkPoints = benchmarkResult.rows.map((row) => ({
-    date: row.date,
-    return_percent: numberOrNull(row.return_percent)
-  }));
-
   res.json({
     ok: true,
     market,
     interval,
     range,
-    methodology: "Each pick is rebased to 0% on its appraisal price; category and all-picks lines are the mean available return on each date.",
+    view: "event_time",
+    step_unit: interval === "weekly" ? "week" : "session",
+    measure: benchmarkAvailable ? "excess" : "return",
+    methodology: "Each pick starts at 0% on the close of the session completed when it was labelled. Lines show the average return relative to the benchmark over the same days, by trading days since labelling.",
     coverage: coverageResult.rows[0] ?? {},
-    series: seriesPayload,
+    series: categoryOrder.map((label) => ({label, points: series.get(label) ?? []})),
     benchmark: {
       ticker: benchmarkTicker,
       name: benchmarkName,
-      available: benchmarkPoints.length > 0,
-      unavailable_reason: benchmarkPoints.length
+      available: benchmarkAvailable,
+      unavailable_reason: benchmarkAvailable
         ? null
-        : `${benchmarkName} price history has not been loaded into the ${market.toUpperCase()} database yet`,
-      points: benchmarkPoints
+        : `${benchmarkName} price history has not been loaded into the ${market.toUpperCase()} database yet, so raw returns are shown`
     }
   });
 }));
@@ -2280,16 +2267,18 @@ apiApp.get("/api/analysis/picks", asyncRoute(async (req, res) => {
       labelled.firebase_uid, COALESCE(labelled.user_email, owner.email) AS owner_email,
       labelled.market, labelled.ticker, labelled.label, labelled.scan_id, labelled.source_id,
       labelled.event_at_utc, labelled.signal_date, labelled.signal_price,
+      entry.price_date AS entry_date, entry.close_price AS entry_price,
       CASE WHEN $3::int = 0 THEN latest.close_price ELSE outcome.price_at_horizon END AS latest_price,
       CASE WHEN $3::int = 0 THEN latest.price_date ELSE NULL END AS latest_date,
       outcome.measured_at_utc,
       CASE
-        WHEN $3::int = 0 AND labelled.signal_price > 0 AND latest.close_price IS NOT NULL
-        THEN ROUND((((latest.close_price - labelled.signal_price) / labelled.signal_price) * 100)::numeric, 2)
+        WHEN $3::int = 0 AND entry.close_price > 0 AND latest.close_price IS NOT NULL
+        THEN ROUND((((latest.close_price - entry.close_price) / entry.close_price) * 100)::numeric, 2)
         WHEN $3::int <> 0 THEN ROUND(outcome.return_percent::numeric, 2)
         ELSE NULL
       END AS return_percent
     FROM latest_labels labelled
+    ${ENTRY_PRICE_LATERAL("labelled")}
     LEFT JOIN LATERAL (
       SELECT close_price, price_date
       FROM price_history
@@ -2973,6 +2962,55 @@ apiApp.patch("/api/analysis/insights/rules/:ruleId", asyncRoute(async (req, res)
   res.json({ok: true, rule: updated.rows[0]});
 }));
 
+const RULE_SHADOW_MINIMUM = 10;
+
+export type RuleEvaluationRow = {
+  market: string;
+  excess: number;
+  drawdown: number;
+  featureDate: unknown;
+  eventAt: number;
+  retained: boolean;
+};
+
+// Score a rule against appraisals, ranking best and worst within each market
+// because ASX and US picks are measured against different benchmarks.
+export function summarizeRuleEvaluation(rows: RuleEvaluationRow[]) {
+  if (!rows.length) return null;
+  const cutoffs = new Map<string, {low: number; high: number}>();
+  for (const market of new Set(rows.map((row) => row.market))) {
+    const outcomes = rows.filter((row) => row.market === market).map((row) => row.excess);
+    cutoffs.set(market, {low: numericPercentile(outcomes, 0.25), high: numericPercentile(outcomes, 0.75)});
+  }
+  const isHigh = (row: RuleEvaluationRow) => row.excess >= (cutoffs.get(row.market)?.high ?? Infinity);
+  const isLow = (row: RuleEvaluationRow) => row.excess <= (cutoffs.get(row.market)?.low ?? -Infinity);
+  const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  const retained = rows.filter((row) => row.retained);
+  const removed = rows.filter((row) => !row.retained);
+  const baselineExcess = average(rows.map((row) => row.excess));
+  const retainedExcess = average(retained.map((row) => row.excess));
+  const baselineDrawdown = average(rows.map((row) => row.drawdown).filter(Number.isFinite));
+  const retainedDrawdown = average(retained.map((row) => row.drawdown).filter(Number.isFinite));
+  return {
+    evaluated_from: rows[0].featureDate ?? null,
+    evaluated_to: rows[rows.length - 1].featureDate ?? null,
+    eligible_count: rows.length,
+    retained_count: retained.length,
+    removed_count: removed.length,
+    high_retained_count: retained.filter(isHigh).length,
+    high_removed_count: removed.filter(isHigh).length,
+    low_retained_count: retained.filter(isLow).length,
+    low_removed_count: removed.filter(isLow).length,
+    baseline_hit_rate: rows.filter(isHigh).length / rows.length,
+    filtered_hit_rate: retained.length ? retained.filter(isHigh).length / retained.length : null,
+    baseline_average_excess: baselineExcess,
+    retained_average_excess: retainedExcess,
+    benchmark_excess_change: retainedExcess === null || baselineExcess === null ? null : retainedExcess - baselineExcess,
+    drawdown_change: retainedDrawdown === null || baselineDrawdown === null ? null : retainedDrawdown - baselineDrawdown,
+    cutoffs_by_market: Object.fromEntries(cutoffs)
+  };
+}
+
 apiApp.post("/api/analysis/insights/rules/:ruleId/evaluate", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   requireAnalyst(user);
@@ -2987,60 +3025,64 @@ apiApp.post("/api/analysis/insights/rules/:ruleId/evaluate", asyncRoute(async (r
   const horizon = insightHorizon(req.body?.horizon_days);
   const rowsResult = await db().query(
     `
-    SELECT snapshot.rating_event_id, snapshot.market, snapshot.ticker,
-           snapshot.feature_as_of_date, outcome.benchmark_excess_return_percent,
-           outcome.maximum_drawdown_percent,
-           jsonb_object_agg(definition.feature_name,
-             COALESCE(to_jsonb(value.numeric_value), to_jsonb(value.boolean_value), to_jsonb(value.categorical_value))
-           ) FILTER (WHERE NOT value.is_missing) AS features
-    FROM pick_feature_snapshots snapshot
-    JOIN rating_events event ON event.id = snapshot.rating_event_id
-    JOIN rating_outcomes outcome ON outcome.rating_event_id = event.id AND outcome.horizon_days = $1
-     AND outcome.outcome_version = $5
-    JOIN pick_feature_values value ON value.snapshot_id = snapshot.id
-    JOIN feature_definitions definition ON definition.id = value.feature_definition_id
-    WHERE snapshot.feature_version = $4 AND snapshot.snapshot_status = 'complete'
-      AND event.action = 'label' AND event.label = 'winner'
-      AND event.firebase_uid = $2
-      AND ($3::text IS NULL OR snapshot.market = $3)
-      AND outcome.benchmark_excess_return_percent IS NOT NULL
-    GROUP BY snapshot.rating_event_id, snapshot.market, snapshot.ticker,
-             snapshot.feature_as_of_date, outcome.benchmark_excess_return_percent,
-             outcome.maximum_drawdown_percent
-    ORDER BY snapshot.feature_as_of_date, snapshot.rating_event_id
+    WITH evaluated AS (
+      SELECT snapshot.rating_event_id, snapshot.market, snapshot.ticker,
+             snapshot.feature_as_of_date, event.event_at_utc,
+             outcome.benchmark_excess_return_percent, outcome.maximum_drawdown_percent,
+             jsonb_object_agg(definition.feature_name,
+               COALESCE(to_jsonb(value.numeric_value), to_jsonb(value.boolean_value), to_jsonb(value.categorical_value))
+             ) FILTER (WHERE NOT value.is_missing) AS features,
+             -- One row per stock and anchor week, matching the Insights analysis.
+             ROW_NUMBER() OVER (
+               PARTITION BY snapshot.market, snapshot.ticker, date_trunc('week', snapshot.feature_as_of_date)
+               ORDER BY event.event_at_utc, event.id
+             ) AS week_rank
+      FROM pick_feature_snapshots snapshot
+      JOIN rating_events event ON event.id = snapshot.rating_event_id
+      JOIN rating_outcomes outcome ON outcome.rating_event_id = event.id AND outcome.horizon_days = $1
+       AND outcome.outcome_version = $5
+      JOIN pick_feature_values value ON value.snapshot_id = snapshot.id
+      JOIN feature_definitions definition ON definition.id = value.feature_definition_id
+      WHERE snapshot.feature_version = $4 AND snapshot.snapshot_status = 'complete'
+        AND event.action = 'label' AND event.label = 'winner'
+        AND event.firebase_uid = $2
+        AND ($3::text IS NULL OR snapshot.market = $3)
+        AND outcome.benchmark_excess_return_percent IS NOT NULL
+      GROUP BY snapshot.rating_event_id, snapshot.market, snapshot.ticker,
+               snapshot.feature_as_of_date, event.event_at_utc, event.id,
+               outcome.benchmark_excess_return_percent, outcome.maximum_drawdown_percent
+    )
+    SELECT * FROM evaluated
+    WHERE week_rank = 1
+    ORDER BY feature_as_of_date, rating_event_id
     LIMIT 25000
     `,
     [horizon, rule.owner_uid, marketFilter, INSIGHT_FEATURE_VERSION, INSIGHT_OUTCOME_VERSION]
   );
-  const rows = rowsResult.rows.map((row) => ({
-    ...row,
+  const rows: RuleEvaluationRow[] = rowsResult.rows.map((row) => ({
+    market: String(row.market),
     excess: Number(row.benchmark_excess_return_percent),
+    drawdown: Number(row.maximum_drawdown_percent),
+    featureDate: row.feature_as_of_date,
+    eventAt: new Date(row.event_at_utc).getTime(),
     retained: ruleMatches(row.features ?? {}, condition)
   }));
   if (rows.length < 20) throw new ApiError(409, "At least 20 mature winner appraisals are required to evaluate a rule");
-  const outcomes = rows.map((row) => row.excess);
-  const lowCutoff = numericPercentile(outcomes, 0.25);
-  const highCutoff = numericPercentile(outcomes, 0.75);
-  const retained = rows.filter((row) => row.retained);
-  const removed = rows.filter((row) => !row.retained);
-  const highRetained = retained.filter((row) => row.excess >= highCutoff).length;
-  const highRemoved = removed.filter((row) => row.excess >= highCutoff).length;
-  const lowRetained = retained.filter((row) => row.excess <= lowCutoff).length;
-  const lowRemoved = removed.filter((row) => row.excess <= lowCutoff).length;
-  const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-  const baselineHitRate = rows.filter((row) => row.excess >= highCutoff).length / rows.length;
-  const filteredHitRate = retained.length ? highRetained / retained.length : null;
+  // Appraisals made after the rule was saved could not have shaped it: they
+  // are the out-of-sample (shadow) test. Earlier appraisals are in-sample.
+  const ruleCreatedAt = new Date(rule.created_at_utc).getTime();
+  const historical = summarizeRuleEvaluation(rows.filter((row) => row.eventAt < ruleCreatedAt));
+  const shadow = summarizeRuleEvaluation(rows.filter((row) => row.eventAt >= ruleCreatedAt));
+  const reported = shadow && shadow.eligible_count >= RULE_SHADOW_MINIMUM ? shadow : historical ?? shadow;
+  if (!reported) throw new ApiError(409, "No mature appraisals are available to evaluate this rule");
+  const period = reported === shadow ? "shadow" : "historical";
   const metrics = {
-    market, horizon_days: horizon, low_cutoff: lowCutoff, high_cutoff: highCutoff,
-    baseline_average_excess: average(rows.map((row) => row.excess)),
-    retained_average_excess: average(retained.map((row) => row.excess)),
+    market, horizon_days: horizon, period,
+    rule_created_at_utc: new Date(ruleCreatedAt).toISOString(),
+    shadow_minimum: RULE_SHADOW_MINIMUM,
+    shadow, historical,
     evaluated_at_utc: new Date().toISOString()
   };
-  const retainedDrawdown = average(retained.map((row) => Number(row.maximum_drawdown_percent)).filter(Number.isFinite));
-  const baselineDrawdown = average(rows.map((row) => Number(row.maximum_drawdown_percent)).filter(Number.isFinite));
-  const drawdownChange = retainedDrawdown === null || baselineDrawdown === null
-    ? null
-    : retainedDrawdown - baselineDrawdown;
   const inserted = await db().query(
     `
     INSERT INTO insight_rule_evaluations (
@@ -3051,12 +3093,11 @@ apiApp.post("/api/analysis/insights/rules/:ruleId/evaluate", asyncRoute(async (r
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
     RETURNING *
     `,
-    [ruleId, rows[0]?.feature_as_of_date ?? null, rows[rows.length - 1]?.feature_as_of_date ?? null,
-      rows.length, retained.length, removed.length, highRetained, highRemoved, lowRemoved, lowRetained,
-      baselineHitRate, filteredHitRate,
-      metrics.retained_average_excess === null || metrics.baseline_average_excess === null
-        ? null : metrics.retained_average_excess - metrics.baseline_average_excess,
-      drawdownChange,
+    [ruleId, reported.evaluated_from, reported.evaluated_to,
+      reported.eligible_count, reported.retained_count, reported.removed_count,
+      reported.high_retained_count, reported.high_removed_count, reported.low_removed_count, reported.low_retained_count,
+      reported.baseline_hit_rate, reported.filtered_hit_rate,
+      reported.benchmark_excess_change, reported.drawdown_change,
       JSON.stringify(metrics)]
   );
   res.json({ok: true, evaluation: inserted.rows[0]});
@@ -3535,6 +3576,8 @@ apiApp.post("/api/admin/recalculate-rating-outcomes", asyncRoute(async (req, res
     market,
     horizons: Array.isArray(body.horizons) ? body.horizons : [28, 56, 84, 182],
     limit: positiveInt(body.limit, 100000, 1, 500000),
+    // An explicit recalculation re-measures outcomes that are already final.
+    remeasure: true,
     requested_by_uid: user.uid,
     requested_by_email: user.email
   };

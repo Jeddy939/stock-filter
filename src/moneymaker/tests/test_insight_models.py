@@ -20,6 +20,21 @@ class InsightModelTests(unittest.TestCase):
             self.assertFalse(train_dates & validation_dates)
             self.assertLessEqual(max(train_dates), min(validation_dates) - timedelta(days=28))
 
+    def test_final_training_set_is_embargoed_before_holdout(self):
+        start = date(2020, 1, 1)
+        dates = [start + timedelta(days=group * 7) for group in range(60)]
+        partitions = chronological_partitions(dates, horizon_days=84)
+        development_dates = {dates[index] for index in partitions["development_indices"]}
+        self.assertTrue(development_dates)
+        self.assertLessEqual(max(development_dates), partitions["holdout_start"] - timedelta(days=84))
+
+    def test_calibration_must_beat_the_base_rate(self):
+        labels = [1 if index % 4 == 0 else 0 for index in range(200)]
+        base_rate_guess = calibration_summary(labels, [0.25] * 200)
+        self.assertFalse(base_rate_guess["calibrated"])
+        informative = calibration_summary(labels, [0.9 if label else 0.1 for label in labels])
+        self.assertLess(informative["brier_score"], informative["reference_brier_score"])
+
     def test_calibration_is_not_claimed_for_sparse_bins(self):
         result = calibration_summary([0, 1, 0, 1], [0.1, 0.9, 0.2, 0.8])
         self.assertFalse(result["calibrated"])
@@ -45,6 +60,10 @@ class InsightModelTests(unittest.TestCase):
         self.assertEqual(result["features"][0]["feature"], "seeded_signal")
         self.assertGreater(result["walk_forward_auc_mean"], 0.8)
         self.assertIn(result["output_name"], {"score", "estimated_probability"})
+        # Trained on every appraisal, so the base rate is the top-quartile share.
+        self.assertAlmostEqual(result["base_rate"], 0.25, delta=0.05)
+        self.assertGreater(result["walk_forward_ranking"]["information_coefficient"], 0.5)
+        self.assertGreater(result["walk_forward_ranking"]["top_fifth_lift"], 0)
 
 
 if __name__ == "__main__":

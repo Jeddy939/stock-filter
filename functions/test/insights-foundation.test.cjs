@@ -46,12 +46,15 @@ assert.match(api, /apiApp\.get\("\/api\/analysis\/insights\/runs\/:runId"/);
 assert.match(api, /apiApp\.post\("\/api\/analysis\/insights\/rules"/);
 assert.match(api, /apiApp\.post\("\/api\/analysis\/insights\/rules\/:ruleId\/evaluate"/);
 assert.match(api, /Only an admin may approve a rule/);
-assert.match(api, /highRemoved/);
+assert.match(api, /high_removed_count: removed\.filter\(isHigh\)\.length/);
+assert.match(api, /row\.eventAt >= ruleCreatedAt/);
 assert.match(api, /requireAdmin\(user\)/);
 
 assert.match(worker, /def run_insight_snapshot_backfill/);
 assert.match(worker, /elif kind == "insight-snapshot-backfill"/);
-assert.match(worker, /process_snapshot\(conn, snapshot_id\)/);
+assert.match(worker, /process_snapshot\(conn, snapshot_id, definition_ids\)/);
+assert.match(outcomes, /%\(remeasure\)s/);
+assert.match(api, /remeasure: true/);
 assert.match(outcomes, /ph\.price_date <= a\.anchor_date \+ %\(horizon\)s::int \+ \{OUTCOME_HORIZON_TOLERANCE_DAYS\}/);
 assert.match(outcomes, /appraisal_cutoff_date\(market, event_at_utc\) AS cutoff_day/);
 assert.match(outcomes, /'horizon_status', horizon_status/);

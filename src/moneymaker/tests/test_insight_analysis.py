@@ -82,6 +82,72 @@ class InsightAnalysisTests(unittest.TestCase):
         self.assertEqual(cohorts["high_cutoff"], cohorts["cutoffs_by_market"]["us"]["high"])
         self.assertEqual(cohorts["low_cutoff"], cohorts["cutoffs_by_market"]["us"]["low"])
 
+    @staticmethod
+    def _panel(count, outcome_for, feature_for, tickers=40, weeks=40):
+        random.seed(5)
+        rows = []
+        for index in range(count):
+            week = index % weeks
+            outcome = outcome_for(index, week)
+            rows.append({
+                "market": "us",
+                "ticker": f"T{index % tickers}",
+                "cluster": f"w{week}",
+                "event_at_utc": f"2025-{1 + week // 4:02d}-{1 + (week % 4) * 7:02d}",
+                "benchmark_excess_return_percent": outcome,
+                "features": {"signal": feature_for(index, week, outcome), "noise": random.uniform(-1, 1)},
+            })
+        return rows
+
+    def test_real_signal_becomes_a_candidate_with_quintiles(self):
+        rows = self._panel(
+            200,
+            lambda index, week: random.gauss(0, 10),
+            lambda index, week, outcome: outcome + random.gauss(0, 8),
+        )
+        findings = {finding["feature"]: finding for finding in analyze_numeric_features(rows)["findings"]}
+        signal = findings["signal"]
+        self.assertEqual(signal["status"], "candidate", signal["status_reasons"])
+        self.assertGreater(signal["rho_ci_low"], 0)
+        means = [quintile["mean_excess"] for quintile in signal["quintiles"]]
+        self.assertGreater(means[-1], means[0])
+        self.assertEqual(findings["noise"]["status"], "exploratory")
+
+    def test_noise_produces_no_candidates(self):
+        rows = self._panel(
+            300,
+            lambda index, week: random.gauss(0, 10),
+            lambda index, week, outcome: random.gauss(0, 1),
+        )
+        findings = analyze_numeric_features(rows)["findings"]
+        self.assertFalse([finding for finding in findings if finding["status"] == "candidate"])
+
+    def test_effect_from_one_ticker_is_not_a_candidate(self):
+        def feature(index, week, outcome):
+            return 50.0 + outcome if index % 40 == 0 else random.gauss(0, 1)
+
+        def outcome(index, week):
+            return 200.0 + week if index % 40 == 0 else random.gauss(0, 10)
+
+        rows = self._panel(200, outcome, feature)
+        signal = next(finding for finding in analyze_numeric_features(rows)["findings"] if finding["feature"] == "signal")
+        self.assertEqual(signal["status"], "exploratory")
+        self.assertEqual(signal["largest_contributor"]["ticker"], "T0")
+
+    def test_effect_in_only_one_period_is_not_a_candidate(self):
+        # Strongly positive in the final third of the timeline, mildly
+        # negative before it: the pooled correlation is positive but does not
+        # repeat across periods.
+        def feature(index, week, outcome):
+            if week >= 27:
+                return outcome + random.gauss(0, 2)
+            return -outcome * 0.3 + random.gauss(0, 10)
+
+        rows = self._panel(240, lambda index, week: random.gauss(0, 10), feature)
+        signal = next(finding for finding in analyze_numeric_features(rows)["findings"] if finding["feature"] == "signal")
+        self.assertLess(signal["agreeing_blocks"], 2)
+        self.assertEqual(signal["status"], "exploratory")
+
     def test_results_are_deterministic(self):
         records = [
             {"benchmark_excess_return_percent": float(index), "features": {"x": float(index % 7)}}

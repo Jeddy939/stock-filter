@@ -193,6 +193,8 @@ class DailyOutcomesJobTests(PostgresSchemaTestCase):
         self.assertEqual(result["horizons"][0]["measured_count"], 1)
         self.assertEqual(result["rating_snapshots"]["created_stubs"], 1)
         self.assertEqual(result["rating_snapshots"]["complete"], 1)
+        stored_values = self.conn.execute("SELECT COUNT(*) FROM pick_feature_values").fetchone()[0]
+        self.assertGreater(stored_values, 30, "batched feature values were written")
         self.assertEqual(result["screen_observations"]["seeded"], 1)
         self.assertEqual(result["screen_observations"]["outcomes"][0]["measured_count"], 1)
         self.assertEqual(result["screen_observations"]["snapshots"]["complete"], 1)

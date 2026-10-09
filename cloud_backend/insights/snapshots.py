@@ -105,6 +105,7 @@ def _store_feature_values(
     values: dict[str, FeatureValue],
 ) -> None:
     cursor.execute("DELETE FROM pick_feature_values WHERE snapshot_id = %s", (snapshot_id,))
+    rows = []
     for name, value in values.items():
         definition_id = definition_ids.get(name)
         if definition_id is None:
@@ -119,28 +120,38 @@ def _store_feature_values(
                 numeric_value = float(value.value)
             else:
                 categorical_value = str(value.value)
-        cursor.execute(
-            """
-            INSERT INTO pick_feature_values (
-                snapshot_id, feature_definition_id, numeric_value, boolean_value,
-                categorical_value, is_missing, missing_reason, source_as_of_utc
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                snapshot_id,
-                definition_id,
-                numeric_value,
-                boolean_value,
-                categorical_value,
-                value.is_missing,
-                value.missing_reason,
-                value.source_as_of_utc,
-            ),
-        )
+        rows.append((
+            snapshot_id,
+            definition_id,
+            numeric_value,
+            boolean_value,
+            categorical_value,
+            value.is_missing,
+            value.missing_reason,
+            value.source_as_of_utc,
+        ))
+    # One batched round trip instead of one insert per feature.
+    cursor.executemany(
+        """
+        INSERT INTO pick_feature_values (
+            snapshot_id, feature_definition_id, numeric_value, boolean_value,
+            categorical_value, is_missing, missing_reason, source_as_of_utc
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        rows,
+    )
 
 
-def process_snapshot(connection: psycopg.Connection[Any], snapshot_id: int) -> dict[str, Any]:
-    """Build one snapshot. Complete snapshots are immutable and skipped."""
+def process_snapshot(
+    connection: psycopg.Connection[Any],
+    snapshot_id: int,
+    definition_ids: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Build one snapshot. Complete snapshots are immutable and skipped.
+
+    Pass ``definition_ids`` from ``ensure_feature_definitions`` when building
+    many snapshots so the definitions are registered once per run.
+    """
     with connection.cursor(row_factory=dict_row) as cursor:
         cursor.execute(
             """
@@ -224,7 +235,7 @@ def process_snapshot(connection: psycopg.Connection[Any], snapshot_id: int) -> d
             appraisal_at_utc=snapshot["appraisal_at_utc"],
             appraisal_close=appraisal_close,
         )
-        definitions = ensure_feature_definitions(cursor)
+        definitions = definition_ids if definition_ids is not None else ensure_feature_definitions(cursor)
         _store_feature_values(cursor, snapshot_id, definitions, {**values, **fundamental_values})
 
         missing = [name for name, value in values.items() if value.is_missing]
