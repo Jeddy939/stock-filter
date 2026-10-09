@@ -2569,6 +2569,9 @@
       });
     }
 
+    // Raw connection errors the API returns while Cloud SQL is stopped.
+    const DATABASE_OFFLINE_PATTERN = /ECONNREFUSED|\.s\.PGSQL\.5432|Cloud SQL connection failed|Database temporarily unavailable/;
+
     async function api(path, options = {}) {
       const getToken = await authReady;
       const headers = new Headers(options.headers || {});
@@ -2594,7 +2597,13 @@
         const contentType = response.headers.get("Content-Type") || "unknown content type";
         throw new Error(`Server returned ${response.status} ${contentType}: ${responseText.slice(0, 180)}`);
       }
-      if (!response.ok || !payload.ok) throw new Error(payload.detail || payload.error || "Request failed");
+      if (!response.ok || !payload.ok) {
+        const message = payload.detail || payload.error || "Request failed";
+        if (DATABASE_OFFLINE_PATTERN.test(message)) {
+          throw new Error("The live database is switched off between weekly updates (it runs during the Tuesday update). This view needs it; an admin can start the database to use it now.");
+        }
+        throw new Error(message);
+      }
       return payload;
     }
 
@@ -2875,7 +2884,11 @@
       $("analysisReviewOpenMarket").hidden = true;
       $("analysisReviewResetView").hidden = true;
       try {
-        const payload = await api(`/api/chart?${reviewChartParams(row).toString()}`);
+        // Between weekly updates the database is off, so read the published
+        // snapshot like the main chart does.
+        const payload = currentSnapshot
+          ? await loadSnapshotChart(row.ticker, row.market, "daily", "1y", [30, 90, 180, 360, 700])
+          : await api(`/api/chart?${reviewChartParams(row).toString()}`);
         if (requestToken !== reviewChartRequestToken) return;
         lastReviewChart = {
           candles: payload.candles || [],
@@ -2908,7 +2921,9 @@
         lastReviewChart = null;
         clearFinancialChart($("analysisReviewChart"));
         $("analysisReviewChartMeta").textContent = error.message;
-        $("analysisReviewChartEmpty").textContent = "The review chart could not be loaded.";
+        $("analysisReviewChartEmpty").textContent = /Snapshot object not found/.test(error.message)
+          ? `${row.ticker} is not in the latest weekly snapshot yet; its chart appears after the next weekly update.`
+          : "The review chart could not be loaded.";
         $("analysisReviewChartEmpty").hidden = false;
         $("analysisReviewResetView").hidden = true;
       }
