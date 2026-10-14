@@ -8,8 +8,18 @@ __pycache__/
 *.json
 !default filter settings.json
 legacy/
+legacy_local/
+functions/
+hosting/
+dataconnect/
+design_lab/
+docs/
+scripts/
+.firebase/
+.pytest_cache/
 exports/
 firebase_public/
+*.zip
 stock_data_*.json
 rate_limit_calibration*.json
 rate_limit_calibration*.sqlite*

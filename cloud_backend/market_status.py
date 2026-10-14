@@ -19,9 +19,9 @@ def refresh_market_status(conn: psycopg.Connection, market: str, provider: str =
                 %s,
                 %s,
                 (SELECT COUNT(*) FROM companies WHERE market = %s),
+                (SELECT COUNT(*) FROM price_history WHERE market = %s AND provider = %s),
                 (SELECT COUNT(*) FROM weekly_metrics WHERE market = %s AND provider = %s),
-                (SELECT COUNT(*) FROM weekly_metrics WHERE market = %s AND provider = %s),
-                (SELECT MAX(week_date) FROM weekly_metrics WHERE market = %s AND provider = %s),
+                (SELECT MAX(price_date) FROM price_history WHERE market = %s AND provider = %s),
                 now()
             ON CONFLICT (market, provider) DO UPDATE SET
                 ticker_count = EXCLUDED.ticker_count,

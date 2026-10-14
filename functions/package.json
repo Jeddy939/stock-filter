@@ -10,13 +10,14 @@
     "build": "tsc",
     "serve": "npm run build && firebase emulators:start --only functions,hosting",
     "deploy": "npm run build && firebase deploy --only functions",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "npm run build && node test/screen-config.test.cjs && node test/request-policy.test.cjs && node test/market.test.cjs && node test/analysis-ui.test.cjs && node test/ip-rate-limit.test.cjs && node test/insights-foundation.test.cjs && node test/fetch-resilience.test.cjs && node test/weekly-snapshot.test.cjs && node test/weekly-sequential.test.cjs && node test/event-time-chart.test.cjs && node test/rule-evaluation.test.cjs"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "firebase-admin": "^12.7.0",
-    "firebase-functions": "^6.1.0",
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2",
     "google-auth-library": "^9.14.2",
     "pg": "^8.13.1"
   },

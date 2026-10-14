@@ -142,7 +142,7 @@ if ($ScheduleUpdates) {
         "--http-method=POST", "--update-headers=Content-Type=application/json", "--message-body=$asxBody",
         "--oidc-service-account-email=$schedulerEmail", "--oidc-token-audience=$ApiUrl")
     $usArgs = @("scheduler", "jobs", "update", "http", "moneymaker-daily-fetch-us", "--location=$Region",
-        "--schedule=30 7 * * 2-6", "--time-zone=Australia/Brisbane", "--uri=$ApiUrl/api/scheduled-fetch",
+        "--schedule=30 7 * * 2", "--time-zone=Australia/Brisbane", "--uri=$ApiUrl/api/scheduled-fetch",
         "--http-method=POST", "--update-headers=Content-Type=application/json", "--message-body=$usBody",
         "--oidc-service-account-email=$schedulerEmail", "--oidc-token-audience=$ApiUrl")
     foreach ($job in @(@($asxArgs, "moneymaker-daily-fetch-asx"), @($usArgs, "moneymaker-daily-fetch-us"))) {

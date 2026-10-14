@@ -17,7 +17,13 @@ from typing import Any, Dict, Iterable, List
 
 
 DEFAULT_CACHES = ["stock_cache.sqlite", "stock_cache_us.sqlite"]
-LABEL_ORDER = {"winner": 0, "potential_winner": 1, "maybe": 2, "bad": 3}
+LABEL_ORDER = {
+    "winner": 0,
+    "potential_winner": 1,
+    "needs_confirmation": 2,
+    "maybe": 3,
+    "bad": 4,
+}
 
 
 def _json_loads(raw: str) -> Dict[str, Any]:
