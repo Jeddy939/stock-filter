@@ -199,6 +199,10 @@ async function testDeployEnvPersistence() {
   assert.match(script, /MONEYMAKER_USE_TASK_QUEUE/);
   assert.match(script, /MONEYMAKER_USE_TASK_QUEUE must be 1, true, or yes/);
   assert.match(script, /"scheduledratingoutcomes"/);
+  // Replacing a function service's whole environment drops FUNCTION_TARGET.
+  assert.doesNotMatch(script, /"--set-env-vars"/);
+  assert.doesNotMatch(script, /"--set-secrets"/);
+  assert.match(script, /"--update-env-vars", \$functionEnvVars/);
   assert.match(envExample, /MONEYMAKER_USE_TASK_QUEUE=true/);
   console.log("sequential workflow: deploy env persistence passed");
 }

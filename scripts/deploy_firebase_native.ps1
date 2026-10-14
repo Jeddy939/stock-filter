@@ -92,14 +92,18 @@ try {
         $env:MONEYMAKER_USE_TASK_QUEUE = $UseTaskQueue
         Invoke-Checked $Firebase @("functions:artifacts:setpolicy", "--location", $Region, "--days", "14", "--force", "--project", $Project)
         Invoke-Checked $Firebase @("deploy", "--only", "functions", "--project", $Project)
+        # Firebase sets FUNCTION_TARGET and related variables on each function
+        # service, and several functions share one container image. Only ever
+        # add or update variables here: replacing the whole set (--set-env-vars)
+        # drops FUNCTION_TARGET and makes a service run the wrong function.
         $functionEnvVars = "MONEYMAKER_REQUIRE_AUTH=true,MONEYMAKER_CLOUD_MODE=true,GOOGLE_CLOUD_PROJECT=$Project,MONEYMAKER_RUN_REGION=$Region,MONEYMAKER_FETCH_JOB=moneymaker-fetch,MONEYMAKER_FILTER_JOB=moneymaker-filter,MONEYMAKER_IMPORT_JOB=moneymaker-import,MONEYMAKER_EXPORT_JOB=moneymaker-export,MONEYMAKER_OUTCOMES_JOB=moneymaker-rating-outcomes,MONEYMAKER_SCHEDULER_AUDIENCE=$ApiUrl,MONEYMAKER_SCHEDULER_SERVICE_ACCOUNT=moneymaker-scheduler@$Project.iam.gserviceaccount.com,FIREBASE_API_KEY=$ApiKey,FIREBASE_APP_ID=$AppId,FIREBASE_AUTH_DOMAIN=$Project.firebaseapp.com,FIREBASE_STORAGE_BUCKET=$StorageBucket,MONEYMAKER_STORAGE_BUCKET=$StorageBucket,FIREBASE_APPCHECK_SITE_KEY=$AppCheckSiteKey,MONEYMAKER_REQUIRE_APP_CHECK=$RequireAppCheck,MONEYMAKER_USE_DATA_CONNECT=$UseDataConnect,MONEYMAKER_DATACONNECT_SERVICE=moneymaker,MONEYMAKER_DATACONNECT_LOCATION=$Region,MONEYMAKER_USE_TASK_QUEUE=$UseTaskQueue"
         Invoke-Checked $Gcloud @(
             "run", "services", "update", $FunctionName,
             "--region", $Region,
             "--project", $Project,
             "--add-cloudsql-instances", $CloudSqlInstance,
-            "--set-env-vars", $functionEnvVars,
-            "--set-secrets", "MONEYMAKER_DATABASE_URL=$DatabaseSecret`:latest"
+            "--update-env-vars", $functionEnvVars,
+            "--update-secrets", "MONEYMAKER_DATABASE_URL=$DatabaseSecret`:latest"
         )
         foreach ($scheduledService in @(
             "scheduledweeklypublication",
@@ -112,8 +116,8 @@ try {
                 "--region", $Region,
                 "--project", $Project,
                 "--add-cloudsql-instances", $CloudSqlInstance,
-                "--set-env-vars", $functionEnvVars,
-                "--set-secrets", "MONEYMAKER_DATABASE_URL=$DatabaseSecret`:latest"
+                "--update-env-vars", $functionEnvVars,
+                "--update-secrets", "MONEYMAKER_DATABASE_URL=$DatabaseSecret`:latest"
             )
         }
         if (@("1", "true", "yes") -contains $DeployTaskFunctions.ToLower()) {
@@ -122,8 +126,8 @@ try {
                 "--region", $Region,
                 "--project", $Project,
                 "--add-cloudsql-instances", $CloudSqlInstance,
-                "--set-env-vars", $functionEnvVars,
-                "--set-secrets", "MONEYMAKER_DATABASE_URL=$DatabaseSecret`:latest"
+                "--update-env-vars", $functionEnvVars,
+                "--update-secrets", "MONEYMAKER_DATABASE_URL=$DatabaseSecret`:latest"
             )
         }
         Invoke-Checked $Gcloud @(
