@@ -1,4 +1,9 @@
-export const VALID_LABELS = new Set(["winner", "potential_winner", "maybe", "bad"]);
+export const VALID_LABELS = new Set([
+  "winner",
+  "needs_confirmation",
+  "maybe",
+  "bad"
+]);
 
 export const MARKET_DEFAULTS = {
   asx: {
@@ -37,6 +42,59 @@ export function rangeDays(range: unknown): number {
   }
 }
 
+export function exclusiveHistoryEndDate(now = new Date()): string {
+  const end = new Date(now.getTime());
+  end.setUTCDate(end.getUTCDate() + 1);
+  return end.toISOString().slice(0, 10);
+}
+
 export function yahooUrl(ticker: string): string {
   return `https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}`;
+}
+
+export function analysisRangeDays(range: unknown): number | null | undefined {
+  const ranges: Record<string, number | null> = {
+    "3m": 92,
+    "6m": 184,
+    "1y": 366,
+    "2y": 731,
+    "5y": 1827,
+    all: null
+  };
+  const key = String(range ?? "all").trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(ranges, key) ? ranges[key] : undefined;
+}
+
+function profileText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export type CompanyProfile = {
+  name: string;
+  sector: string;
+  industry: string;
+  country: string;
+  website: string;
+  yahoo_url: string;
+  summary: string;
+};
+
+export function normalizeCompanyProfile(info: unknown, ticker: string): CompanyProfile {
+  const raw = info && typeof info === "object" && !Array.isArray(info) ? info as Record<string, unknown> : {};
+  let summary = profileText(raw.summary) || profileText(raw.longBusinessSummary) || profileText(raw.description);
+  if (summary.length > 620) {
+    const shortened = summary.slice(0, 617).replace(/\s+\S*$/, "").replace(/[.,;:]+$/, "");
+    summary = `${shortened || summary.slice(0, 617)}...`;
+  }
+
+  const symbol = profileText(raw.symbol).toUpperCase() || ticker.trim().toUpperCase();
+  return {
+    name: profileText(raw.name) || profileText(raw.longName) || profileText(raw.shortName) || symbol,
+    sector: profileText(raw.sector),
+    industry: profileText(raw.industry),
+    country: profileText(raw.country),
+    website: profileText(raw.website),
+    yahoo_url: profileText(raw.yahoo_url) || yahooUrl(symbol),
+    summary
+  };
 }

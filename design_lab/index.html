@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MoneyMaker Design Lab</title>
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-concept="workbench">
+  <section class="design-lab" aria-labelledby="lab-title">
+    <div class="lab-heading">
+      <div>
+        <span class="eyebrow">Design exploration</span>
+        <h1 id="lab-title">MoneyMaker interface directions</h1>
+        <p>Switch concepts, navigate the mock application, rate stocks, and lock in the direction worth developing.</p>
+      </div>
+      <div class="selection-state" aria-live="polite">
+        <span>Selected direction</span>
+        <strong id="selectedConcept">None</strong>
+      </div>
+    </div>
+
+    <div class="concept-picker" aria-label="Design concepts">
+      <button class="concept-option active" type="button" data-concept-choice="workbench">
+        <span class="concept-number">01</span>
+        <span><strong>Research Workbench</strong><small>Dense, dark and chart-led</small></span>
+        <i data-lucide="monitor-dot" aria-hidden="true"></i>
+      </button>
+      <button class="concept-option" type="button" data-concept-choice="ledger">
+        <span class="concept-number">02</span>
+        <span><strong>Investment Ledger</strong><small>Light, measured and report-led</small></span>
+        <i data-lucide="book-open" aria-hidden="true"></i>
+      </button>
+      <button class="concept-option" type="button" data-concept-choice="review">
+        <span class="concept-number">03</span>
+        <span><strong>Signal Review</strong><small>Focused, decisive and queue-led</small></span>
+        <i data-lucide="list-checks" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <div class="lab-actions">
+      <p id="conceptDescription">A professional market workstation for scanning, chart inspection and rapid appraisal.</p>
+      <div>
+        <button class="quiet-action" id="clearChoice" type="button">Clear choice</button>
+        <button class="select-direction" id="selectDirection" type="button">
+          <i data-lucide="check" aria-hidden="true"></i>
+          Select this direction
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <div class="prototype-frame">
+    <header class="app-header">
+      <a class="brand" href="#" aria-label="MoneyMaker home">
+        <span class="brand-mark" aria-hidden="true">MM</span>
+        <span><strong>MoneyMaker</strong><small>Market research</small></span>
+      </a>
+
+      <nav class="primary-nav" aria-label="Application views">
+        <button class="nav-item active" type="button" data-view="market">
+          <i data-lucide="candlestick-chart" aria-hidden="true"></i>
+          Market
+        </button>
+        <button class="nav-item" type="button" data-view="analysis">
+          <i data-lucide="chart-no-axes-combined" aria-hidden="true"></i>
+          Analysis
+        </button>
+      </nav>
+
+      <div class="header-actions">
+        <button class="icon-button" id="openOperations" type="button" title="Operations" aria-label="Open operations">
+          <i data-lucide="activity" aria-hidden="true"></i>
+          <span class="operation-indicator"></span>
+        </button>
+        <button class="account-button" type="button" title="Account settings">
+          <span>JB</span><span class="account-copy"><strong>James</strong><small>Owner</small></span>
+          <i data-lucide="chevron-down" aria-hidden="true"></i>
+        </button>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <section class="app-view active" id="marketView" data-app-view="market">
+        <div class="data-status" aria-label="Market data freshness">
+          <button class="data-source active" type="button" data-market-status="asx">
+            <span class="source-dot"></span><strong>ASX</strong><span>17 Jul 2026</span>
+            <span class="source-detail">1,908 tickers · refreshed 6:12 AM AEST · next Tuesday 6:30 AM</span>
+          </button>
+          <button class="data-source" type="button" data-market-status="us">
+            <span class="source-dot"></span><strong>US</strong><span>16 Jul 2026</span>
+            <span class="source-detail">5,493 tickers · refreshed 7:04 AM AEST · next Tuesday 7:00 AM</span>
+          </button>
+          <span class="status-explainer"><i data-lucide="database" aria-hidden="true"></i> Cloud database</span>
+        </div>
+
+        <section class="screen-command" aria-label="Stock screen controls">
+          <div class="market-switch" aria-label="Market">
+            <button class="active" type="button" data-market="asx">ASX</button>
+            <button type="button" data-market="us">US</button>
+          </div>
+          <button class="screen-name" type="button">
+            <span><small>Screen</small><strong>Volume breakout above long-term MAs</strong></span>
+            <i data-lucide="chevron-down" aria-hidden="true"></i>
+          </button>
+          <label class="search-control">
+            <i data-lucide="search" aria-hidden="true"></i>
+            <input id="tickerSearch" type="search" placeholder="Ticker or company" aria-label="Ticker or company search">
+          </label>
+          <button class="settings-button" id="toggleSettings" type="button">
+            <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
+            Filters <span class="filter-count">6</span>
+          </button>
+          <button class="run-button" id="runFreshScreen" type="button">
+            <i data-lucide="play" aria-hidden="true"></i>
+            Run fresh
+          </button>
+        </section>
+
+        <section class="filter-tray" id="filterTray" hidden aria-label="Screen filters">
+          <div><span>Relative volume</span><strong>≥ 2.0×</strong></div>
+          <div><span>Lookback</span><strong>1 week</strong></div>
+          <div><span>Market cap</span><strong>Any</strong></div>
+          <div><span>Moving averages</span><strong>90 · 180 · 360 · 700</strong></div>
+          <button type="button">Edit all filters</button>
+        </section>
+
+        <section class="instrument-workspace">
+          <div class="instrument-heading">
+            <div class="instrument-identity">
+              <span class="exchange-mark" id="exchangeMark">AU</span>
+              <div>
+                <div class="ticker-line">
+                  <h2 id="activeTicker">CBA</h2>
+                  <span id="activeExchange">ASX</span>
+                  <strong id="activePrice">$168.42</strong>
+                  <span class="positive" id="activeChange">+1.18%</span>
+                </div>
+                <p id="activeCompany">Commonwealth Bank of Australia · Financial Services · Banks</p>
+              </div>
+            </div>
+            <div class="instrument-actions">
+              <a id="yahooLink" href="https://finance.yahoo.com/quote/CBA.AX" target="_blank" rel="noreferrer">
+                Yahoo Finance <i data-lucide="external-link" aria-hidden="true"></i>
+              </a>
+              <button class="icon-button" type="button" title="Open chart fullscreen" aria-label="Open chart fullscreen">
+                <i data-lucide="maximize-2" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="concept-layout">
+            <div class="chart-column">
+              <div class="chart-toolbar">
+                <div class="control-group" aria-label="Candle interval">
+                  <button class="active" type="button" data-interval="daily">D</button>
+                  <button type="button" data-interval="weekly">W</button>
+                  <button type="button" data-interval="monthly">M</button>
+                </div>
+                <div class="control-group range-controls" aria-label="Chart range">
+                  <button type="button" data-range="3m">3M</button>
+                  <button type="button" data-range="6m">6M</button>
+                  <button class="active" type="button" data-range="1y">1Y</button>
+                  <button type="button" data-range="5y">5Y</button>
+                  <button type="button" data-range="all">All</button>
+                </div>
+                <div class="ma-legend" aria-label="Moving averages">
+                  <button class="active" type="button" data-ma="30"><span style="--ma:#d7ac3d"></span>30</button>
+                  <button class="active" type="button" data-ma="90"><span style="--ma:#4ca3c7"></span>90</button>
+                  <button class="active" type="button" data-ma="180"><span style="--ma:#9172c8"></span>180</button>
+                  <button type="button" data-ma="360"><span style="--ma:#dc795b"></span>360</button>
+                  <button type="button" data-ma="700"><span style="--ma:#95a950"></span>700</button>
+                </div>
+              </div>
+              <div class="chart-stage">
+                <canvas id="conceptChart" aria-label="Mock candlestick chart"></canvas>
+              </div>
+              <p class="company-summary" id="companySummary">Australia's largest retail bank, providing consumer, business and institutional banking services across Australia and New Zealand.</p>
+            </div>
+
+            <aside class="review-rail" aria-label="Selected stock review">
+              <div class="review-progress"><span>Review queue</span><strong><b id="queueIndex">1</b> / 6</strong></div>
+              <h3>Appraise <span id="reviewTicker">CBA</span></h3>
+              <p>Record your current conviction. You can change it at any time without affecting another analyst.</p>
+              <div class="review-actions" id="reviewActions">
+                <button type="button" data-rating="winner"><span></span>Winner</button>
+                <button type="button" data-rating="potential_winner"><span></span>Potential winner</button>
+                <button type="button" data-rating="needs_confirmation"><span></span>Needs confirmation</button>
+                <button type="button" data-rating="maybe"><span></span>Maybe</button>
+                <button type="button" data-rating="bad"><span></span>Bad</button>
+              </div>
+              <label for="reviewNote">Private note</label>
+              <textarea id="reviewNote" rows="3" placeholder="Why does this stock belong here?"></textarea>
+              <div class="queue-navigation">
+                <button class="icon-button" id="previousStock" type="button" title="Previous stock" aria-label="Previous stock"><i data-lucide="arrow-left"></i></button>
+                <button id="saveAndNext" type="button">Save &amp; next <i data-lucide="arrow-right"></i></button>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="results-section">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">Latest completed screen</span>
+              <h2>Qualified stocks <span id="resultCount">6</span></h2>
+            </div>
+            <div class="scan-meta">
+              <span>Run 17 Jul 2026, 6:42 AM</span>
+              <button class="icon-button" type="button" title="Choose table columns" aria-label="Choose table columns"><i data-lucide="columns-3"></i></button>
+              <button class="icon-button" type="button" title="Export results" aria-label="Export results"><i data-lucide="download"></i></button>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table class="results-table">
+              <thead>
+                <tr>
+                  <th>Company</th><th>Close</th><th>1 week</th><th>Rel. volume</th><th>Market cap</th><th>MA history</th><th>Appraisal</th><th>Note</th>
+                </tr>
+              </thead>
+              <tbody id="resultsBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="app-view" id="analysisView" data-app-view="analysis" hidden>
+        <div class="analysis-heading">
+          <div>
+            <span class="eyebrow">Decision quality</span>
+            <h2>Appraisal performance</h2>
+            <p>Track whether high-conviction picks outperform and identify what the best selections have in common.</p>
+          </div>
+          <div class="analysis-filters">
+            <select aria-label="Analysis market"><option>All markets</option><option>ASX</option><option>US</option></select>
+            <select aria-label="Outcome horizon"><option>90-day outcome</option><option>30-day outcome</option><option>180-day outcome</option><option>Current return</option></select>
+            <button type="button"><i data-lucide="refresh-cw"></i> Refresh</button>
+          </div>
+        </div>
+
+        <div class="analysis-scoreboard">
+          <div><span>Winner hit rate</span><strong>68.4%</strong><small>+11.2 pts vs all picks</small></div>
+          <div><span>Winner median return</span><strong>+14.8%</strong><small>90-day outcome</small></div>
+          <div><span>Active winners</span><strong>19</strong><small>7 awaiting outcome</small></div>
+          <div><span>Needs confirmation</span><strong>8</strong><small>Oldest is 12 days</small></div>
+        </div>
+
+        <div class="analysis-grid">
+          <section class="analysis-module performance-module">
+            <div class="module-heading"><div><span class="eyebrow">Conviction calibration</span><h3>Performance by appraisal</h3></div><span>42 priced picks</span></div>
+            <div class="performance-list">
+              <div><span class="rating-key winner">Winner</span><strong>+18.6%</strong><div class="return-bar"><i style="width:86%"></i></div><small>68% positive</small></div>
+              <div><span class="rating-key potential_winner">Potential</span><strong>+9.4%</strong><div class="return-bar"><i style="width:61%"></i></div><small>59% positive</small></div>
+              <div><span class="rating-key needs_confirmation">Confirm</span><strong>+3.1%</strong><div class="return-bar"><i style="width:42%"></i></div><small>52% positive</small></div>
+              <div><span class="rating-key maybe">Maybe</span><strong>-1.8%</strong><div class="return-bar negative"><i style="width:26%"></i></div><small>44% positive</small></div>
+              <div><span class="rating-key bad">Bad</span><strong>-8.2%</strong><div class="return-bar negative"><i style="width:55%"></i></div><small>25% positive</small></div>
+            </div>
+          </section>
+
+          <section class="analysis-module cohort-module">
+            <div class="module-heading"><div><span class="eyebrow">Winner fingerprint</span><h3>What winners share</h3></div><button class="icon-button" type="button" title="More information"><i data-lucide="info"></i></button></div>
+            <div class="cohort-list">
+              <div><strong>3.4×</strong><span>Median relative volume</span><small>vs 2.2× all picks</small></div>
+              <div><strong>+$1.2B</strong><span>Median market cap</span><small>Larger than other groups</small></div>
+              <div><strong>71%</strong><span>Above MA 180 after 30d</span><small>Most persistent signal</small></div>
+              <div><strong>Industrials</strong><span>Best-performing sector</span><small>6 of 8 picks positive</small></div>
+            </div>
+          </section>
+        </div>
+
+        <section class="analysis-module attention-module">
+          <div class="module-heading"><div><span class="eyebrow">Action queue</span><h3>Winners needing attention</h3></div><span>Sorted by risk</span></div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Company</th><th>Rated</th><th>Return</th><th>MA status</th><th>Reason</th><th>Action</th></tr></thead>
+              <tbody>
+                <tr><td><strong>IBRX</strong><small>ImmunityBio</small></td><td>Winner · 24d</td><td class="negative">-7.4%</td><td>Below MA 90</td><td>Momentum weakened</td><td><button type="button">Review</button></td></tr>
+                <tr><td><strong>OIL.AX</strong><small>Optiscan Imaging</small></td><td>Winner · 41d</td><td class="positive">+5.8%</td><td>Near MA 180</td><td>Volume normalization</td><td><button type="button">Review</button></td></tr>
+                <tr><td><strong>CGS.AX</strong><small>Cogstate</small></td><td>Potential · 18d</td><td class="negative">-2.1%</td><td>Below MA 30</td><td>Early signal failure</td><td><button type="button">Review</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <aside class="operations-drawer" id="operationsDrawer" aria-label="Operations" aria-hidden="true">
+      <div class="drawer-heading">
+        <div><span class="eyebrow">Background activity</span><h2>Screen operation</h2></div>
+        <button class="icon-button" id="closeOperations" type="button" title="Close operations" aria-label="Close operations"><i data-lucide="x"></i></button>
+      </div>
+      <div class="operation-summary"><span class="operation-spinner"></span><div><strong id="operationTitle">Ready</strong><small id="operationMessage">No process is currently running.</small></div></div>
+      <div class="operation-progress"><span id="operationFill"></span></div>
+      <ol class="operation-stages" id="operationStages">
+        <li data-stage="0"><span></span><div><strong>Queued</strong><small>Waiting for worker</small></div></li>
+        <li data-stage="1"><span></span><div><strong>Loading snapshot</strong><small>Read market metrics</small></div></li>
+        <li data-stage="2"><span></span><div><strong>Applying criteria</strong><small>Evaluate supported filters</small></div></li>
+        <li data-stage="3"><span></span><div><strong>Ranking matches</strong><small>Order qualified stocks</small></div></li>
+        <li data-stage="4"><span></span><div><strong>Complete</strong><small>Results are ready</small></div></li>
+      </ol>
+      <details><summary>Technical details</summary><pre>Job ID: demo-screen-2026-07-18&#10;Snapshot: weekly_metrics_us&#10;Config hash: 4a92f7d1</pre></details>
+    </aside>
+    <div class="drawer-scrim" id="drawerScrim"></div>
+  </div>
+
+  <section class="reference-note">
+    <details>
+      <summary>Patterns and sources used in these concepts</summary>
+      <p>These are original concepts informed by established financial and enterprise interfaces, not copied templates.</p>
+      <ul>
+        <li><a href="https://www.tradingview.com/support/solutions/43000718866-tradingview-stock-screener-trade-smarter-not-harder/" target="_blank" rel="noreferrer">TradingView Screener</a>: hideable filters, saved screens and configurable columns.</li>
+        <li><a href="https://finviz.com/blog/access-stock-screens-from-advanced-charts-on-finviz/" target="_blank" rel="noreferrer">Finviz screen and chart workflow</a>: fast movement from a result list into chart inspection.</li>
+        <li><a href="https://www.koyfin.com/help/topic/functionality/" target="_blank" rel="noreferrer">Koyfin workspaces</a>: reusable views and linked market-research modules.</li>
+        <li><a href="https://carbondesignsystem.com/components/data-table/usage/" target="_blank" rel="noreferrer">IBM Carbon data tables</a>: dense table sizing, toolbars and accessible interactions.</li>
+        <li><a href="https://lucide.dev/" target="_blank" rel="noreferrer">Lucide</a>: consistent open-source interface icons.</li>
+      </ul>
+    </details>
+  </section>
+
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

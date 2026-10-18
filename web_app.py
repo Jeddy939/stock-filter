@@ -15,7 +15,7 @@ import sys
 import threading
 import traceback
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -299,7 +299,7 @@ def _write_central_rating_json_event(event: Dict[str, Any]) -> None:
                 if isinstance(loaded, list):
                     events = [item for item in loaded if isinstance(item, dict)]
             except json.JSONDecodeError:
-                backup = json_path.with_suffix(f".bad-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.json")
+                backup = json_path.with_suffix(f".bad-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}.json")
                 json_path.replace(backup)
                 events = []
 
@@ -313,7 +313,7 @@ def _queue_google_sheets_rating_event(event: Dict[str, Any], error: str) -> None
     pending_path = _sheets_pending_path()
     pending_path.parent.mkdir(parents=True, exist_ok=True)
     queued = dict(event)
-    queued["queued_at_utc"] = datetime.utcnow().isoformat(timespec="seconds")
+    queued["queued_at_utc"] = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
     queued["queue_error"] = error[:1000]
     with RATING_FILE_LOCK:
         with pending_path.open("a", encoding="utf-8") as handle:
@@ -857,6 +857,9 @@ def _filter_config(payload: Dict[str, Any]) -> Dict[str, Any]:
     config["min_market_cap"] = float(payload.get("min_market_cap", config["min_market_cap"]))
     config["max_market_cap"] = float(payload.get("max_market_cap", config["max_market_cap"]))
     config["lookback_weeks"] = int(payload.get("lookback_weeks", config["lookback_weeks"]))
+    config["exclude_above_180_ma_2y"] = str(
+        payload.get("exclude_above_180_ma_2y", "false")
+    ).strip().lower() in {"1", "true", "yes", "on"}
     config["ma_periods"] = {
         "short": int(payload.get("ma_short", config["ma_periods"]["short"])),
         "intermediate": int(payload.get("ma_intermediate", config["ma_periods"]["intermediate"])),
@@ -1184,7 +1187,7 @@ def _save_scan(
 ) -> int:
     with _connect_write(cache_file) as conn:
         _ensure_scan_schema(conn)
-        now = datetime.utcnow().isoformat(timespec="seconds")
+        now = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
         cursor = conn.execute(
             """
             INSERT INTO scan_runs (
@@ -1297,7 +1300,10 @@ def _upsert_tracked_pick(conn: sqlite3.Connection, pick: Dict[str, Any]) -> Dict
     if not ticker:
         raise ValueError("ticker is required")
 
-    updated_at = str(pick.get("updated_at_utc") or datetime.utcnow().isoformat(timespec="seconds"))
+    updated_at = str(
+        pick.get("updated_at_utc")
+        or datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
+    )
     added_at = str(pick.get("added_at_utc") or updated_at)
     existing = conn.execute(
         "SELECT added_at_utc, updated_at_utc FROM tracked_picks WHERE market = ? AND ticker = ?",
@@ -1554,7 +1560,7 @@ def _label_scan_result(payload: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f"{ticker} is not in scan {scan_id}")
         market = _infer_market(scan_row["scan_cache_file"] or cache_file, payload.get("market"))
 
-        labeled_at = datetime.utcnow().isoformat(timespec="seconds")
+        labeled_at = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
         if label in ("", "clear", "none", "unlabelled", "unlabeled"):
             conn.execute("DELETE FROM scan_labels WHERE scan_id = ? AND ticker = ?", (scan_id, ticker))
             conn.execute("DELETE FROM tracked_picks WHERE market = ? AND ticker = ?", (market, ticker))
@@ -2010,7 +2016,7 @@ def _labelled_selection_rows(cache_file: str, scan_id: Optional[int] = None) -> 
 
 
 def _selection_report_text(rows: Sequence[Dict[str, Any]], cache_file: str, scan_id: Optional[int]) -> str:
-    exported_at = datetime.utcnow().isoformat(timespec="seconds")
+    exported_at = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
     lines = [
         "Moneymaker labelled selections",
         f"Exported at UTC: {exported_at}",

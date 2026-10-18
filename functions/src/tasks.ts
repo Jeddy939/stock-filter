@@ -44,6 +44,11 @@ async function waitForChildFetchJob(jobId: string): Promise<void> {
   throw new Error(`Timed out waiting for child fetch job ${jobId}; last status ${lastStatus}: ${lastDetail.slice(0, 1000)}`);
 }
 
+async function childFetchStatus(jobId: string): Promise<string> {
+  const result = await db().query("SELECT status FROM job_runs WHERE id = $1", [jobId]);
+  return String(result.rows[0]?.status ?? "missing");
+}
+
 export const refreshTickerBatch = onTaskDispatched<RefreshTickerBatchPayload>(
   {
     region: "australia-southeast1",
@@ -63,13 +68,21 @@ export const refreshTickerBatch = onTaskDispatched<RefreshTickerBatchPayload>(
       throw new Error("refreshJobId, refreshBatchId, parentJobId, market, and tickers are required");
     }
 
-    await db().query(
+    const batchState = await db().query(
       `
       UPDATE refresh_batches
       SET status = 'running', attempts = attempts + 1, started_at_utc = COALESCE(started_at_utc, NOW())
-      WHERE id = $1 AND refresh_job_id = $2
+      WHERE id = $1 AND refresh_job_id = $2 AND status <> 'succeeded'
+      RETURNING status
       `,
       [data.refreshBatchId, data.refreshJobId]
+    );
+    if (!batchState.rows[0]) return;
+    await db().query(
+      `UPDATE refresh_jobs
+       SET status = 'running', stage = 'Fetching batches', error = NULL, finished_at_utc = NULL
+       WHERE id = $1`,
+      [data.refreshJobId]
     );
 
     const existingDispatch = await db().query(
@@ -82,8 +95,12 @@ export const refreshTickerBatch = onTaskDispatched<RefreshTickerBatchPayload>(
     );
     const existingChildJobId = String(existingDispatch.rows[0]?.child_job_id ?? "").trim();
     if (existingChildJobId) {
-      await waitForChildFetchJob(existingChildJobId);
-      return;
+      const status = await childFetchStatus(existingChildJobId);
+      if (status === "succeeded") return;
+      if (["queued", "running"].includes(status)) {
+        await waitForChildFetchJob(existingChildJobId);
+        return;
+      }
     }
 
     const jobId = crypto.randomUUID();
