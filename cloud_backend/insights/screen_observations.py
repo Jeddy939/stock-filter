@@ -21,7 +21,7 @@ from psycopg.types.json import Jsonb
 from .anchor import session_complete_utc
 from .features import FEATURE_VERSION, FeatureValue, calculate_technical_features
 from .fundamentals import point_in_time_fundamentals
-from .outcomes import OUTCOME_VERSION, measure_outcomes
+from .outcomes import OUTCOME_VERSION, measure_outcomes, price_provider_sql
 
 
 # Enough daily sessions for the longest feature (700-week moving average).
@@ -62,16 +62,30 @@ def seed_screen_observations(
 ) -> int:
     """Queue one observation per screened stock-week; retry-safe."""
     with connection.cursor() as cursor:
+        # Observations queued under a source with no stored prices could never
+        # be built; drop those failures so they are re-queued under the
+        # provider that actually holds the prices.
         cursor.execute(
-            """
+            f"""
+            DELETE FROM screen_observations
+            WHERE feature_version = %(feature_version)s
+              AND snapshot_status = 'failed'
+              AND provider <> {price_provider_sql("provider")}
+              AND (%(market)s::text IS NULL OR market = %(market)s)
+            """,
+            {"market": market, "feature_version": feature_version},
+        )
+        cursor.execute(
+            f"""
             INSERT INTO screen_observations (market, provider, ticker, signal_date, feature_version)
             SELECT DISTINCT screened.market, screened.provider, screened.ticker, screened.signal_date, %(feature_version)s
             FROM (
-                SELECT lower(run.market) AS market, run.provider, hit.ticker, hit.signal_date
+                SELECT lower(run.market) AS market, {price_provider_sql("run.provider")} AS provider,
+                       hit.ticker, hit.signal_date
                 FROM scan_results hit
                 JOIN scan_runs run ON run.id = hit.scan_id
                 UNION ALL
-                SELECT lower(run.market), run.provider, miss.ticker, miss.signal_date
+                SELECT lower(run.market), {price_provider_sql("run.provider")}, miss.ticker, miss.signal_date
                 FROM scan_near_misses miss
                 JOIN scan_runs run ON run.id = miss.scan_id
             ) screened

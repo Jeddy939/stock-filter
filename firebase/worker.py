@@ -1053,7 +1053,9 @@ def run_insight_analysis(data: dict[str, Any]) -> dict[str, Any]:
                       ON snapshot.rating_event_id = CASE
                            WHEN %s = 'origin' THEN decisions.origin_event_id ELSE decisions.id END
                      AND snapshot.feature_version = %s
-                     AND snapshot.snapshot_status = 'complete'
+                     -- US snapshots are 'partial' when SEC filings are missing; their
+                     -- price features are complete and fundamentals count as missing.
+                     AND snapshot.snapshot_status IN ('complete', 'partial')
                 ), measured AS (
                     SELECT selected.*, snapshot.feature_as_of_date,
                            outcome.benchmark_excess_return_percent,

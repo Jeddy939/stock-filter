@@ -28,12 +28,22 @@ OUTCOME_HORIZON_TOLERANCE_DAYS = 7
 # least this many days after the ticker's final bar.
 OUTCOME_TERMINATION_SILENCE_DAYS = 21
 
-RATING_OUTCOME_CANDIDATES_CTE = """
+def price_provider_sql(column: str) -> str:
+    """SQL mapping a recorded source to the provider that stores its prices.
+
+    Only yfinance and the opt-in stooq source write price_history. Scans and
+    ratings recorded under other sources (blank, google_sheets_import) were
+    priced from yfinance, so their prices are looked up there.
+    """
+    return f"CASE WHEN lower(COALESCE({column}, '')) = 'stooq' THEN 'stooq' ELSE 'yfinance' END"
+
+
+RATING_OUTCOME_CANDIDATES_CTE = f"""
     candidates AS (
         SELECT
             id,
             market,
-            COALESCE(NULLIF(provider, ''), 'yfinance') AS provider,
+            {price_provider_sql("provider")} AS provider,
             ticker,
             appraisal_cutoff_date(market, event_at_utc) AS cutoff_day,
             CASE WHEN lower(market) = 'asx' THEN '^AORD' ELSE 'SPY' END AS benchmark_ticker

@@ -3743,7 +3743,7 @@
         const coverage = overview.coverage || {};
         $("insightsTotalEvents").textContent = fmt.format(Number(coverage.total_events || 0));
         $("insightsMatureEvents").textContent = fmt.format(Number(coverage.mature_events || 0));
-        $("insightsSnapshotCount").textContent = fmt.format(Number(coverage.complete_snapshots || 0));
+        $("insightsSnapshotCount").textContent = fmt.format(Number(coverage.usable_snapshots ?? coverage.complete_snapshots ?? 0));
         $("insightsFundamentalCoverage").textContent = `${Number(coverage.fundamental_coverage_percent || 0).toFixed(1)}%`;
         $("insightsAnalysisLevel").textContent = labelText(overview.analysis_level || "coverage");
         $("insightsStatus").textContent = overview.minimum_sample_message || "Coverage loaded";

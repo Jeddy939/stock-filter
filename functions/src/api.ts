@@ -2517,10 +2517,11 @@ apiApp.get("/api/analysis/insights/overview", asyncRoute(async (req, res) => {
       -- Matches the analysis worker: complete snapshot, current outcome
       -- definition, and one stock per anchor week.
       COUNT(DISTINCT (market, ticker, date_trunc('week', feature_as_of_date))) FILTER (
-        WHERE outcome.rating_event_id IS NOT NULL AND snapshot_status = 'complete'
+        WHERE outcome.rating_event_id IS NOT NULL AND snapshot_status IN ('complete', 'partial')
       )::int AS mature_events,
       COUNT(outcome.rating_event_id)::int AS mature_appraisals,
       COUNT(snapshot_id) FILTER (WHERE snapshot_status = 'complete')::int AS complete_snapshots,
+      COUNT(snapshot_id) FILTER (WHERE snapshot_status IN ('complete', 'partial'))::int AS usable_snapshots,
       COUNT(snapshot_id) FILTER (WHERE snapshot_status = 'partial')::int AS partial_snapshots,
       COUNT(*) FILTER (WHERE snapshot_id IS NULL)::int AS missing_snapshots,
       ROUND(
@@ -2574,6 +2575,11 @@ apiApp.get("/api/analysis/insights/overview", asyncRoute(async (req, res) => {
   });
 }));
 
+// Matches price_provider_sql in cloud_backend/insights/outcomes.py: only
+// yfinance and stooq store prices, so other recorded sources price from yfinance.
+const PRICE_PROVIDER_SQL = (column: string) =>
+  `CASE WHEN lower(COALESCE(${column}, '')) = 'stooq' THEN 'stooq' ELSE 'yfinance' END`;
+
 // Screen observations (hits and near-misses) measured from their signal week,
 // with how the in-scope users labelled each stock-week. $1 market (null = all),
 // $2 owner uid (null = team), $3 horizon, $4 feature version, $5 outcome version.
@@ -2609,14 +2615,14 @@ const SELECTION_COMPARISON_CTE = `
       SELECT COUNT(*)::int AS hit_count, MAX(result.volume_ratio) AS volume_ratio
       FROM scan_results result
       JOIN scan_runs run ON run.id = result.scan_id
-      WHERE lower(run.market) = observation.market AND run.provider = observation.provider
+      WHERE lower(run.market) = observation.market AND ${PRICE_PROVIDER_SQL("run.provider")} = observation.provider
         AND result.ticker = observation.ticker AND result.signal_date = observation.signal_date
     ) hit ON TRUE
     LEFT JOIN LATERAL (
       SELECT near.failed_rule, near.volume_ratio
       FROM scan_near_misses near
       JOIN scan_runs run ON run.id = near.scan_id
-      WHERE lower(run.market) = observation.market AND run.provider = observation.provider
+      WHERE lower(run.market) = observation.market AND ${PRICE_PROVIDER_SQL("run.provider")} = observation.provider
         AND near.ticker = observation.ticker AND near.signal_date = observation.signal_date
       ORDER BY near.id DESC LIMIT 1
     ) miss ON TRUE
@@ -3043,7 +3049,7 @@ apiApp.post("/api/analysis/insights/rules/:ruleId/evaluate", asyncRoute(async (r
        AND outcome.outcome_version = $5
       JOIN pick_feature_values value ON value.snapshot_id = snapshot.id
       JOIN feature_definitions definition ON definition.id = value.feature_definition_id
-      WHERE snapshot.feature_version = $4 AND snapshot.snapshot_status = 'complete'
+      WHERE snapshot.feature_version = $4 AND snapshot.snapshot_status IN ('complete', 'partial')
         AND event.action = 'label' AND event.label = 'winner'
         AND event.firebase_uid = $2
         AND ($3::text IS NULL OR snapshot.market = $3)

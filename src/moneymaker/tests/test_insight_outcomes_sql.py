@@ -12,17 +12,17 @@ from moneymaker.tests.postgres_support import PostgresSchemaTestCase
 
 
 class OutcomeSqlTests(PostgresSchemaTestCase):
-    def rating(self, ticker, event_at, *, close_price=None, signal_date=None):
+    def rating(self, ticker, event_at, *, close_price=None, signal_date=None, provider="yfinance"):
         with self.conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO rating_events (
                     event_at_utc, action, market, provider, ticker, label,
                     signal_date, close_price, firebase_uid
-                ) VALUES (%s, 'label', 'us', 'yfinance', %s, 'winner', %s, %s, 'uid-1')
+                ) VALUES (%s, 'label', 'us', %s, %s, 'winner', %s, %s, 'uid-1')
                 RETURNING id
                 """,
-                (event_at, ticker, signal_date, close_price),
+                (event_at, provider, ticker, signal_date, close_price),
             )
             event_id = cur.fetchone()[0]
         self.conn.commit()
@@ -103,6 +103,18 @@ class OutcomeSqlTests(PostgresSchemaTestCase):
         self.assertAlmostEqual(return_percent, -60.0)
         self.assertEqual(outcome_date, date(2026, 2, 13))
         self.assertEqual(quality["horizon_status"], "terminated_last_price")
+
+    def test_rating_from_imported_source_is_priced_from_yfinance(self):
+        # Ratings imported from Google Sheets carry provider google_sheets_import,
+        # which has no price history of its own.
+        self.bars("SPY", date(2026, 1, 1), date(2026, 6, 30), lambda day: 100.0)
+        self.bars("AAA", date(2026, 1, 1), date(2026, 6, 30), lambda day: 10.0 if day <= date(2026, 2, 4) else 11.0)
+        imported = self.rating("AAA", datetime(2026, 2, 5, 1, 0, tzinfo=timezone.utc), provider="google_sheets_import")
+        blank = self.rating("AAA", datetime(2026, 2, 6, 1, 0, tzinfo=timezone.utc), provider="")
+
+        self.assertEqual(self.measure()["measured_count"], 2)
+        self.assertAlmostEqual(self.outcome(imported)[2], 10.0)
+        self.assertEqual(self.outcome(blank)[6]["provider"], "yfinance")
 
     def test_final_outcomes_are_not_remeasured_unless_requested(self):
         from cloud_backend.insights.outcomes import measure_rating_outcomes

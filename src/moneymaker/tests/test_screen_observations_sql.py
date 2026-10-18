@@ -146,6 +146,94 @@ class ScreenObservationTests(PostgresSchemaTestCase):
         self.assertEqual(measure_screen_outcomes(self.conn, market="us", horizons=[28], limit=1000)[0]["measured_count"], 0)
 
 
+class ImportedSourceTests(PostgresSchemaTestCase):
+    def test_imported_scan_is_observed_under_yfinance_and_stale_failure_replaced(self):
+        from cloud_backend.insights.screen_observations import refresh_screen_observations
+
+        self.bars("SPY", date(2025, 1, 1), date(2026, 6, 30), lambda day: 100.0)
+        self.bars("OLD", date(2025, 1, 1), date(2026, 6, 30), lambda day: 12.0 if day > SIGNAL else 10.0)
+        scan_id = self.conn.execute(
+            """
+            INSERT INTO scan_runs (market, source_id, created_at_utc, provider, cache_file, scanned_count,
+                                   result_count, skipped_no_history, config_json, ticker_universe_json)
+            VALUES ('us', 1, now(), 'google_sheets_import', 'test', 1, 1, 0, '{}', '[]') RETURNING id
+            """
+        ).fetchone()[0]
+        self.conn.execute(
+            "INSERT INTO scan_results (scan_id, source_id, rank, ticker, signal_date, result_json) VALUES (%s, 1, 1, 'OLD', %s, '{}')",
+            (scan_id, SIGNAL),
+        )
+        # A failure left by the old behaviour, queued under the import source.
+        self.conn.execute(
+            """
+            INSERT INTO screen_observations (market, provider, ticker, signal_date, feature_version, snapshot_status, error)
+            VALUES ('us', 'google_sheets_import', 'OLD', %s, 3, 'failed', 'No price history existed at the signal date')
+            """,
+            (SIGNAL,),
+        )
+        self.conn.commit()
+
+        result = refresh_screen_observations(self.conn, market="us", horizons=[28], limit=1000)
+
+        rows = self.conn.execute("SELECT provider, snapshot_status FROM screen_observations ORDER BY id").fetchall()
+        self.assertEqual(rows, [("yfinance", "partial")])
+        self.assertEqual(result["outcomes"][0]["measured_count"], 1)
+
+
+class InsightAnalysisSelectionTests(PostgresSchemaTestCase):
+    def test_partial_us_snapshots_are_analysed(self):
+        import firebase.worker as worker
+        from psycopg.types.json import Jsonb as JsonbValue
+        from moneymaker.tests.postgres_support import DATABASE_URL
+
+        start = date(2026, 1, 5)
+        for index in range(24):
+            anchor = start + timedelta(days=7 * index)
+            event_id = self.conn.execute(
+                """
+                INSERT INTO rating_events (event_at_utc, action, market, provider, ticker, label, signal_date, firebase_uid)
+                VALUES (%s, 'label', %s, 'google_sheets_import', %s, 'winner', %s, 'uid-1') RETURNING id
+                """,
+                (datetime.combine(anchor, datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=22),
+                 "us" if index % 3 else "asx", f"T{index}", anchor),
+            ).fetchone()[0]
+            self.conn.execute(
+                """
+                INSERT INTO pick_feature_snapshots (rating_event_id, origin_event_id, firebase_uid, market, ticker,
+                    appraisal_label, appraisal_at_utc, feature_as_of_date, feature_version, snapshot_status, technical_json)
+                VALUES (%s, %s, 'uid-1', %s, %s, 'winner', now(), %s, 3, %s, %s)
+                """,
+                (event_id, event_id, "us" if index % 3 else "asx", f"T{index}", anchor,
+                 "partial" if index % 3 else "complete", JsonbValue({"return_5d_pct": {"value": float(index)}})),
+            )
+            self.conn.execute(
+                """
+                INSERT INTO rating_outcomes (rating_event_id, horizon_days, measured_at_utc, price_at_signal,
+                    price_at_horizon, return_percent, benchmark_excess_return_percent, outcome_version)
+                VALUES (%s, 28, now(), 10, 11, 10, %s, 2)
+                """,
+                (event_id, float(index)),
+            )
+        self.conn.commit()
+
+        separator = "&" if "?" in DATABASE_URL else "?"
+        original = (os.environ.get("MONEYMAKER_DATABASE_URL"), worker.update_job, worker.job_id)
+        os.environ["MONEYMAKER_DATABASE_URL"] = f"{DATABASE_URL}{separator}options=-csearch_path%3D{self.schema}"
+        worker.update_job = lambda **values: None
+        worker.job_id = lambda: "00000000-0000-0000-0000-000000000001"
+        try:
+            result = worker.run_insight_analysis({"market": "all", "scope": "team", "horizon_days": 28})
+        finally:
+            if original[0] is None:
+                os.environ.pop("MONEYMAKER_DATABASE_URL", None)
+            else:
+                os.environ["MONEYMAKER_DATABASE_URL"] = original[0]
+            worker.update_job, worker.job_id = original[1], original[2]
+
+        # 16 US (partial) + 8 ASX (complete) winners all count.
+        self.assertEqual(result["mature_count"], 24)
+
+
 class DailyOutcomesJobTests(PostgresSchemaTestCase):
     def test_daily_job_builds_rating_snapshots_and_screen_observations(self):
         import firebase.worker as worker
