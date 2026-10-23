@@ -11,7 +11,7 @@ import {
   startScheduledMarketRefresh,
   startSnapshotPublishJob
 } from "./api";
-import {databaseState, startDatabase, stopDatabase} from "./database-lifecycle";
+import {databaseState, lastAppActivity, latestActivity, startDatabase, stopDatabase} from "./database-lifecycle";
 
 const region = "australia-southeast1";
 const timeZone = "Australia/Brisbane";
@@ -485,7 +485,8 @@ export async function stopIdleDatabase(now = new Date()): Promise<Record<string,
   );
   const activeCount = Number(activity.rows[0]?.active_count ?? 0);
   if (activeCount > 0) return {ok: true, skipped: true, reason: "Background jobs are active", active_count: activeCount};
-  const lastActivity = activity.rows[0]?.last_activity_at ? new Date(activity.rows[0].last_activity_at) : null;
+  const lastJobActivity = activity.rows[0]?.last_activity_at ? new Date(activity.rows[0].last_activity_at) : null;
+  const lastActivity = latestActivity(lastJobActivity, await lastAppActivity());
   if (lastActivity && now.getTime() - lastActivity.getTime() < 30 * 60_000) {
     return {ok: true, skipped: true, reason: "Database has not been idle for 30 minutes", last_activity_at: lastActivity};
   }

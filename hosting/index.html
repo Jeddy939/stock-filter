@@ -1321,6 +1321,66 @@
       white-space: nowrap;
       border: 0;
     }
+    .trigger-page .analysis-tools input[type="search"] { width: 170px; min-height: 34px; }
+    .trigger-table-wrap { max-height: calc(100vh - 205px); border: 1px solid var(--line); border-radius: 6px; }
+    .trigger-table { min-width: 940px; border: 0; border-radius: 0; }
+    .trigger-table thead { position: sticky; top: 0; z-index: 5; }
+    .trigger-table th:nth-child(1) { width: 18%; }
+    .trigger-table th:nth-child(2) { width: 7%; }
+    .trigger-table th:nth-child(3) { width: 13%; }
+    .trigger-table th:nth-child(4), .trigger-table th:nth-child(5), .trigger-table th:nth-child(6) { width: 9%; }
+    .trigger-table th:nth-child(7) { width: 18%; }
+    .trigger-table th:nth-child(8) { width: 11%; }
+    .trigger-table th:nth-child(9) { width: 64px; }
+    .trigger-table td { vertical-align: top; }
+    .trigger-table td:nth-child(2), .trigger-table th:nth-child(2),
+    .trigger-table td:nth-child(3), .trigger-table th:nth-child(3),
+    .trigger-table td:nth-child(7), .trigger-table th:nth-child(7) { text-align: left; }
+    .trigger-row-hit td { background: rgba(69, 189, 130, .09); }
+    .trigger-row-hit td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+    .trigger-sub {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.3;
+      white-space: normal;
+    }
+    .trigger-sub.warn { color: var(--warn); }
+    .trigger-badge {
+      display: inline-block;
+      padding: 1px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .trigger-badge.hit { color: #07140d; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+    .trigger-badge.bad { color: var(--bad); border-color: #8f3d3d; }
+    .trigger-distance.at { color: var(--accent); font-weight: 700; }
+    .trigger-distance.near { color: var(--warn); font-weight: 600; }
+    .trigger-edit { min-height: 26px; padding: 3px 9px; font-size: 12px; }
+    .trigger-empty {
+      margin-bottom: 10px;
+      padding: 22px;
+      border: 1px dashed var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      text-align: center;
+    }
+    .trigger-empty p { margin: 0 0 12px; }
+    .trigger-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin-top: 12px; }
+    .trigger-form label, .trigger-bulk-form label { margin: 0; }
+    .trigger-form input, .trigger-form select, .trigger-bulk-form select, .trigger-bulk-form textarea { display: block; margin-top: 5px; }
+    .trigger-bulk-form { display: grid; gap: 10px; margin-top: 12px; }
+    .trigger-bulk-form textarea { min-height: 170px; font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
+    .trigger-hint { margin: 0; color: var(--muted); font-size: 12px; }
+    .trigger-modal-status { margin: 12px 0 0; white-space: normal; }
+    @media (max-width: 600px) {
+      .trigger-form { grid-template-columns: 1fr; }
+      .trigger-page .analysis-tools input[type="search"] { flex: 1; width: auto; min-width: 0; }
+      .trigger-table-wrap { max-height: none; }
+    }
     @media (max-width: 940px) {
       main, body.cloud-mode main { display: block; }
       aside, body.cloud-mode aside { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -1416,6 +1476,7 @@
       <nav class="app-tabs" id="appTabs" aria-label="Application views">
         <button id="marketTab" class="active" type="button" aria-pressed="true">Market</button>
         <button id="analysisTab" type="button" aria-pressed="false">Analysis</button>
+        <button id="triggersTab" type="button" aria-pressed="false">Triggers</button>
       </nav>
       <button class="status-line" id="topStatus" type="button" disabled>Connecting to market data...</button>
       <button class="status-line" id="weeklyRunStatus" type="button" hidden aria-live="polite" title="Open weekly update progress"></button>
@@ -1591,6 +1652,14 @@
 
       <div class="panel admin-panel" id="adminPanel" hidden>
         <h2>Data Operations</h2>
+        <section class="admin-section" aria-labelledby="liveDatabaseHeading">
+          <h3 id="liveDatabaseHeading">Live database</h3>
+          <div class="manual-refresh-actions">
+            <button id="startLiveDatabase" type="button" title="Start Cloud SQL so the analysis tools can use it">Start database</button>
+            <button id="stopLiveDatabase" type="button" title="Stop Cloud SQL now instead of waiting for the idle shutdown">Stop database</button>
+          </div>
+          <span class="status-line admin-status" id="liveDatabaseStatus">Status not checked</span>
+        </section>
         <section class="admin-section" aria-labelledby="marketRefreshHeading">
           <h3 id="marketRefreshHeading">Market data</h3>
           <div class="manual-refresh-actions">
@@ -1955,6 +2024,76 @@
       </section>
     </section>
   </section>
+
+  <section class="analysis-page trigger-page" id="triggersPage" hidden>
+    <div class="analysis-heading">
+      <div>
+        <h2>Trigger levels</h2>
+        <p id="triggerRulesText">A stock triggers when its price touches its moving average at any point in a bar, and stays flagged for 6 months.</p>
+      </div>
+      <div class="analysis-tools">
+        <div class="analysis-segment" id="triggerMarketFilter" aria-label="Trigger market">
+          <button class="active" type="button" data-trigger-market="all" aria-pressed="true">All</button>
+          <button type="button" data-trigger-market="us" aria-pressed="false">US</button>
+          <button type="button" data-trigger-market="asx" aria-pressed="false">ASX</button>
+          <button type="button" data-trigger-market="crypto" aria-pressed="false">Crypto</button>
+        </div>
+        <input id="triggerSearch" type="search" placeholder="Search ticker or name" aria-label="Search trigger list">
+        <button id="triggerScanNow" type="button" hidden>Scan now</button>
+        <button class="primary" id="triggerAddOpen" type="button" hidden>Add stocks</button>
+      </div>
+    </div>
+    <div class="analysis-statusbar" aria-live="polite">
+      <span>Triggered <strong id="triggerCountHit">-</strong></span>
+      <span>Watching <strong id="triggerCountWatching">-</strong></span>
+      <span>Short-history MA <strong id="triggerCountFallback">-</strong></span>
+      <span>Not enough data <strong id="triggerCountInsufficient">-</strong></span>
+      <span>No data <strong id="triggerCountError">-</strong></span>
+      <span>Last scan <strong id="triggerLastScan">-</strong></span>
+      <span id="triggerStatus">Open Triggers to load the list.</span>
+    </div>
+    <div class="trigger-empty" id="triggerEmpty" hidden>
+      <p>The trigger list is empty.</p>
+      <button class="primary" id="triggerSeed" type="button" hidden>Load Brady's starting list</button>
+    </div>
+    <div class="results-wrap trigger-table-wrap">
+      <table class="trigger-table">
+        <thead><tr><th>Ticker</th><th>Market</th><th>Trigger MA</th><th>Price</th><th>MA value</th><th title="How far the price is above (+) or below (-) the trigger MA">Distance</th><th>Status</th><th>Active until</th><th></th></tr></thead>
+        <tbody id="triggerBody"><tr><td colspan="9" style="text-align:left;color:var(--muted)">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="modal feedback-modal hidden" id="triggerModal" role="dialog" aria-modal="true" aria-labelledby="triggerModalTitle">
+    <div class="feedback-window">
+      <div class="progress-head">
+        <h2 id="triggerModalTitle">Add stocks</h2>
+        <button id="closeTriggerModal" type="button">Close</button>
+      </div>
+      <div class="feedback-body">
+        <div class="analysis-segment" id="triggerModeSwitch" aria-label="How to add stocks">
+          <button class="active" type="button" data-trigger-mode="single" aria-pressed="true">One stock</button>
+          <button type="button" data-trigger-mode="bulk" aria-pressed="false">Paste a list</button>
+        </div>
+        <div class="trigger-form" id="triggerSingleForm">
+          <label for="triggerMarket">Market<select id="triggerMarket"><option value="us">US</option><option value="asx">ASX</option><option value="crypto">Crypto</option></select></label>
+          <label for="triggerTicker">Ticker<input id="triggerTicker" autocomplete="off" spellcheck="false" placeholder="e.g. MCD"></label>
+          <label for="triggerPeriod">MA length<input id="triggerPeriod" type="number" min="2" max="2000" step="1" inputmode="numeric" placeholder="e.g. 360"></label>
+          <label for="triggerTimeframe">Timeframe<select id="triggerTimeframe"><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="daily">Daily</option></select></label>
+        </div>
+        <div class="trigger-bulk-form" id="triggerBulkForm" hidden>
+          <label for="triggerBulkMarket">Market for single-column lines<select id="triggerBulkMarket"><option value="us">US</option><option value="asx">ASX</option><option value="crypto">Crypto</option></select></label>
+          <label for="triggerBulkText">Stocks<textarea id="triggerBulkText" spellcheck="false" placeholder="MCD 700 Weekly&#10;NFLX 360 Weekly&#10;BHP 240 Monthly"></textarea></label>
+          <p class="trigger-hint">One stock per line: ticker, MA length, timeframe. Rows copied straight from the spreadsheet work too; its columns are read as US, ASX, then Crypto. A stock already on the list gets the new trigger.</p>
+        </div>
+        <p class="status-line trigger-modal-status" id="triggerModalStatus" aria-live="polite"></p>
+        <div class="actions">
+          <button class="primary" id="saveTrigger" type="button">Save</button>
+          <button id="deleteTrigger" type="button" hidden>Remove from list</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="modal feedback-modal hidden" id="feedbackModal" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle">
     <div class="feedback-window">
@@ -2569,6 +2708,73 @@
       });
     }
 
+    // Cloud SQL is stopped between weekly runs; admins can start it on demand.
+    // The idle shutdown stops it again after 30 minutes without app use.
+    const LIVE_DATABASE_POLL_MS = 5000;
+    const LIVE_DATABASE_POLL_LIMIT_MS = 6 * 60_000;
+    let liveDatabaseTimer = null;
+    let liveDatabasePollDeadline = 0;
+
+    function describeLiveDatabase(database = {}) {
+      const policy = String(database.activationPolicy || "").toUpperCase();
+      const state = String(database.state || "").toUpperCase();
+      if (database.running) {
+        return {phase: "running", tone: "ok", text: "Running. It switches off after 30 minutes without use."};
+      }
+      if (policy === "ALWAYS") {
+        return {phase: "starting", tone: "warn", text: "Starting... this usually takes 1-3 minutes."};
+      }
+      if (state === "RUNNABLE") {
+        return {phase: "stopping", tone: "warn", text: "Stopping..."};
+      }
+      return {phase: "off", tone: "", text: "Off. It only runs during the Tuesday update unless started here."};
+    }
+
+    function renderLiveDatabase(database) {
+      const {phase, tone, text} = describeLiveDatabase(database);
+      $("liveDatabaseStatus").textContent = text;
+      $("liveDatabaseStatus").className = `status-line admin-status ${tone}`.trim();
+      $("startLiveDatabase").disabled = phase !== "off";
+      $("stopLiveDatabase").disabled = phase !== "running";
+      return phase;
+    }
+
+    async function refreshLiveDatabaseStatus() {
+      if (liveDatabaseTimer) clearTimeout(liveDatabaseTimer);
+      liveDatabaseTimer = null;
+      try {
+        const payload = await api("/api/admin/database-status");
+        const phase = renderLiveDatabase(payload.database);
+        const settling = phase === "starting" || phase === "stopping";
+        if (settling && Date.now() < liveDatabasePollDeadline) {
+          liveDatabaseTimer = setTimeout(refreshLiveDatabaseStatus, LIVE_DATABASE_POLL_MS);
+        }
+      } catch (error) {
+        $("liveDatabaseStatus").textContent = `Could not read database status: ${error.message}`;
+        $("liveDatabaseStatus").className = "status-line admin-status bad";
+        $("startLiveDatabase").disabled = false;
+        $("stopLiveDatabase").disabled = false;
+      }
+    }
+
+    async function changeLiveDatabase(action) {
+      $("startLiveDatabase").disabled = true;
+      $("stopLiveDatabase").disabled = true;
+      $("liveDatabaseStatus").textContent = action === "start" ? "Sending start request..." : "Sending stop request...";
+      $("liveDatabaseStatus").className = "status-line admin-status warn";
+      try {
+        const payload = await api(`/api/admin/${action}-database`, {method: "POST", body: "{}"});
+        renderLiveDatabase(payload.database);
+        liveDatabasePollDeadline = Date.now() + LIVE_DATABASE_POLL_LIMIT_MS;
+        liveDatabaseTimer = setTimeout(refreshLiveDatabaseStatus, LIVE_DATABASE_POLL_MS);
+      } catch (error) {
+        $("liveDatabaseStatus").textContent = error.message;
+        $("liveDatabaseStatus").className = "status-line admin-status bad";
+        $("startLiveDatabase").disabled = false;
+        $("stopLiveDatabase").disabled = false;
+      }
+    }
+
     // Raw connection errors the API returns while Cloud SQL is stopped.
     const DATABASE_OFFLINE_PATTERN = /ECONNREFUSED|\.s\.PGSQL\.5432|Cloud SQL connection failed|Database temporarily unavailable/;
 
@@ -2600,7 +2806,10 @@
       if (!response.ok || !payload.ok) {
         const message = payload.detail || payload.error || "Request failed";
         if (DATABASE_OFFLINE_PATTERN.test(message)) {
-          throw new Error("The live database is switched off between weekly updates (it runs during the Tuesday update). This view needs it; an admin can start the database to use it now.");
+          const howToStart = currentUserProfile?.user?.role === "admin"
+            ? "Start it from Ops (top right) > Live database (it takes 1-3 minutes), then reload this view."
+            : "An admin can start the database to use it now.";
+          throw new Error(`The live database is switched off between weekly updates (it runs during the Tuesday update). This view needs it. ${howToStart}`);
         }
         throw new Error(message);
       }
@@ -2655,14 +2864,294 @@
     }
 
     function activateView(view) {
-      const analysis = view === "analysis";
-      $("marketMain").hidden = analysis;
-      $("analysisPage").hidden = !analysis;
-      $("marketTab").classList.toggle("active", !analysis);
-      $("marketTab").setAttribute("aria-pressed", String(!analysis));
-      $("analysisTab").classList.toggle("active", analysis);
-      $("analysisTab").setAttribute("aria-pressed", String(analysis));
-      if (analysis) loadActiveAnalysisWorkspace();
+      const views = {market: ["marketMain", "marketTab"], analysis: ["analysisPage", "analysisTab"], triggers: ["triggersPage", "triggersTab"]};
+      Object.entries(views).forEach(([name, [pageId, tabId]]) => {
+        const active = name === view;
+        $(pageId).hidden = !active;
+        $(tabId).classList.toggle("active", active);
+        $(tabId).setAttribute("aria-pressed", String(active));
+      });
+      if (view === "analysis") loadActiveAnalysisWorkspace();
+      if (view === "triggers") loadTriggers();
+    }
+
+    // Trigger levels: Brady's long-term MA buy floors, scanned twice a day.
+    const TRIGGER_MARKET_LABELS = {us: "US", asx: "ASX", crypto: "Crypto"};
+    const TRIGGER_TIMEFRAME_LABELS = {daily: "Daily", weekly: "Weekly", monthly: "Monthly"};
+    const TRIGGER_TIMEFRAME_SHORT = {daily: "D", weekly: "W", monthly: "M"};
+    let triggerItems = [];
+    let triggerRules = {min_bars: 50, active_months: 6};
+    let triggerScanInfo = null;
+    let triggerMarketFilter = "all";
+    let triggerRequest = null;
+    let triggerEditing = null;
+    let triggerMode = "single";
+
+    function triggerCanEdit() {
+      return ["admin", "analyst"].includes(currentUserProfile?.user?.role);
+    }
+
+    function triggerPrice(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number) || number <= 0) return "-";
+      const digits = number >= 1000 ? 0 : number >= 1 ? 2 : 4;
+      return number.toLocaleString("en-AU", {minimumFractionDigits: digits, maximumFractionDigits: digits});
+    }
+
+    function triggerDate(value, timeframe = "daily") {
+      if (!value) return "-";
+      const date = new Date(`${value}T00:00:00Z`);
+      if (Number.isNaN(date.getTime())) return String(value);
+      if (timeframe === "monthly") return new Intl.DateTimeFormat("en-AU", {month: "short", year: "numeric", timeZone: "UTC"}).format(date);
+      const text = new Intl.DateTimeFormat("en-AU", {day: "numeric", month: "short", year: "numeric", timeZone: "UTC"}).format(date);
+      return timeframe === "weekly" ? `week of ${text}` : text;
+    }
+
+    function triggerRank(item) {
+      const status = item.scan?.status;
+      if (status === "triggered") return 0;
+      if (status === "watching") return 1;
+      if (status === "insufficient") return 2;
+      return item.scan_pending ? 3 : 4;
+    }
+
+    function triggerDistance(item) {
+      const value = item.scan?.distance_pct;
+      return value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value);
+    }
+
+    function sortedTriggers(items) {
+      return [...items].sort((a, b) =>
+        triggerRank(a) - triggerRank(b)
+        || (triggerDistance(a) ?? Infinity) - (triggerDistance(b) ?? Infinity)
+        || a.ticker.localeCompare(b.ticker));
+    }
+
+    function triggerStatusCell(item) {
+      const scan = item.scan;
+      if (!scan) return '<span class="trigger-badge">Scanning...</span>';
+      let html;
+      if (scan.status === "triggered") {
+        const detail = scan.touching_now ? "At the MA now" : `Last touch ${triggerDate(scan.last_touch_on, item.timeframe)}`;
+        html = `<span class="trigger-badge hit">Triggered</span><span class="trigger-sub">${escapeHtml(detail)}</span>`;
+      } else if (scan.status === "watching") {
+        html = '<span class="trigger-badge">Watching</span>';
+      } else if (scan.status === "insufficient") {
+        const needed = Math.min(Number(triggerRules.min_bars || 50), Number(item.ma_period));
+        html = `<span class="trigger-badge">Not enough data</span><span class="trigger-sub">${fmt.format(scan.bars_available || 0)} of ${needed} bars needed</span>`;
+      } else {
+        html = `<span class="trigger-badge bad">No data</span><span class="trigger-sub" title="${escapeHtml(scan.error || "")}">${escapeHtml(scan.error || "Price data unavailable")}</span>`;
+      }
+      if (scan.error && scan.status !== "error") {
+        html += `<span class="trigger-sub warn" title="${escapeHtml(scan.error)}">Last update failed; showing ${escapeHtml(formatBrisbane(scan.scanned_at_utc))}</span>`;
+      }
+      return html;
+    }
+
+    function triggerRow(item) {
+      const scan = item.scan;
+      const yahoo = `https://finance.yahoo.com/quote/${encodeURIComponent(item.yahoo_symbol || item.ticker)}`;
+      const short = TRIGGER_TIMEFRAME_SHORT[item.timeframe] || "";
+      const fallback = scan?.fallback && scan.ma_period_used
+        ? `<span class="trigger-sub warn" title="Only ${scan.ma_period_used} bars of history exist, so the MA averages all of them">Short history: using ${scan.ma_period_used}${short}</span>`
+        : "";
+      const distance = triggerDistance(item);
+      const distanceClass = distance === null ? "" : distance <= 0 ? "at" : distance <= 5 ? "near" : "";
+      const distanceText = distance === null ? "-" : `${distance > 0 ? "+" : ""}${distance.toFixed(1)}%`;
+      return `<tr class="${scan?.status === "triggered" ? "trigger-row-hit" : ""}">
+        <td><a class="ticker" href="${escapeHtml(yahoo)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.ticker)}</a><span class="trigger-sub" title="${escapeHtml(scan?.name || "")}">${escapeHtml(scan?.name || "")}</span></td>
+        <td>${escapeHtml(TRIGGER_MARKET_LABELS[item.market] || item.market)}</td>
+        <td>${escapeHtml(`${item.ma_period} ${TRIGGER_TIMEFRAME_LABELS[item.timeframe] || item.timeframe}`)}${fallback}</td>
+        <td>${triggerPrice(scan?.price)}${scan?.currency ? `<span class="trigger-sub">${escapeHtml(scan.currency)}</span>` : ""}</td>
+        <td>${triggerPrice(scan?.ma_value)}</td>
+        <td class="trigger-distance ${distanceClass}">${distanceText}${distance !== null && distance < 0 ? '<span class="trigger-sub">below MA</span>' : ""}</td>
+        <td>${triggerStatusCell(item)}</td>
+        <td>${scan?.status === "triggered" ? escapeHtml(triggerDate(scan.active_until)) : "-"}</td>
+        <td>${triggerCanEdit() ? `<button class="trigger-edit" type="button" data-trigger-edit="${escapeHtml(item.id)}">Edit</button>` : ""}</td>
+      </tr>`;
+    }
+
+    function renderTriggers() {
+      const canEdit = triggerCanEdit();
+      $("triggerAddOpen").hidden = !canEdit;
+      $("triggerScanNow").hidden = !canEdit;
+      const inMarket = triggerItems.filter((item) => triggerMarketFilter === "all" || item.market === triggerMarketFilter);
+      const count = (predicate) => fmt.format(inMarket.filter(predicate).length);
+      $("triggerCountHit").textContent = count((item) => item.scan?.status === "triggered");
+      $("triggerCountWatching").textContent = count((item) => item.scan?.status === "watching");
+      $("triggerCountFallback").textContent = count((item) => item.scan?.fallback && item.scan?.status !== "insufficient");
+      $("triggerCountInsufficient").textContent = count((item) => item.scan?.status === "insufficient");
+      $("triggerCountError").textContent = count((item) => item.scan?.status === "error");
+      const scan = triggerScanInfo;
+      $("triggerLastScan").textContent = scan?.running ? `running since ${formatBrisbane(scan.started_at_utc)}` : formatBrisbane(scan?.finished_at_utc);
+      $("triggerRulesText").textContent = `A stock triggers when its price touches its moving average at any point in a bar, and stays flagged for ${triggerRules.active_months || 6} months after the last touch. Stocks with less history than the MA length use every bar available (at least ${triggerRules.min_bars || 50}).`;
+      $("triggerEmpty").hidden = triggerItems.length > 0;
+      $("triggerSeed").hidden = currentUserProfile?.user?.role !== "admin";
+      const search = $("triggerSearch").value.trim().toUpperCase();
+      const visible = sortedTriggers(inMarket).filter((item) => !search
+        || item.ticker.includes(search)
+        || String(item.scan?.name || "").toUpperCase().includes(search));
+      $("triggerBody").innerHTML = visible.length
+        ? visible.map(triggerRow).join("")
+        : `<tr><td colspan="9" style="text-align:left;color:var(--muted)">${triggerItems.length ? "No stocks match this filter." : "No stocks on the trigger list yet."}</td></tr>`;
+    }
+
+    function applyTriggerPayload(payload) {
+      triggerItems = payload.items || [];
+      triggerRules = payload.rules || triggerRules;
+      triggerScanInfo = payload.scan || null;
+      renderTriggers();
+    }
+
+    function setTriggerStatus(message, bad = false) {
+      $("triggerStatus").textContent = message;
+      $("triggerStatus").className = bad ? "bad" : "";
+    }
+
+    function loadTriggers() {
+      if (triggerRequest) return triggerRequest;
+      setTriggerStatus("Loading...");
+      triggerRequest = api("/api/triggers")
+        .then((payload) => {
+          applyTriggerPayload(payload);
+          setTriggerStatus(`${fmt.format(triggerItems.length)} stocks on the list`);
+        })
+        .catch((error) => setTriggerStatus(error.message, true))
+        .finally(() => { triggerRequest = null; });
+      return triggerRequest;
+    }
+
+    async function runTriggerScan() {
+      const button = $("triggerScanNow");
+      button.disabled = true;
+      button.textContent = "Scanning...";
+      setTriggerStatus("Scanning every stock against Yahoo prices; this takes about a minute.");
+      try {
+        const payload = await api("/api/triggers/scan", {method: "POST", body: "{}"});
+        applyTriggerPayload(payload);
+        const result = payload.result || {};
+        const failed = Number(result.counts?.fetch_errors || 0);
+        setTriggerStatus(result.skipped ? result.reason : `Scan finished in ${result.duration_seconds ?? "-"}s${failed ? `; ${failed} stocks could not be updated` : ""}`);
+      } catch (error) {
+        setTriggerStatus(error.message, true);
+      } finally {
+        button.disabled = false;
+        button.textContent = "Scan now";
+      }
+    }
+
+    async function seedTriggers() {
+      const button = $("triggerSeed");
+      button.disabled = true;
+      setTriggerStatus("Adding Brady's list and scanning it; this takes about a minute.");
+      try {
+        const result = await api("/api/triggers/seed", {method: "POST", body: "{}"});
+        await loadTriggers();
+        setTriggerStatus(`Added ${result.added.length} stocks`);
+      } catch (error) {
+        setTriggerStatus(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function setTriggerMode(mode) {
+      triggerMode = mode;
+      $("triggerSingleForm").hidden = mode !== "single";
+      $("triggerBulkForm").hidden = mode !== "bulk";
+      document.querySelectorAll("[data-trigger-mode]").forEach((button) => {
+        const active = button.dataset.triggerMode === mode;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+    }
+
+    function setTriggerModalStatus(message, bad = false) {
+      $("triggerModalStatus").textContent = message;
+      $("triggerModalStatus").className = `status-line trigger-modal-status${bad ? " bad" : ""}`;
+    }
+
+    function openTriggerModal(item = null) {
+      triggerEditing = item;
+      $("triggerModalTitle").textContent = item ? `Edit ${item.ticker} trigger` : "Add stocks";
+      $("triggerModeSwitch").hidden = Boolean(item);
+      setTriggerMode("single");
+      $("triggerMarket").value = item?.market || (triggerMarketFilter === "all" ? "us" : triggerMarketFilter);
+      $("triggerBulkMarket").value = $("triggerMarket").value;
+      $("triggerMarket").disabled = Boolean(item);
+      $("triggerTicker").disabled = Boolean(item);
+      $("triggerTicker").value = item?.ticker || "";
+      $("triggerPeriod").value = item?.ma_period || "";
+      $("triggerTimeframe").value = item?.timeframe || "weekly";
+      $("deleteTrigger").hidden = !item;
+      $("saveTrigger").disabled = false;
+      setTriggerModalStatus(item ? "Change the MA length or timeframe. The stock is rescanned straight away." : "");
+      $("triggerModal").classList.remove("hidden");
+      (item ? $("triggerPeriod") : $("triggerTicker")).focus();
+    }
+
+    function closeTriggerModal() {
+      $("triggerModal").classList.add("hidden");
+      triggerEditing = null;
+    }
+
+    async function saveTrigger() {
+      const button = $("saveTrigger");
+      button.disabled = true;
+      try {
+        if (triggerMode === "bulk") {
+          setTriggerModalStatus("Saving and scanning the new stocks...");
+          const result = await api("/api/triggers/bulk", {
+            method: "POST",
+            body: JSON.stringify({market: $("triggerBulkMarket").value, text: $("triggerBulkText").value})
+          });
+          await loadTriggers();
+          const problems = (result.errors || []).map((error) => `line ${error.line} (${error.text}): ${error.error}`);
+          const summary = `Added ${result.added.length}, updated ${result.updated.length}, unchanged ${result.unchanged.length}.`;
+          if (problems.length) {
+            setTriggerModalStatus(`${summary} Skipped ${problems.length}: ${problems.slice(0, 5).join("; ")}${problems.length > 5 ? "; ..." : ""}`, true);
+          } else {
+            $("triggerBulkText").value = "";
+            closeTriggerModal();
+            setTriggerStatus(summary);
+          }
+          return;
+        }
+        setTriggerModalStatus("Saving and scanning...");
+        const result = await api("/api/triggers", {
+          method: "POST",
+          body: JSON.stringify({
+            market: $("triggerMarket").value,
+            ticker: $("triggerTicker").value,
+            ma_period: Number($("triggerPeriod").value),
+            timeframe: $("triggerTimeframe").value
+          })
+        });
+        const index = triggerItems.findIndex((row) => row.id === result.item.id);
+        if (index >= 0) triggerItems[index] = result.item;
+        else triggerItems.push(result.item);
+        renderTriggers();
+        closeTriggerModal();
+        setTriggerStatus(`${result.item.ticker} saved`);
+      } catch (error) {
+        setTriggerModalStatus(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function deleteTrigger() {
+      const item = triggerEditing;
+      if (!item || !window.confirm(`Remove ${item.ticker} from the trigger list?`)) return;
+      try {
+        await api(`/api/triggers/${encodeURIComponent(item.id)}`, {method: "DELETE"});
+        triggerItems = triggerItems.filter((row) => row.id !== item.id);
+        renderTriggers();
+        closeTriggerModal();
+        setTriggerStatus(`${item.ticker} removed`);
+      } catch (error) {
+        setTriggerModalStatus(error.message, true);
+      }
     }
 
     function returnText(value) {
@@ -3900,7 +4389,7 @@
         market: analysis ? $("analysisMarket").value : $("marketSelect").value,
         ticker,
         context: {
-          view: analysis ? "analysis" : "market",
+          view: analysis ? "analysis" : !$("triggersPage").hidden ? "triggers" : "market",
           scan_id: currentScanId,
           viewport: `${window.innerWidth}x${window.innerHeight}`,
           url_query: window.location.search.slice(0, 500)
@@ -5244,6 +5733,37 @@
 
     $("marketTab").addEventListener("click", () => activateView("market"));
     $("analysisTab").addEventListener("click", () => activateView("analysis"));
+    $("triggersTab").addEventListener("click", () => activateView("triggers"));
+    document.querySelectorAll("[data-trigger-market]").forEach((button) => {
+      button.addEventListener("click", () => {
+        triggerMarketFilter = button.dataset.triggerMarket;
+        document.querySelectorAll("[data-trigger-market]").forEach((other) => {
+          const active = other === button;
+          other.classList.toggle("active", active);
+          other.setAttribute("aria-pressed", String(active));
+        });
+        renderTriggers();
+      });
+    });
+    $("triggerSearch").addEventListener("input", renderTriggers);
+    $("triggerScanNow").addEventListener("click", runTriggerScan);
+    $("triggerSeed").addEventListener("click", seedTriggers);
+    $("triggerAddOpen").addEventListener("click", () => openTriggerModal());
+    $("triggerBody").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-trigger-edit]");
+      if (!button) return;
+      const item = triggerItems.find((row) => row.id === button.dataset.triggerEdit);
+      if (item) openTriggerModal(item);
+    });
+    document.querySelectorAll("[data-trigger-mode]").forEach((button) => {
+      button.addEventListener("click", () => setTriggerMode(button.dataset.triggerMode));
+    });
+    $("saveTrigger").addEventListener("click", saveTrigger);
+    $("deleteTrigger").addEventListener("click", deleteTrigger);
+    $("closeTriggerModal").addEventListener("click", closeTriggerModal);
+    $("triggerModal").addEventListener("click", (event) => {
+      if (event.target === $("triggerModal")) closeTriggerModal();
+    });
     $("openFeedback").addEventListener("click", openFeedbackDialog);
     $("closeFeedback").addEventListener("click", closeFeedbackDialog);
     $("submitFeedback").addEventListener("click", submitFeedback);
@@ -5346,7 +5866,13 @@
     $("weeklyRunStatus").addEventListener("click", openWeeklyRunProgress);
     $("openOperations").addEventListener("click", () => {
       $("adminPanel").hidden = !$("adminPanel").hidden;
+      if (!$("adminPanel").hidden) {
+        liveDatabasePollDeadline = Date.now() + LIVE_DATABASE_POLL_LIMIT_MS;
+        refreshLiveDatabaseStatus();
+      }
     });
+    $("startLiveDatabase").addEventListener("click", () => changeLiveDatabase("start"));
+    $("stopLiveDatabase").addEventListener("click", () => changeLiveDatabase("stop"));
     $("refreshAsxData").addEventListener("click", () => startManualMarketRefresh("asx"));
     $("refreshUsData").addEventListener("click", () => startManualMarketRefresh("us"));
     bindLimitToggle("useFetchLimit", "fetchLimit");
@@ -5388,6 +5914,10 @@
       }
       if (event.key === "Escape" && !$("purchaseModal").classList.contains("hidden")) {
         closePurchaseDialog();
+        return;
+      }
+      if (event.key === "Escape" && !$("triggerModal").classList.contains("hidden")) {
+        closeTriggerModal();
         return;
       }
       if (event.key === "Escape" && $("chartPanel").classList.contains("fullscreen")) {

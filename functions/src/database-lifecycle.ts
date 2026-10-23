@@ -1,3 +1,4 @@
+import {getFirestore, Timestamp} from "firebase-admin/firestore";
 import {GoogleAuth} from "google-auth-library";
 
 const project = process.env.GOOGLE_CLOUD_PROJECT ?? process.env.GCLOUD_PROJECT ?? "moneymaker-aedf7";
@@ -54,6 +55,37 @@ export async function ensureDatabaseRunning(timeoutMs = 300_000) {
 }
 
 export async function stopDatabase() { return setActivationPolicy("NEVER"); }
+
+// Signed-in API use is stored in Firestore (readable while Cloud SQL is stopped)
+// so the idle shutdown leaves the database running while someone is using the app.
+const APP_ACTIVITY_DOC = "system/database_activity";
+const APP_ACTIVITY_THROTTLE_MS = 60_000;
+let lastAppActivityWriteMs = 0;
+
+/** Record app use at most once a minute per instance; returns whether it wrote. */
+export async function recordAppActivity(
+  nowMs = Date.now(),
+  write: (at: Date) => Promise<unknown> = (at) =>
+    getFirestore().doc(APP_ACTIVITY_DOC).set({last_app_activity_at: at}, {merge: true})
+): Promise<boolean> {
+  if (nowMs - lastAppActivityWriteMs < APP_ACTIVITY_THROTTLE_MS) return false;
+  lastAppActivityWriteMs = nowMs;
+  await write(new Date(nowMs));
+  return true;
+}
+
+export async function lastAppActivity(): Promise<Date | null> {
+  const snapshot = await getFirestore().doc(APP_ACTIVITY_DOC).get();
+  const value = snapshot.data()?.last_app_activity_at;
+  if (value instanceof Timestamp) return value.toDate();
+  return value ? new Date(value) : null;
+}
+
+/** The most recent of several activity times, ignoring missing or invalid ones. */
+export function latestActivity(...times: Array<Date | null | undefined>): Date | null {
+  const valid = times.filter((time): time is Date => time instanceof Date && !Number.isNaN(time.getTime()));
+  return valid.length ? new Date(Math.max(...valid.map((time) => time.getTime()))) : null;
+}
 
 export function isDatabaseDownError(error: unknown): boolean {
   const parts: string[] = [];

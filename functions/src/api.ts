@@ -25,7 +25,8 @@ import {
 import {requiresAppCheck} from "./request-policy";
 import {ipRateLimit} from "./ip-rate-limit";
 import {normalizeScreenConfig, screenConfigHash} from "./screen-config";
-import {databaseState, ensureDatabaseRunning, startDatabase, stopDatabase} from "./database-lifecycle";
+import {databaseState, ensureDatabaseRunning, recordAppActivity, startDatabase, stopDatabase} from "./database-lifecycle";
+import {triggerRouter} from "./triggers";
 
 interface JobRow {
   id?: string;
@@ -1491,6 +1492,18 @@ apiApp.use("/api", (req: Request, res: Response, next: NextFunction) => {
       const message = error instanceof Error ? error.message : String(error);
       res.status(status).json({ok: false, error: message, detail: message});
     });
+});
+
+// Signed-in use keeps Cloud SQL out of the idle shutdown. Status checks and the
+// Firestore-only trigger routes do not need the database, so they do not count.
+const APP_ACTIVITY_IGNORED_PATHS = ["/admin/database-status", "/triggers"];
+
+apiApp.use("/api", (req: Request, _res: Response, next: NextFunction) => {
+  const ignored = APP_ACTIVITY_IGNORED_PATHS.some((path) => req.path === path || req.path.startsWith(`${path}/`));
+  if (req.header("authorization") && !ignored) {
+    recordAppActivity().catch((error) => console.warn("Could not record app activity", error));
+  }
+  next();
 });
 
 apiApp.get("/api/config", asyncRoute(async (req, res) => {
@@ -3662,6 +3675,8 @@ apiApp.post("/api/admin/insights/refresh-fundamentals", asyncRoute(async (req, r
     requested_by_email: user.email
   }));
 }));
+
+apiApp.use(triggerRouter);
 
 apiApp.use((_req, res) => {
   res.status(404).json({ok: false, error: "Not found"});

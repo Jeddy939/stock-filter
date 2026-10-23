@@ -3,6 +3,7 @@ import {apiApp} from "./api";
 export {refreshTickerBatch} from "./tasks";
 export {scheduledJobReconciliation, scheduledRatingOutcomes} from "./scheduled";
 export {scheduledDatabaseIdleShutdown, scheduledWeeklyPublication} from "./weekly";
+export {scheduledTriggerScan} from "./triggers";
 
 export const api = onRequest(
   {
