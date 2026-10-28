@@ -1,5 +1,5 @@
 import express, {type Request, type Response} from "express";
-import {getFirestore, type DocumentReference} from "firebase-admin/firestore";
+import {getFirestore, type DocumentReference, type DocumentSnapshot} from "firebase-admin/firestore";
 import {logger} from "firebase-functions";
 import {onSchedule} from "firebase-functions/v2/scheduler";
 import {ApiError, requireAdmin, requireAnalyst, requireAuth, type UserContext} from "./auth";
@@ -16,14 +16,22 @@ import {
   TRIGGER_MIN_BARS,
   validateTriggerConfig,
   yahooSymbol,
-  type TriggerConfig
+  type TriggerConfig,
+  type YahooFetchOptions
 } from "./trigger-levels";
 
 // Trigger levels live in Firestore, not Cloud SQL, because the database only
-// runs during the weekly window and these scans run every day.
+// runs during the weekly window and these scans run every day. Firestore is in
+// the US (nam5) and Functions run in Sydney, so every round trip is slow:
+// reads and writes are batched rather than made one document at a time.
 const COLLECTION = "trigger_levels";
-const SCAN_CONCURRENCY = 4;
+const SCAN_CONCURRENCY = 6;
 const SCAN_LOCK_MS = 15 * 60_000;
+// Firebase Hosting gives up on a function after 60 seconds, so requests made
+// from the page scan in short steps and stop starting new stocks after this.
+const BATCH_DEADLINE_MS = 30_000;
+const BATCH_MAX_IDS = 60;
+const INTERACTIVE_FETCH: YahooFetchOptions = {attempts: 2, timeoutMs: 8_000};
 
 export interface TriggerScan {
   config_key: string;
@@ -63,11 +71,16 @@ function statusReference() {
 }
 
 /** Scans one entry. A fetch failure keeps the last good result for the same trigger. */
-export async function scanTrigger(config: TriggerConfig, previous: TriggerScan | null, now = new Date()): Promise<TriggerScan> {
+export async function scanTrigger(
+  config: TriggerConfig,
+  previous: TriggerScan | null,
+  now = new Date(),
+  fetchOptions: YahooFetchOptions = {}
+): Promise<TriggerScan> {
   const configKey = triggerConfigKey(config);
   const scannedAt = now.toISOString();
   try {
-    const data = await fetchYahooBars(yahooSymbol(config.market, config.ticker), config.timeframe, config.ma_period);
+    const data = await fetchYahooBars(yahooSymbol(config.market, config.ticker), config.timeframe, config.ma_period, fetch, fetchOptions);
     const evaluation = evaluateTrigger(data.bars, config.ma_period, config.timeframe, {now, price: data.price});
     return {...evaluation, config_key: configKey, currency: data.currency, name: data.name, scanned_at_utc: scannedAt, error: null};
   } catch (error) {
@@ -97,32 +110,49 @@ export async function scanTrigger(config: TriggerConfig, previous: TriggerScan |
   }
 }
 
-async function scanReference(reference: DocumentReference): Promise<TriggerScan | null> {
-  const snapshot = await reference.get();
-  if (!snapshot.exists) return null;
-  const data = snapshot.data() as TriggerDocument;
-  const scan = await scanTrigger(data, data.scan ?? null);
-  try {
-    await reference.update({scan});
-  } catch (error) {
-    // The entry was removed while it was being scanned.
-    if ((error as {code?: unknown})?.code !== 5) throw error;
-  }
-  return scan;
+interface ScanOptions {
+  deadlineMs?: number;
+  fetch?: YahooFetchOptions;
 }
 
-async function scanReferences(references: DocumentReference[]) {
-  const counts = {total: references.length, triggered: 0, watching: 0, insufficient: 0, error: 0, fetch_errors: 0};
+function emptyCounts(total = 0) {
+  return {total, triggered: 0, watching: 0, insufficient: 0, error: 0, fetch_errors: 0};
+}
+
+/**
+ * Scans the given entries with one batched read and one bulk write. With a
+ * deadline, entries not started in time are returned in `remaining`.
+ */
+async function scanReferences(references: DocumentReference[], options: ScanOptions = {}) {
+  const startedAt = Date.now();
+  const counts = emptyCounts(references.length);
   const errors: string[] = [];
+  const scanned = new Map<string, {data: TriggerDocument; scan: TriggerScan}>();
+  const remaining: string[] = [];
+  if (!references.length) return {counts, errors, scanned, remaining};
+
+  const snapshots: DocumentSnapshot[] = await getFirestore().getAll(...references);
+  const writer = getFirestore().bulkWriter();
+  // A NOT_FOUND write means the entry was removed while it was being scanned.
+  writer.onWriteError((error) => {
+    if (error.code === 5) return false;
+    if (error.failedAttempts < 3) return true;
+    if (errors.length < 25) errors.push(`${error.documentRef.id}: ${error.message}`);
+    return false;
+  });
   let next = 0;
   async function worker() {
-    while (next < references.length) {
-      const reference = references[next++];
-      const scan = await scanReference(reference).catch((error) => {
-        errors.push(`${reference.id}: ${error instanceof Error ? error.message : String(error)}`);
-        return null;
-      });
-      if (!scan) continue;
+    while (next < snapshots.length) {
+      const snapshot = snapshots[next++];
+      if (!snapshot.exists) continue;
+      if (options.deadlineMs && Date.now() - startedAt > options.deadlineMs) {
+        remaining.push(snapshot.id);
+        continue;
+      }
+      const data = snapshot.data() as TriggerDocument;
+      const scan = await scanTrigger(data, data.scan ?? null, new Date(), options.fetch);
+      writer.update(snapshot.ref, {scan}).catch(() => undefined);
+      scanned.set(snapshot.id, {data, scan});
       counts[scan.status] += 1;
       if (scan.error) {
         counts.fetch_errors += 1;
@@ -131,7 +161,8 @@ async function scanReferences(references: DocumentReference[]) {
     }
   }
   await Promise.all(Array.from({length: SCAN_CONCURRENCY}, worker));
-  return {counts, errors};
+  await writer.close();
+  return {counts, errors, scanned, remaining};
 }
 
 /** Scans the whole watchlist; a second full scan within the lock window is refused. */
@@ -153,17 +184,7 @@ export async function runFullTriggerScan(source: string): Promise<Record<string,
   try {
     const references = await collection().listDocuments();
     const {counts, errors} = await scanReferences(references);
-    const finishedAt = new Date();
-    const result = {
-      running: false,
-      source,
-      started_at_utc: startedAt.toISOString(),
-      finished_at_utc: finishedAt.toISOString(),
-      duration_seconds: Math.round((finishedAt.getTime() - startedAt.getTime()) / 1000),
-      counts,
-      errors,
-      last_error: null
-    };
+    const result = scanStatus(source, startedAt, counts, errors);
     await statusReference().set(result, {merge: true});
     return {ok: true, ...result};
   } catch (error) {
@@ -173,19 +194,54 @@ export async function runFullTriggerScan(source: string): Promise<Record<string,
   }
 }
 
+function scanStatus(source: string, startedAt: Date, counts: ReturnType<typeof emptyCounts>, errors: string[]) {
+  const finishedAt = new Date();
+  return {
+    running: false,
+    source,
+    started_at_utc: startedAt.toISOString(),
+    started_at_ms: startedAt.getTime(),
+    finished_at_utc: finishedAt.toISOString(),
+    duration_seconds: Math.round((finishedAt.getTime() - startedAt.getTime()) / 1000),
+    counts,
+    errors,
+    last_error: null
+  };
+}
+
+/** Records a scan the page ran in steps, counted from what is now stored. */
+async function recordSteppedScan(source: string, startedAt: Date) {
+  const snapshot = await collection().get();
+  const counts = emptyCounts(snapshot.size);
+  for (const item of snapshot.docs) {
+    const data = item.data() as TriggerDocument;
+    const scan = data.scan && data.scan.config_key === triggerConfigKey(data) ? data.scan : null;
+    if (!scan) continue;
+    counts[scan.status] += 1;
+    if (scan.error) counts.fetch_errors += 1;
+  }
+  const status = scanStatus(source, startedAt, counts, []);
+  await statusReference().set(status, {merge: true});
+  return status;
+}
+
+/** Saves entries with one batched read and one bulk write. Scanning is separate. */
 async function upsertTriggers(configs: TriggerConfig[], user: UserContext, overwrite: boolean) {
   const now = new Date().toISOString();
   const added: string[] = [];
   const updated: string[] = [];
   const unchanged: string[] = [];
-  const references: DocumentReference[] = [];
-  for (const config of configs) {
-    const reference = collection().doc(triggerId(config.market, config.ticker));
-    const snapshot = await reference.get();
-    const existing = snapshot.data() as TriggerDocument | undefined;
+  if (!configs.length) return {added, updated, unchanged, scan_ids: []};
+  const references = configs.map((config) => collection().doc(triggerId(config.market, config.ticker)));
+  const snapshots = await getFirestore().getAll(...references);
+  const writer = getFirestore().bulkWriter();
+  const writes: Promise<unknown>[] = [];
+  configs.forEach((config, index) => {
+    const reference = references[index];
+    const existing = snapshots[index].data() as TriggerDocument | undefined;
     if (existing && (!overwrite || triggerConfigKey(existing) === triggerConfigKey(config))) {
       unchanged.push(reference.id);
-      continue;
+      return;
     }
     const values = {
       ...config,
@@ -194,17 +250,16 @@ async function upsertTriggers(configs: TriggerConfig[], user: UserContext, overw
       updated_by: user.email
     };
     if (existing) {
-      await reference.update(values);
+      writes.push(writer.update(reference, values));
       updated.push(reference.id);
     } else {
-      await reference.set({...values, created_at_utc: now, created_by: user.email, scan: null});
+      writes.push(writer.set(reference, {...values, created_at_utc: now, created_by: user.email, scan: null}));
       added.push(reference.id);
     }
-    references.push(reference);
-  }
-  // Scan changed entries straight away so the list is current.
-  if (references.length) await scanReferences(references);
-  return {added, updated, unchanged};
+  });
+  await writer.close();
+  await Promise.all(writes);
+  return {added, updated, unchanged, scan_ids: [...added, ...updated]};
 }
 
 function publicItem(id: string, data: TriggerDocument) {
@@ -253,7 +308,11 @@ triggerRouter.post("/api/triggers", asyncRoute(async (req, res) => {
   }
   const result = await upsertTriggers([config], user, true);
   const reference = collection().doc(triggerId(config.market, config.ticker));
-  const item = publicItem(reference.id, (await reference.get()).data() as TriggerDocument);
+  const {scanned} = await scanReferences([reference], {fetch: INTERACTIVE_FETCH});
+  const saved = scanned.get(reference.id);
+  const item = saved
+    ? publicItem(reference.id, {...saved.data, scan: saved.scan})
+    : publicItem(reference.id, (await reference.get()).data() as TriggerDocument);
   res.json({ok: true, ...result, item});
 }));
 
@@ -278,6 +337,35 @@ triggerRouter.delete("/api/triggers/:id", asyncRoute(async (req, res) => {
   if (!(await reference.get()).exists) throw new ApiError(404, "Trigger not found");
   await reference.delete();
   res.json({ok: true, id: reference.id});
+}));
+
+// One step of a scan run from the page. Returns the entries it scanned and any
+// it had no time for; the page sends those again.
+triggerRouter.post("/api/triggers/scan-batch", asyncRoute(async (req, res) => {
+  const user = await requireAuth(req, db());
+  requireAnalyst(user);
+  const ids = Array.isArray(req.body?.ids) ? [...new Set(req.body.ids.map((id: unknown) => String(id)))] as string[] : [];
+  if (!ids.length) throw new ApiError(400, "ids is required");
+  if (ids.length > BATCH_MAX_IDS) throw new ApiError(400, `Scan at most ${BATCH_MAX_IDS} stocks per request`);
+  if (ids.some((id) => !/^(us|asx|crypto)__[A-Z0-9._^=-]{1,20}$/.test(id))) throw new ApiError(400, "Invalid trigger id");
+  const {counts, errors, scanned, remaining} = await scanReferences(
+    ids.map((id) => collection().doc(id)),
+    {deadlineMs: BATCH_DEADLINE_MS, fetch: INTERACTIVE_FETCH}
+  );
+  const fullScan = req.body?.full_scan;
+  let scan = null;
+  if (fullScan?.final && !remaining.length) {
+    const startedAt = new Date(String(fullScan.started_at_utc ?? ""));
+    scan = await recordSteppedScan(`manual:${user.email ?? user.uid}`, Number.isNaN(startedAt.getTime()) ? new Date() : startedAt);
+  }
+  res.json({
+    ok: true,
+    items: [...scanned.entries()].map(([id, saved]) => publicItem(id, {...saved.data, scan: saved.scan})),
+    remaining,
+    counts,
+    errors,
+    scan
+  });
 }));
 
 triggerRouter.post("/api/triggers/scan", asyncRoute(async (req, res) => {

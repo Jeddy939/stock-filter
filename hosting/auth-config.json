@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "enabled": true,
+  "apiKey": "AIzaSyA4tXcCkEv26i83WlM8k_dv-EubkjRCFRM",
+  "authDomain": "moneymaker-aedf7.firebaseapp.com",
+  "projectId": "moneymaker-aedf7",
+  "storageBucket": "moneymaker-aedf7-cache",
+  "appId": "1:137012961005:web:4e50719b24c3bb382c76e4",
+  "appCheck": {
+    "enabled": false,
+    "enforce": false,
+    "siteKey": ""
+  }
+}

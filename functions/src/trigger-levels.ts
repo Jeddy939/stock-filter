@@ -321,21 +321,29 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export interface YahooFetchOptions {
+  attempts?: number;
+  timeoutMs?: number;
+}
+
 export async function fetchYahooBars(
   symbol: string,
   timeframe: TriggerTimeframe,
   maPeriod: number,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  options: YahooFetchOptions = {}
 ): Promise<YahooFetchResult> {
+  const attempts = options.attempts ?? 4;
+  const timeoutMs = options.timeoutMs ?? 20_000;
   let lastError = "Yahoo request failed";
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (attempt) await sleep(1000 * 2 ** attempt);
     const url = yahooChartUrl(symbol, timeframe, maPeriod, new Date(), attempt % 2 ? "query2" : "query1");
     let response: Response;
     try {
       response = await fetchImpl(url, {
         headers: {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", Accept: "application/json"},
-        signal: AbortSignal.timeout(20_000)
+        signal: AbortSignal.timeout(timeoutMs)
       });
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);

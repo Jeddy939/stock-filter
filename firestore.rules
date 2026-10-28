@@ -89,6 +89,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Trigger levels are edited through the API; members read them directly.
+    match /trigger_levels/{triggerId} {
+      allow read: if isMember();
+      allow write: if false;
+    }
+
     match /weekly_runs/{runId} {
       allow read: if isMember();
       allow write: if false;

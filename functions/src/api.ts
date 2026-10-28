@@ -27,6 +27,7 @@ import {ipRateLimit} from "./ip-rate-limit";
 import {normalizeScreenConfig, screenConfigHash} from "./screen-config";
 import {databaseState, ensureDatabaseRunning, recordAppActivity, startDatabase, stopDatabase} from "./database-lifecycle";
 import {triggerRouter} from "./triggers";
+import {isGzip, snapshotCacheControl, SnapshotFileCache} from "./snapshot-files";
 
 interface JobRow {
   id?: string;
@@ -1541,6 +1542,35 @@ apiApp.get("/api/snapshot-object", asyncRoute(async (req, res) => {
   }
   res.setHeader("Cache-Control", "private, max-age=300");
   res.json({ok: true, snapshot});
+}));
+
+const snapshotFileCache = new SnapshotFileCache();
+
+// Serves a snapshot file's stored gzip bytes unchanged. Versioned files are
+// immutable, so the browser and this instance can both keep them.
+apiApp.get("/api/snapshot-file", asyncRoute(async (req, res) => {
+  await requireAuth(req, db());
+  const objectPath = storageObjectPath(req.query.path, ["snapshots/"]);
+  let raw = snapshotFileCache.get(objectPath);
+  if (!raw) {
+    try {
+      [raw] = await getStorage().bucket(storageBucketName()).file(objectPath).download({decompress: false});
+    } catch (error) {
+      const code = (error as {code?: unknown})?.code;
+      if (code === 404 || code === "404") throw new ApiError(404, "Snapshot object not found");
+      throw error;
+    }
+    snapshotFileCache.set(objectPath, raw);
+  }
+  res.setHeader("Cache-Control", snapshotCacheControl(objectPath));
+  res.setHeader("Vary", "Accept-Encoding");
+  res.type("application/json");
+  if (isGzip(raw) && req.acceptsEncodings("gzip")) {
+    res.setHeader("Content-Encoding", "gzip");
+    res.send(raw);
+    return;
+  }
+  res.send(isGzip(raw) ? gunzipSync(raw) : raw);
 }));
 
 apiApp.post("/api/feedback", asyncRoute(async (req, res) => {

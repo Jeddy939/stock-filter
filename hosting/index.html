@@ -2211,9 +2211,13 @@
     let lastWeeklyRunPhase = null;
     async function initializeFirebaseAuth() {
       try {
-        const response = await fetch("/api/auth-config");
-        if (!response.ok) return null;
-        const config = await response.json();
+        // A static copy avoids waking the API just to start sign-in.
+        let config = await fetch("/auth-config.json").then((response) => response.ok ? response.json() : null).catch(() => null);
+        if (!config?.enabled) {
+          const response = await fetch("/api/auth-config");
+          if (!response.ok) return null;
+          config = await response.json();
+        }
         if (!config.enabled || !config.apiKey || !config.appId) return null;
         const [{ initializeApp }, authModule, appCheckModule, firestoreModule, storageModule] = await Promise.all([
           import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"),
@@ -2256,7 +2260,7 @@
         });
         await auth.authStateReady();
         if (!auth.currentUser) return null;
-        return () => authModule.getIdToken(auth.currentUser, true);
+        return () => authModule.getIdToken(auth.currentUser);
       } catch (error) {
         console.warn("Firebase authentication is unavailable", error);
         return null;
@@ -2264,16 +2268,58 @@
     }
     authReady = initializeFirebaseAuth();
 
+    async function fetchSnapshotFile(objectPath) {
+      const getToken = await authReady;
+      const headers = new Headers();
+      if (getToken) headers.set("Authorization", `Bearer ${await getToken()}`);
+      if (appCheckTokenProvider) {
+        try {
+          const appCheckToken = await appCheckTokenProvider();
+          if (appCheckToken) headers.set("X-Firebase-AppCheck", appCheckToken);
+        } catch (error) {
+          console.warn("Could not get App Check token", error);
+        }
+      }
+      // Versioned snapshot files never change, so the browser keeps them
+      // between visits and repeat loads skip the network entirely.
+      const response = await fetch(`/api/snapshot-file?path=${encodeURIComponent(objectPath)}`, {headers});
+      if (response.status === 404) {
+        const fallback = await api(`/api/snapshot-object?path=${encodeURIComponent(objectPath)}`);
+        return fallback.snapshot;
+      }
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || payload.error || `Snapshot request failed (${response.status})`);
+      }
+      return response.json();
+    }
+
     async function snapshotJson(objectPath, useCache = true) {
       if (useCache && snapshotObjectCache.has(objectPath)) return snapshotObjectCache.get(objectPath);
-      const response = await api(`/api/snapshot-object?path=${encodeURIComponent(objectPath)}`);
-      const payload = response.snapshot;
-      if (useCache) snapshotObjectCache.set(objectPath, payload);
-      return payload;
+      const request = fetchSnapshotFile(objectPath);
+      if (useCache) {
+        snapshotObjectCache.set(objectPath, request);
+        request.catch(() => snapshotObjectCache.delete(objectPath));
+      }
+      return request;
     }
 
     async function loadCurrentSnapshot(force = false) {
       if (force) snapshotObjectCache.delete("snapshots/current.json");
+      // The publisher writes the same manifest to Firestore, which answers
+      // without waking the API.
+      if (firebaseFirestore && firebaseFirestoreMethods) {
+        try {
+          const {doc, getDoc} = firebaseFirestoreMethods;
+          const manifest = await getDoc(doc(firebaseFirestore, "system", "current_snapshot"));
+          if (manifest.exists() && manifest.data()?.paths) {
+            currentSnapshot = manifest.data();
+            return currentSnapshot;
+          }
+        } catch (error) {
+          console.warn("Firestore snapshot manifest is unavailable; using the API", error);
+        }
+      }
       currentSnapshot = await snapshotJson("snapshots/current.json", !force);
       return currentSnapshot;
     }
@@ -3008,10 +3054,33 @@
       $("triggerStatus").className = bad ? "bad" : "";
     }
 
+    async function readTriggersFromFirestore() {
+      if (!firebaseFirestore || !firebaseFirestoreMethods) throw new Error("Firestore is not ready");
+      const {collection, doc, getDoc, getDocs} = firebaseFirestoreMethods;
+      const [items, scan] = await Promise.all([
+        getDocs(collection(firebaseFirestore, "trigger_levels")),
+        getDoc(doc(firebaseFirestore, "system", "trigger_scan"))
+      ]);
+      return {
+        items: items.docs.map((item) => {
+          const data = item.data();
+          // A scan only counts if it was made for the trigger as it is now.
+          const current = data.scan && data.scan.config_key === `${data.ma_period}:${data.timeframe}` ? data.scan : null;
+          return {id: item.id, ...data, scan: current, scan_pending: !current};
+        }),
+        scan: scan.exists() ? scan.data() : null,
+        rules: triggerRules
+      };
+    }
+
     function loadTriggers() {
       if (triggerRequest) return triggerRequest;
-      setTriggerStatus("Loading...");
-      triggerRequest = api("/api/triggers")
+      setTriggerStatus(triggerItems.length ? "Refreshing..." : "Loading...");
+      triggerRequest = readTriggersFromFirestore()
+        .catch((error) => {
+          console.warn("Reading triggers from Firestore failed; using the API", error);
+          return api("/api/triggers");
+        })
         .then((payload) => {
           applyTriggerPayload(payload);
           setTriggerStatus(`${fmt.format(triggerItems.length)} stocks on the list`);
@@ -3021,37 +3090,76 @@
       return triggerRequest;
     }
 
+    // Scans in short requests (Hosting cuts a request off after 60 seconds),
+    // updating the table and a progress count after each one.
+    let triggerScanRunning = false;
+
+    function setTriggerScanBusy(busy) {
+      triggerScanRunning = busy;
+      $("triggerScanNow").disabled = busy;
+      $("triggerScanNow").textContent = busy ? "Scanning..." : "Scan now";
+      $("triggerSeed").disabled = busy;
+    }
+
+    async function scanTriggerIds(ids, {fullScan = false, label = "Scanning"} = {}) {
+      const startedAt = new Date().toISOString();
+      const queue = [...new Set(ids)];
+      const total = queue.length;
+      let done = 0;
+      let failed = 0;
+      setTriggerStatus(`${label} 0 of ${fmt.format(total)}...`);
+      while (queue.length) {
+        const chunk = queue.splice(0, 30);
+        const payload = await api("/api/triggers/scan-batch", {
+          method: "POST",
+          body: JSON.stringify({ids: chunk, full_scan: fullScan ? {started_at_utc: startedAt, final: queue.length === 0} : null})
+        });
+        const items = payload.items || [];
+        const remaining = payload.remaining || [];
+        if (!items.length && remaining.length) throw new Error("The scan stopped making progress; try again shortly");
+        items.forEach((item) => {
+          const index = triggerItems.findIndex((row) => row.id === item.id);
+          if (index >= 0) triggerItems[index] = item;
+          else triggerItems.push(item);
+        });
+        queue.unshift(...remaining);
+        if (payload.scan) triggerScanInfo = payload.scan;
+        done += items.length;
+        failed += Number(payload.counts?.fetch_errors || 0);
+        renderTriggers();
+        setTriggerStatus(`${label} ${fmt.format(done)} of ${fmt.format(total)}...`);
+      }
+      return {done, failed};
+    }
+
     async function runTriggerScan() {
-      const button = $("triggerScanNow");
-      button.disabled = true;
-      button.textContent = "Scanning...";
-      setTriggerStatus("Scanning every stock against Yahoo prices; this takes about a minute.");
+      if (triggerScanRunning) return;
+      setTriggerScanBusy(true);
       try {
-        const payload = await api("/api/triggers/scan", {method: "POST", body: "{}"});
-        applyTriggerPayload(payload);
-        const result = payload.result || {};
-        const failed = Number(result.counts?.fetch_errors || 0);
-        setTriggerStatus(result.skipped ? result.reason : `Scan finished in ${result.duration_seconds ?? "-"}s${failed ? `; ${failed} stocks could not be updated` : ""}`);
+        await loadTriggers();
+        const started = Date.now();
+        const {done, failed} = await scanTriggerIds(triggerItems.map((item) => item.id), {fullScan: true});
+        setTriggerStatus(`Scanned ${fmt.format(done)} stocks in ${Math.round((Date.now() - started) / 1000)}s${failed ? `; ${failed} could not be updated` : ""}`);
       } catch (error) {
         setTriggerStatus(error.message, true);
       } finally {
-        button.disabled = false;
-        button.textContent = "Scan now";
+        setTriggerScanBusy(false);
       }
     }
 
     async function seedTriggers() {
-      const button = $("triggerSeed");
-      button.disabled = true;
-      setTriggerStatus("Adding Brady's list and scanning it; this takes about a minute.");
+      if (triggerScanRunning) return;
+      setTriggerScanBusy(true);
+      setTriggerStatus("Adding Brady's list...");
       try {
         const result = await api("/api/triggers/seed", {method: "POST", body: "{}"});
         await loadTriggers();
-        setTriggerStatus(`Added ${result.added.length} stocks`);
+        if (result.scan_ids?.length) await scanTriggerIds(result.scan_ids, {label: "Scanning new stocks"});
+        setTriggerStatus(`Added ${fmt.format(result.added.length)} stocks`);
       } catch (error) {
         setTriggerStatus(error.message, true);
       } finally {
-        button.disabled = false;
+        setTriggerScanBusy(false);
       }
     }
 
@@ -3100,7 +3208,7 @@
       button.disabled = true;
       try {
         if (triggerMode === "bulk") {
-          setTriggerModalStatus("Saving and scanning the new stocks...");
+          setTriggerModalStatus("Saving...");
           const result = await api("/api/triggers/bulk", {
             method: "POST",
             body: JSON.stringify({market: $("triggerBulkMarket").value, text: $("triggerBulkText").value})
@@ -3114,6 +3222,13 @@
             $("triggerBulkText").value = "";
             closeTriggerModal();
             setTriggerStatus(summary);
+          }
+          if (result.scan_ids?.length && !triggerScanRunning) {
+            setTriggerScanBusy(true);
+            scanTriggerIds(result.scan_ids, {label: "Scanning new stocks"})
+              .then(() => setTriggerStatus(summary))
+              .catch((error) => setTriggerStatus(error.message, true))
+              .finally(() => setTriggerScanBusy(false));
           }
           return;
         }
@@ -3830,8 +3945,8 @@
       const marketPrices = new Map();
       await Promise.all([...new Set(lastPurchases.map((row) => row.market))].map(async (market) => {
         try {
-          const payload = await snapshotJson(snapshotPath("weekly_metrics", {market}));
-          (payload.metrics || []).forEach((row) => marketPrices.set(`${market}:${row.ticker}`, {
+          const payload = await snapshotJson(snapshotPath("screen_flags", {market}));
+          Object.entries(payload.tickers || {}).forEach(([ticker, row]) => marketPrices.set(`${market}:${ticker}`, {
             latest_price: row.latest_daily_close,
             latest_date: row.latest_daily_date
           }));
@@ -3896,6 +4011,30 @@
       renderAnalysisPicks();
     }
 
+    // Fetches what the Analysis and Triggers tabs need while the user is still
+    // on the Market tab, so switching tabs renders from memory.
+    async function prefetchOtherViews() {
+      if (!currentSnapshot) return;
+      loadTriggers();
+      const market = $("analysisMarket").value;
+      const uid = firebaseAuth?.currentUser?.uid;
+      const appraisals = await loadLiveAppraisals(market);
+      const tickers = [...new Set(appraisals
+        .filter((row) => row.owner_uid === uid && row.action !== "clear" && row.label)
+        .map((row) => row.ticker))];
+      tickers.push(market === "asx" ? "^AORD" : "SPY");
+      const paths = tickers.map((ticker) => snapshotPath("chart", {
+        market,
+        ticker: String(ticker).toUpperCase().replace(/[^A-Z0-9._^=-]+/g, "_")
+      }));
+      paths.push(snapshotPath("screen_flags", {market}));
+      let next = 0;
+      const worker = async () => {
+        while (next < paths.length) await snapshotJson(paths[next++]).catch(() => null);
+      };
+      await Promise.all(Array.from({length: 6}, worker));
+    }
+
     async function loadSnapshotAnalysis(market, interval, range) {
       const uid = firebaseAuth?.currentUser?.uid;
       const appraisals = await loadLiveAppraisals(market);
@@ -3904,7 +4043,7 @@
       const maxSessions = range === "all" ? null : Math.round(snapshotRangeDays(range) * 252 / 365);
       const chartRows = await Promise.all(mine.map(async (pick) => {
         try {
-          const chart = await loadSnapshotChart(pick.ticker, market, "daily", "10y", []);
+          const chart = await loadSnapshotChart(pick.ticker, market, "daily", "10y", [], appraisals);
           const signalDate = String(pick.signal_date || pick.date || pick.event_at_utc || "").slice(0, 10);
           // Entry is the last close available when the label was given.
           const cutoff = appraisalCutoffDate(market, pick.event_at_utc || pick.updated_at_utc) || signalDate;
@@ -3919,7 +4058,7 @@
       const benchmarkTicker = market === "asx" ? "^AORD" : "SPY";
       let benchmarkRows = [];
       try {
-        benchmarkRows = (await loadSnapshotChart(benchmarkTicker, market, "daily", "10y", [])).candles;
+        benchmarkRows = (await loadSnapshotChart(benchmarkTicker, market, "daily", "10y", [], appraisals)).candles;
       } catch (error) {
         console.warn("Snapshot benchmark is unavailable", error);
       }
@@ -4744,7 +4883,7 @@
       return result;
     }
 
-    async function loadSnapshotChart(ticker, market, interval, range, periods) {
+    async function loadSnapshotChart(ticker, market, interval, range, periods, knownAppraisals = null) {
       const payload = await snapshotJson(snapshotPath("chart", {
         market,
         ticker: String(ticker).toUpperCase().replace(/[^A-Z0-9._^=-]+/g, "_")
@@ -4769,7 +4908,7 @@
         period,
         values.slice(firstVisible)
       ]));
-      const appraisals = await loadLiveAppraisals(market);
+      const appraisals = knownAppraisals || await loadLiveAppraisals(market);
       const appraisal = appraisals.find((row) => row.owner_uid === firebaseAuth?.currentUser?.uid && row.ticker === ticker) || null;
       return {
         ...payload,
@@ -5941,6 +6080,7 @@
       await initializeAppMode();
       applyMarketDefaults();
       resumeActiveFilterJob();
+      setTimeout(() => prefetchOtherViews().catch((error) => console.warn("Background prefetch failed", error)), 1500);
     }).catch((error) => {
       showSignedOut(error.message || "Sign-in setup failed");
     });
