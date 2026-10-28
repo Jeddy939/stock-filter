@@ -14,6 +14,8 @@ import {
   triggerId,
   TRIGGER_ACTIVE_MONTHS,
   TRIGGER_MIN_BARS,
+  touchStarts,
+  triggerMaSeries,
   validateTriggerConfig,
   yahooSymbol,
   type TriggerConfig,
@@ -295,6 +297,56 @@ export const triggerRouter = express.Router();
 triggerRouter.get("/api/triggers", asyncRoute(async (req, res) => {
   const user = await requireAuth(req, db());
   res.json({ok: true, role: user.role, ...(await listTriggers())});
+}));
+
+// Chart data for one trigger: live Yahoo bars at the trigger's timeframe, the
+// trigger MA at every bar, and the start of each touch. Kept for ten minutes
+// per instance so reopening a chart is instant.
+const CHART_TTL_MS = 10 * 60_000;
+const chartCache = new Map<string, {at: number; payload: Record<string, unknown>}>();
+
+triggerRouter.get("/api/triggers/chart", asyncRoute(async (req, res) => {
+  await requireAuth(req, db());
+  let config: TriggerConfig;
+  try {
+    config = validateTriggerConfig(req.query as Record<string, unknown>);
+  } catch (error) {
+    badRequest(error);
+  }
+  const symbol = yahooSymbol(config.market, config.ticker);
+  const key = `${symbol}|${triggerConfigKey(config)}`;
+  const cached = chartCache.get(key);
+  let payload = cached && Date.now() - cached.at < CHART_TTL_MS ? cached.payload : null;
+  if (!payload) {
+    let data;
+    try {
+      // Daily charts fetch five more years so the default three-year view has a real MA.
+      data = await fetchYahooBars(symbol, config.timeframe, config.ma_period, fetch, {...INTERACTIVE_FETCH, extraDays: 5 * 365});
+    } catch (error) {
+      throw new ApiError(502, error instanceof Error ? error.message : String(error));
+    }
+    const ma = triggerMaSeries(data.bars, config.ma_period);
+    // When older bars were not fetched, the first MA values would wrongly
+    // average a short window, so leave them out until a full window exists.
+    if (data.truncated) ma.fill(null, 0, Math.min(ma.length, config.ma_period - 1));
+    payload = {
+      ...config,
+      yahoo_symbol: symbol,
+      name: data.name,
+      currency: data.currency,
+      price: data.price,
+      evaluation: evaluateTrigger(data.bars, config.ma_period, config.timeframe, {price: data.price}),
+      candles: data.bars,
+      ma,
+      touches: touchStarts(data.bars, ma),
+      min_bars: TRIGGER_MIN_BARS,
+      fetched_at_utc: new Date().toISOString()
+    };
+    chartCache.set(key, {at: Date.now(), payload});
+    if (chartCache.size > 100) chartCache.delete(chartCache.keys().next().value as string);
+  }
+  res.setHeader("Cache-Control", "private, max-age=300");
+  res.json({ok: true, ...payload});
 }));
 
 triggerRouter.post("/api/triggers", asyncRoute(async (req, res) => {

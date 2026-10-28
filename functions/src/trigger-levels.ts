@@ -23,6 +23,7 @@ export interface Bar {
   high: number;
   low: number;
   close: number;
+  volume: number;
 }
 
 export interface TriggerEvaluation {
@@ -143,7 +144,7 @@ export function parseTriggerLines(text: string, defaultMarket: TriggerMarket): P
   return {entries: [...entries.values()], errors};
 }
 
-function addDays(date: string, days: number): string {
+export function addDays(date: string, days: number): string {
   const value = new Date(`${date}T00:00:00.000Z`);
   value.setUTCDate(value.getUTCDate() + days);
   return value.toISOString().slice(0, 10);
@@ -180,7 +181,7 @@ export function brisbaneDate(now = new Date()): string {
 interface YahooChartResult {
   meta?: {gmtoffset?: number; regularMarketPrice?: number; currency?: string; longName?: string; shortName?: string};
   timestamp?: number[];
-  indicators?: {quote?: {open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[]}[]};
+  indicators?: {quote?: {open?: (number | null)[]; high?: (number | null)[]; low?: (number | null)[]; close?: (number | null)[]; volume?: (number | null)[]}[]};
 }
 
 /**
@@ -201,6 +202,8 @@ export function barsFromYahoo(result: YahooChartResult, timeframe: TriggerTimefr
     const open = quote.open?.[index] ?? close;
     const high = Math.max(...values);
     const low = Math.min(...values);
+    const rawVolume = Number(quote.volume?.[index] ?? 0);
+    const volume = Number.isFinite(rawVolume) && rawVolume > 0 ? rawVolume : 0;
     const localDate = new Date((timestamp + offset) * 1000).toISOString().slice(0, 10);
     const date = periodStart(localDate, timeframe);
     const previous = bars[bars.length - 1];
@@ -208,9 +211,10 @@ export function barsFromYahoo(result: YahooChartResult, timeframe: TriggerTimefr
       previous.high = Math.max(previous.high, high);
       previous.low = Math.min(previous.low, low);
       previous.close = close;
+      previous.volume = Math.max(previous.volume, volume);
       return;
     }
-    bars.push({date, open: open > 0 ? open : close, high, low, close});
+    bars.push({date, open: open > 0 ? open : close, high, low, close, volume});
   });
   return bars;
 }
@@ -289,6 +293,35 @@ export function evaluateTrigger(
   };
 }
 
+/**
+ * The trigger MA at every bar, using the same short-history rule as
+ * evaluateTrigger: all bars so far until there are `maPeriod`, and nothing
+ * before `minBars` (or `maPeriod`, if that is shorter).
+ */
+export function triggerMaSeries(bars: Bar[], maPeriod: number, minBars = TRIGGER_MIN_BARS): (number | null)[] {
+  const required = Math.min(minBars, maPeriod);
+  let sum = 0;
+  return bars.map((bar, index) => {
+    sum += bar.close;
+    if (index >= maPeriod) sum -= bars[index - maPeriod].close;
+    const length = Math.min(maPeriod, index + 1);
+    return length < required ? null : sum / length;
+  });
+}
+
+/** The first bar of each run of bars whose low reached the MA. */
+export function touchStarts(bars: Bar[], ma: (number | null)[]): string[] {
+  const starts: string[] = [];
+  let touching = false;
+  bars.forEach((bar, index) => {
+    const value = ma[index];
+    const touched = value !== null && value !== undefined && bar.low <= value;
+    if (touched && !touching) starts.push(bar.date);
+    touching = touched;
+  });
+  return starts;
+}
+
 // Monday 1969-12-29 UTC. Yahoo aligns weekly bars to the weekday of period1,
 // and range=max silently switches to coarser bars, so request explicit ranges.
 const YAHOO_WEEK_ANCHOR = -259_200;
@@ -299,13 +332,19 @@ export interface YahooFetchResult {
   price: number | null;
   currency: string | null;
   name: string | null;
+  /** True when a daily request started after the stock's first trade, so the earliest bars are missing. */
+  truncated: boolean;
 }
 
-export function yahooChartUrl(symbol: string, timeframe: TriggerTimeframe, maPeriod: number, now = new Date(), host = "query1"): string {
+export function dailyHistoryDays(maPeriod: number, extraDays = 0): number {
+  // The MA length plus the six-month lookback, in calendar days.
+  return Math.ceil(maPeriod * 1.5) + 300 + extraDays;
+}
+
+export function yahooChartUrl(symbol: string, timeframe: TriggerTimeframe, maPeriod: number, now = new Date(), host = "query1", extraDays = 0): string {
   const end = Math.floor(now.getTime() / 1000);
-  // Daily history only needs the MA length plus the six-month lookback.
   const start = timeframe === "daily"
-    ? end - (Math.ceil(maPeriod * 1.5) + 300) * 86_400
+    ? end - dailyHistoryDays(maPeriod, extraDays) * 86_400
     : YAHOO_WEEK_ANCHOR;
   const params = new URLSearchParams({
     interval: YAHOO_INTERVALS[timeframe],
@@ -324,6 +363,8 @@ function sleep(ms: number) {
 export interface YahooFetchOptions {
   attempts?: number;
   timeoutMs?: number;
+  /** Extra calendar days of daily history, e.g. for a chart. */
+  extraDays?: number;
 }
 
 export async function fetchYahooBars(
@@ -335,10 +376,12 @@ export async function fetchYahooBars(
 ): Promise<YahooFetchResult> {
   const attempts = options.attempts ?? 4;
   const timeoutMs = options.timeoutMs ?? 20_000;
+  const extraDays = options.extraDays ?? 0;
   let lastError = "Yahoo request failed";
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (attempt) await sleep(1000 * 2 ** attempt);
-    const url = yahooChartUrl(symbol, timeframe, maPeriod, new Date(), attempt % 2 ? "query2" : "query1");
+    const requestedAt = new Date();
+    const url = yahooChartUrl(symbol, timeframe, maPeriod, requestedAt, attempt % 2 ? "query2" : "query1", extraDays);
     let response: Response;
     try {
       response = await fetchImpl(url, {
@@ -362,11 +405,14 @@ export async function fetchYahooBars(
     const bars = barsFromYahoo(result, timeframe);
     if (!bars.length) throw new Error(`Yahoo has no price history for ${symbol}`);
     const price = Number(result.meta?.regularMarketPrice);
+    const requestStart = new Date(requestedAt.getTime() - dailyHistoryDays(maPeriod, extraDays) * 86_400_000).toISOString().slice(0, 10);
     return {
       bars,
       price: Number.isFinite(price) && price > 0 ? price : null,
       currency: result.meta?.currency ?? null,
-      name: result.meta?.longName || result.meta?.shortName || null
+      name: result.meta?.longName || result.meta?.shortName || null,
+      // A first bar within ten days of the requested start means older bars exist.
+      truncated: timeframe === "daily" && bars[0].date <= addDays(requestStart, 10)
     };
   }
   throw new Error(`${symbol}: ${lastError}`);

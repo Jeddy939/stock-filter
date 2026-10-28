@@ -60,7 +60,7 @@ assert.equal(weekly[0].low, 58.5);
 assert.equal(weekly[0].high, 61);
 assert.equal(weekly[0].close, 59.7);
 const withNulls = barsFromYahoo({timestamp: [0, 86400], indicators: {quote: [{open: [1, null], high: [2, null], low: [null, null], close: [1.5, null]}]}}, "daily");
-assert.deepEqual(withNulls, [{date: "1970-01-01", open: 1, high: 2, low: 1, close: 1.5}]);
+assert.deepEqual(withNulls, [{date: "1970-01-01", open: 1, high: 2, low: 1, close: 1.5, volume: 0}]);
 assert.match(yahooChartUrl("MCD", "weekly", 700, new Date("2026-10-23T00:00:00Z")), /interval=1wk&period1=-259200&/);
 
 function weeklyBars(closes, lows, lastMonday) {
@@ -116,4 +116,22 @@ result = evaluateTrigger(weeklyBars(Array(35).fill(20), null, "2026-10-19"), 30,
 assert.notEqual(result.status, "insufficient");
 assert.equal(result.fallback, false);
 
+// Chart series match the scanner's MA, including the short-history fallback
+{
+  const {triggerMaSeries, touchStarts} = require("../lib/trigger-levels.js");
+  const history = weeklyBars([...Array(60).fill(10), ...Array(60).fill(20)], null, "2026-10-19");
+  const series = triggerMaSeries(history, 180);
+  assert.equal(series[48], null);
+  assert.equal(series[49], 10);
+  const evaluation = evaluateTrigger(history, 180, "weekly", {now});
+  assert.ok(Math.abs(series.at(-1) - evaluation.ma_value) < 1e-9);
+  const long = weeklyBars(Array(400).fill(5).map((value, index) => value + (index % 7)), null, "2026-10-19");
+  const longSeries = triggerMaSeries(long, 360);
+  assert.ok(Math.abs(longSeries.at(-1) - evaluateTrigger(long, 360, "weekly", {now}).ma_value) < 1e-9);
+  const runs = touchStarts(
+    [{date: "a", low: 9}, {date: "b", low: 8}, {date: "c", low: 12}, {date: "d", low: 9}].map((bar) => ({...bar, open: 0, high: 0, close: 0, volume: 0})),
+    [10, 10, 10, null]
+  );
+  assert.deepEqual(runs, ["a"]);
+}
 console.log("trigger-levels tests passed");

@@ -1376,10 +1376,52 @@
     .trigger-bulk-form textarea { min-height: 170px; font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; }
     .trigger-hint { margin: 0; color: var(--muted); font-size: 12px; }
     .trigger-modal-status { margin: 12px 0 0; white-space: normal; }
+    .trigger-chart-link {
+      padding: 0;
+      min-height: 0;
+      border: 0;
+      background: none;
+      cursor: pointer;
+      font: inherit;
+    }
+    .trigger-chart-link:hover, .trigger-chart-link:focus-visible { text-decoration: underline; }
+    .trigger-chart-window { width: min(1120px, 100%); }
+    .trigger-chart-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 16px;
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .trigger-chart-summary strong { color: var(--text); font-weight: 600; }
+    .trigger-chart-tools {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 14px;
+      margin-bottom: 10px;
+    }
+    .trigger-ma-toggles { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
+    .trigger-ma-toggles label { display: inline-flex; align-items: center; gap: 5px; margin: 0; color: var(--text); cursor: pointer; }
+    .trigger-ma-toggles input { width: auto; min-height: 0; margin: 0; }
+    .trigger-ma-swatch { width: 14px; height: 3px; border-radius: 2px; }
+    .trigger-chart-tools a { margin-left: auto; color: var(--accent-2); font-size: 12px; }
+    .trigger-chart-box {
+      position: relative;
+      height: min(62vh, 560px);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+      background: #0c1110;
+    }
+    .trigger-chart-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
     @media (max-width: 600px) {
       .trigger-form { grid-template-columns: 1fr; }
       .trigger-page .analysis-tools input[type="search"] { flex: 1; width: auto; min-width: 0; }
       .trigger-table-wrap { max-height: none; }
+      .trigger-chart-box { height: 360px; }
+      .trigger-chart-tools a { margin-left: 0; }
     }
     @media (max-width: 940px) {
       main, body.cloud-mode main { display: block; }
@@ -2063,6 +2105,31 @@
       </table>
     </div>
   </section>
+
+  <div class="modal feedback-modal hidden" id="triggerChartModal" role="dialog" aria-modal="true" aria-labelledby="triggerChartTitle">
+    <div class="feedback-window trigger-chart-window">
+      <div class="progress-head">
+        <h2 id="triggerChartTitle">Chart</h2>
+        <button id="closeTriggerChart" type="button">Close</button>
+      </div>
+      <div class="feedback-body">
+        <div class="trigger-chart-summary" id="triggerChartSummary" aria-live="polite"></div>
+        <div class="trigger-chart-tools">
+          <div class="analysis-segment" id="triggerChartRange" aria-label="Chart range">
+            <button type="button" data-chart-years="1" aria-pressed="false">1Y</button>
+            <button type="button" data-chart-years="3" aria-pressed="false">3Y</button>
+            <button type="button" data-chart-years="5" aria-pressed="false">5Y</button>
+            <button type="button" data-chart-years="10" aria-pressed="false">10Y</button>
+            <button type="button" data-chart-years="all" aria-pressed="false">All</button>
+          </div>
+          <div class="trigger-ma-toggles" id="triggerMaToggles" aria-label="Moving averages"></div>
+          <a id="triggerChartYahoo" href="#" target="_blank" rel="noopener noreferrer">Open in Yahoo Finance</a>
+        </div>
+        <div class="trigger-chart-box" id="triggerChartCanvas" tabindex="0"></div>
+        <p class="trigger-chart-note" id="triggerChartNote"></p>
+      </div>
+    </div>
+  </div>
 
   <div class="modal feedback-modal hidden" id="triggerModal" role="dialog" aria-modal="true" aria-labelledby="triggerModalTitle">
     <div class="feedback-window">
@@ -2996,7 +3063,6 @@
 
     function triggerRow(item) {
       const scan = item.scan;
-      const yahoo = `https://finance.yahoo.com/quote/${encodeURIComponent(item.yahoo_symbol || item.ticker)}`;
       const short = TRIGGER_TIMEFRAME_SHORT[item.timeframe] || "";
       const fallback = scan?.fallback && scan.ma_period_used
         ? `<span class="trigger-sub warn" title="Only ${scan.ma_period_used} bars of history exist, so the MA averages all of them">Short history: using ${scan.ma_period_used}${short}</span>`
@@ -3005,7 +3071,7 @@
       const distanceClass = distance === null ? "" : distance <= 0 ? "at" : distance <= 5 ? "near" : "";
       const distanceText = distance === null ? "-" : `${distance > 0 ? "+" : ""}${distance.toFixed(1)}%`;
       return `<tr class="${scan?.status === "triggered" ? "trigger-row-hit" : ""}">
-        <td><a class="ticker" href="${escapeHtml(yahoo)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.ticker)}</a><span class="trigger-sub" title="${escapeHtml(scan?.name || "")}">${escapeHtml(scan?.name || "")}</span></td>
+        <td><button class="ticker trigger-chart-link" type="button" data-trigger-chart="${escapeHtml(item.id)}" title="Open the ${escapeHtml(item.ticker)} chart">${escapeHtml(item.ticker)}</button><span class="trigger-sub" title="${escapeHtml(scan?.name || "")}">${escapeHtml(scan?.name || "")}</span></td>
         <td>${escapeHtml(TRIGGER_MARKET_LABELS[item.market] || item.market)}</td>
         <td>${escapeHtml(`${item.ma_period} ${TRIGGER_TIMEFRAME_LABELS[item.timeframe] || item.timeframe}`)}${fallback}</td>
         <td>${triggerPrice(scan?.price)}${scan?.currency ? `<span class="trigger-sub">${escapeHtml(scan.currency)}</span>` : ""}</td>
@@ -3161,6 +3227,137 @@
       } finally {
         setTriggerScanBusy(false);
       }
+    }
+
+    // In-app chart for one trigger: live bars at the trigger's timeframe, the
+    // trigger MA (bold), optional standard MAs and a marker at each touch.
+    const TRIGGER_EXTRA_PERIODS = [30, 90, 180, 360, 700];
+    const TRIGGER_MA_COLOR = "#45bd82";
+    const triggerChartState = {item: null, payload: null, years: null, extraPeriods: new Set(), request: 0};
+
+    function defaultChartYears(timeframe) {
+      if (timeframe === "daily") return "3";
+      if (timeframe === "weekly") return "10";
+      return "all";
+    }
+
+    async function openTriggerChart(item) {
+      const request = ++triggerChartState.request;
+      triggerChartState.item = item;
+      triggerChartState.payload = null;
+      triggerChartState.years = defaultChartYears(item.timeframe);
+      const short = TRIGGER_TIMEFRAME_SHORT[item.timeframe] || "";
+      $("triggerChartTitle").textContent = `${item.ticker} · ${item.ma_period} ${TRIGGER_TIMEFRAME_LABELS[item.timeframe] || item.timeframe}`;
+      $("triggerChartYahoo").href = `https://finance.yahoo.com/quote/${encodeURIComponent(item.yahoo_symbol || item.ticker)}`;
+      $("triggerChartSummary").textContent = "Loading chart...";
+      $("triggerChartNote").textContent = "";
+      $("triggerMaToggles").innerHTML = [
+        `<label title="The trigger MA, always shown"><span class="trigger-ma-swatch" style="background:${TRIGGER_MA_COLOR}"></span><input type="checkbox" checked disabled>${item.ma_period}${short} trigger</label>`,
+        ...TRIGGER_EXTRA_PERIODS.filter((period) => period !== Number(item.ma_period)).map((period) =>
+          `<label><span class="trigger-ma-swatch" style="background:${maColors[period] || "#f1f4f0"}"></span><input type="checkbox" data-ma-period="${period}" ${triggerChartState.extraPeriods.has(period) ? "checked" : ""}>${period}${short}</label>`)
+      ].join("");
+      clearFinancialChart($("triggerChartCanvas"));
+      $("triggerChartModal").classList.remove("hidden");
+      try {
+        const query = new URLSearchParams({market: item.market, ticker: item.ticker, ma_period: String(item.ma_period), timeframe: item.timeframe});
+        const payload = await api(`/api/triggers/chart?${query}`);
+        if (request !== triggerChartState.request) return;
+        triggerChartState.payload = payload;
+        renderTriggerChartSummary();
+        drawTriggerChart();
+      } catch (error) {
+        if (request !== triggerChartState.request) return;
+        $("triggerChartSummary").textContent = "";
+        const message = document.createElement("div");
+        message.className = "chart-empty-message";
+        message.textContent = error.message;
+        $("triggerChartCanvas").replaceChildren(message);
+      }
+    }
+
+    function renderTriggerChartSummary() {
+      const {item, payload} = triggerChartState;
+      const evaluation = payload.evaluation || {};
+      const short = TRIGGER_TIMEFRAME_SHORT[item.timeframe] || "";
+      const distance = Number(evaluation.distance_pct);
+      const status = evaluation.status === "triggered"
+        ? `Triggered${evaluation.touching_now ? " · at the MA now" : ` · last touch ${triggerDate(evaluation.last_touch_on, item.timeframe)}`} · active until ${triggerDate(evaluation.active_until)}`
+        : evaluation.status === "insufficient" ? "Not enough data" : "Watching";
+      $("triggerChartSummary").innerHTML = [
+        payload.name ? `<strong>${escapeHtml(payload.name)}</strong>` : "",
+        `Price <strong>${escapeHtml(triggerPrice(evaluation.price))}${payload.currency ? ` ${escapeHtml(payload.currency)}` : ""}</strong>`,
+        `Trigger MA <strong>${escapeHtml(triggerPrice(evaluation.ma_value))}</strong>`,
+        `Distance <strong>${Number.isFinite(distance) ? `${distance > 0 ? "+" : ""}${distance.toFixed(1)}%` : "-"}</strong>`,
+        `<strong>${escapeHtml(status)}</strong>`
+      ].filter(Boolean).map((part) => `<span>${part}</span>`).join("");
+      const touchCount = (payload.touches || []).length;
+      const notes = [touchCount
+        ? `Green arrows mark where the price first reached the ${item.ma_period}${short} MA in each dip (${fmt.format(touchCount)} ${touchCount === 1 ? "dip" : "dips"}).`
+        : `The price has not reached the ${item.ma_period}${short} MA in the history shown.`];
+      if (evaluation.fallback && evaluation.ma_period_used) {
+        notes.push(`Only ${fmt.format(evaluation.ma_period_used)} bars of history exist, so the trigger MA averages every bar so far (from bar ${Math.min(payload.min_bars || 50, item.ma_period)}).`);
+      }
+      notes.push(`Prices from Yahoo, fetched ${formatBrisbane(payload.fetched_at_utc)}.`);
+      $("triggerChartNote").textContent = notes.join(" ");
+    }
+
+    function drawTriggerChart() {
+      const {item, payload} = triggerChartState;
+      if (!item || !payload) return;
+      const candles = payload.candles || [];
+      const short = TRIGGER_TIMEFRAME_SHORT[item.timeframe] || "";
+      const extras = [...triggerChartState.extraPeriods].filter((period) => period !== Number(item.ma_period));
+      const movingAverages = {trigger: payload.ma || [], ...snapshotMovingAverages(candles, extras)};
+      const touches = new Set(payload.touches || []);
+      drawCandles(candles, item.ticker, movingAverages, {
+        canvas: $("triggerChartCanvas"),
+        interval: item.timeframe,
+        range: triggerChartState.years === "all" ? "all" : `${triggerChartState.years}y`,
+        trackState: false,
+        lineStyles: {
+          trigger: {
+            title: `Trigger ${item.ma_period}${short}`,
+            color: TRIGGER_MA_COLOR,
+            lineWidth: 3,
+            lastValueVisible: true
+          }
+        },
+        markers: candles.filter((bar) => touches.has(bar.date)).map((bar) => ({
+          time: bar.date,
+          position: "belowBar",
+          color: TRIGGER_MA_COLOR,
+          shape: "arrowUp"
+        }))
+      });
+      applyTriggerChartRange();
+    }
+
+    function applyTriggerChartRange() {
+      const years = triggerChartState.years;
+      document.querySelectorAll("[data-chart-years]").forEach((button) => {
+        const active = button.dataset.chartYears === years;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+      const chart = financialCharts.get($("triggerChartCanvas"))?.chart;
+      const candles = triggerChartState.payload?.candles || [];
+      if (!chart || !candles.length) return;
+      if (years === "all") {
+        chart.timeScale().fitContent();
+        return;
+      }
+      const last = candles[candles.length - 1].date;
+      const from = new Date(`${last}T00:00:00Z`);
+      from.setUTCFullYear(from.getUTCFullYear() - Number(years));
+      const start = from.toISOString().slice(0, 10);
+      if (start <= candles[0].date) chart.timeScale().fitContent();
+      else chart.timeScale().setVisibleRange({from: start, to: last});
+    }
+
+    function closeTriggerChart() {
+      triggerChartState.request += 1;
+      $("triggerChartModal").classList.add("hidden");
+      clearFinancialChart($("triggerChartCanvas"));
     }
 
     function setTriggerMode(mode) {
@@ -5132,6 +5329,9 @@
         lastValueVisible: true
       });
       candleSeries.setData(rows.map(({time, open, high, low, close}) => ({time, open, high, low, close})));
+      if (options.markers?.length && LightweightCharts.createSeriesMarkers) {
+        LightweightCharts.createSeriesMarkers(candleSeries, options.markers);
+      }
 
       const movingAverageSeries = {};
       Object.keys(movingAverages || {}).forEach((period) => {
@@ -5145,7 +5345,8 @@
           lineWidth: 2,
           priceLineVisible: false,
           lastValueVisible: false,
-          crosshairMarkerVisible: false
+          crosshairMarkerVisible: false,
+          ...(options.lineStyles?.[period] || {})
         });
         series.setData(data);
         movingAverageSeries[period] = series;
@@ -5889,10 +6090,33 @@
     $("triggerSeed").addEventListener("click", seedTriggers);
     $("triggerAddOpen").addEventListener("click", () => openTriggerModal());
     $("triggerBody").addEventListener("click", (event) => {
+      const chartButton = event.target.closest("[data-trigger-chart]");
+      if (chartButton) {
+        const item = triggerItems.find((row) => row.id === chartButton.dataset.triggerChart);
+        if (item) openTriggerChart(item);
+        return;
+      }
       const button = event.target.closest("[data-trigger-edit]");
       if (!button) return;
       const item = triggerItems.find((row) => row.id === button.dataset.triggerEdit);
       if (item) openTriggerModal(item);
+    });
+    $("closeTriggerChart").addEventListener("click", closeTriggerChart);
+    $("triggerChartModal").addEventListener("click", (event) => {
+      if (event.target === $("triggerChartModal")) closeTriggerChart();
+    });
+    document.querySelectorAll("[data-chart-years]").forEach((button) => {
+      button.addEventListener("click", () => {
+        triggerChartState.years = button.dataset.chartYears;
+        drawTriggerChart();
+      });
+    });
+    $("triggerMaToggles").addEventListener("change", (event) => {
+      const period = event.target?.dataset?.maPeriod;
+      if (!period) return;
+      if (event.target.checked) triggerChartState.extraPeriods.add(Number(period));
+      else triggerChartState.extraPeriods.delete(Number(period));
+      drawTriggerChart();
     });
     document.querySelectorAll("[data-trigger-mode]").forEach((button) => {
       button.addEventListener("click", () => setTriggerMode(button.dataset.triggerMode));
@@ -6053,6 +6277,10 @@
       }
       if (event.key === "Escape" && !$("purchaseModal").classList.contains("hidden")) {
         closePurchaseDialog();
+        return;
+      }
+      if (event.key === "Escape" && !$("triggerChartModal").classList.contains("hidden")) {
+        closeTriggerChart();
         return;
       }
       if (event.key === "Escape" && !$("triggerModal").classList.contains("hidden")) {
